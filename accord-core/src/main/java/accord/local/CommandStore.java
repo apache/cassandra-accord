@@ -18,29 +18,6 @@
 
 package accord.local;
 
-import accord.api.LocalListeners;
-import accord.api.ProgressLog;
-import accord.api.DataStore;
-import accord.api.VisibleForImplementationTesting;
-import accord.coordinate.CollectCalculatedDeps;
-import accord.local.Command.WaitingOn;
-
-import javax.annotation.Nullable;
-import accord.api.Agent;
-
-import accord.local.CommandStores.RangesForEpoch;
-import accord.primitives.KeyDeps;
-import accord.primitives.Keys;
-import accord.primitives.Range;
-import accord.primitives.Routables;
-import accord.utils.async.AsyncChain;
-
-import accord.api.ConfigurationService.EpochReady;
-import accord.utils.DeterministicIdentitySet;
-import accord.utils.Invariants;
-import accord.utils.ReducingRangeMap;
-import accord.utils.async.AsyncResult;
-
 import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.Collections;
 import java.util.HashMap;
@@ -54,17 +31,39 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSortedMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import accord.api.Agent;
+import accord.api.ConfigurationService.EpochReady;
+import accord.api.DataStore;
+import accord.api.LocalListeners;
+import accord.api.ProgressLog;
+import accord.coordinate.CollectCalculatedDeps;
+import accord.local.Command.WaitingOn;
+import accord.local.CommandStores.RangesForEpoch;
+import accord.primitives.Deps;
 import accord.primitives.FullRoute;
+import accord.primitives.KeyDeps;
+import accord.primitives.Keys;
 import accord.primitives.Participants;
+import accord.primitives.Range;
 import accord.primitives.RangeDeps;
 import accord.primitives.Ranges;
+import accord.primitives.Routables;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
+import accord.utils.DeterministicIdentitySet;
+import accord.utils.Invariants;
+import accord.utils.ReducingRangeMap;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 import org.agrona.collections.Int2ObjectHashMap;
 
@@ -75,6 +74,7 @@ import static accord.local.PreLoadContext.empty;
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_ADJACENT;
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
+import static accord.utils.Invariants.checkState;
 import static accord.utils.Invariants.illegalState;
 
 /**
@@ -82,6 +82,8 @@ import static accord.utils.Invariants.illegalState;
  */
 public abstract class CommandStore implements AgentExecutor
 {
+    public static final Logger logger = LoggerFactory.getLogger(CommandStore.class);
+
     static class EpochUpdate
     {
         final RangesForEpoch newRangesForEpoch;
@@ -110,13 +112,13 @@ public abstract class CommandStore implements AgentExecutor
         // TODO (desired): can better encapsulate by accepting only the newRangesForEpoch and deriving the add/remove ranges
         public void add(long epoch, RangesForEpoch newRangesForEpoch, Ranges addRanges)
         {
-            RedundantBefore addRedundantBefore = RedundantBefore.create(addRanges, epoch, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, TxnId.minForEpoch(epoch));
+            RedundantBefore addRedundantBefore = RedundantBefore.create(addRanges, epoch, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.minForEpoch(epoch));
             update(newRangesForEpoch, addRedundantBefore);
         }
 
         public void remove(long epoch, RangesForEpoch newRangesForEpoch, Ranges removeRanges)
         {
-            RedundantBefore addRedundantBefore = RedundantBefore.create(removeRanges, Long.MIN_VALUE, epoch, TxnId.NONE, TxnId.NONE, TxnId.NONE);
+            RedundantBefore addRedundantBefore = RedundantBefore.create(removeRanges, Long.MIN_VALUE, epoch, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE);
             update(newRangesForEpoch, addRedundantBefore);
         }
 
@@ -150,9 +152,9 @@ public abstract class CommandStore implements AgentExecutor
     protected final LocalListeners listeners;
     protected final EpochUpdateHolder epochUpdateHolder;
 
-    // TODO (expected): schedule regular pruning of these collections
-    // bootstrapBeganAt and shardDurableAt are both canonical data sets mostly used for debugging / constructing
-    private NavigableMap<TxnId, Ranges> bootstrapBeganAt = ImmutableSortedMap.of(TxnId.NONE, Ranges.EMPTY); // additive (i.e. once inserted, rolled-over until invalidated, and the floor entry contains additions)
+    // Used in markShardStale to make sure the staleness includes in progresss bootstraps
+    private transient NavigableMap<TxnId, Ranges> bootstrapBeganAt = ImmutableSortedMap.of(TxnId.NONE, Ranges.EMPTY); // additive (i.e. once inserted, rolled-over until invalidated, and the floor entry contains additions)
+
     private RedundantBefore redundantBefore = RedundantBefore.EMPTY;
     // TODO (expected): store this only once per node
     private DurableBefore durableBefore = DurableBefore.EMPTY;
@@ -179,7 +181,13 @@ public abstract class CommandStore implements AgentExecutor
     private final Set<Bootstrap> bootstraps = Collections.synchronizedSet(new DeterministicIdentitySet<>());
     @Nullable private ReducingRangeMap<Timestamp> rejectBefore;
 
-    protected CommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
+    protected CommandStore(int id,
+                           NodeTimeService time,
+                           Agent agent,
+                           DataStore store,
+                           ProgressLog.Factory progressLogFactory,
+                           LocalListeners.Factory listenersFactory,
+                           EpochUpdateHolder epochUpdateHolder)
     {
         this.id = id;
         this.time = time;
@@ -201,25 +209,29 @@ public abstract class CommandStore implements AgentExecutor
         return agent;
     }
 
-    public RangesForEpoch updateRangesForEpoch()
+    public void updateRangesForEpoch(SafeCommandStore safeStore)
     {
         EpochUpdate update = epochUpdateHolder.get();
         if (update == null)
-            return rangesForEpoch;
+            return;
 
         update = epochUpdateHolder.getAndSet(null);
         if (!update.addGlobalRanges.isEmpty())
-            setDurableBefore(DurableBefore.merge(durableBefore, DurableBefore.create(update.addGlobalRanges, TxnId.NONE, TxnId.NONE)));
+            safeStore.upsertDurableBefore(DurableBefore.create(update.addGlobalRanges, TxnId.NONE, TxnId.NONE));
         if (update.addRedundantBefore.size() > 0)
-            setRedundantBefore(RedundantBefore.merge(redundantBefore, update.addRedundantBefore));
+            safeStore.upsertRedundantBefore(update.addRedundantBefore);
         if (update.newRangesForEpoch != null)
-            rangesForEpoch = update.newRangesForEpoch;
-        return rangesForEpoch;
+            safeStore.setRangesForEpoch(update.newRangesForEpoch);
     }
 
     public RangesForEpoch unsafeRangesForEpoch()
     {
         return rangesForEpoch;
+    }
+
+    protected void unsafeSetRangesForEpoch(RangesForEpoch newRangesForEpoch)
+    {
+        rangesForEpoch = newRangesForEpoch;
     }
 
     public abstract boolean inStore();
@@ -235,43 +247,45 @@ public abstract class CommandStore implements AgentExecutor
     public abstract <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> apply);
     public abstract void shutdown();
 
-    // implementations are expected to override this for persistence
-    protected void setRejectBefore(ReducingRangeMap<Timestamp> newRejectBefore)
+    protected abstract void registerHistoricalTransactions(Deps deps, SafeCommandStore safeStore);
+
+    protected void upsertDurableBefore(DurableBefore addDurableBefore)
+    {
+        durableBefore = DurableBefore.merge(durableBefore, addDurableBefore);
+    }
+
+    protected void unsafeSetRejectBefore(ReducingRangeMap<Timestamp> newRejectBefore)
     {
         this.rejectBefore = newRejectBefore;
     }
 
+    // Should be called _only_ via safe command store
+    protected void upsertRedundantBefore(RedundantBefore addRedundantBefore)
+    {
+        redundantBefore = RedundantBefore.merge(redundantBefore, addRedundantBefore);
+    }
+
+    protected void unsafeSetDurableBefore(DurableBefore newDurableBefore)
+    {
+        durableBefore = newDurableBefore;
+    }
+
+    protected void unsafeSetRedundantBefore(RedundantBefore newRedundantBefore)
+    {
+        redundantBefore = newRedundantBefore;
+    }
+
     /**
-     * To be overridden by implementations, to ensure the new state is persisted
-     *
-     * TODO (required): consider handling asynchronicity of persistence
-     *  (could leave to impls to call this parent method once persisted)
-     * TODO (desired): compact Ranges, merging overlaps
+     * This method may be invoked on a non-CommandStore thread
      */
-    protected void setBootstrapBeganAt(NavigableMap<TxnId, Ranges> newBootstrapBeganAt)
+    protected synchronized void unsafeSetSafeToRead(NavigableMap<Timestamp, Ranges> newSafeToRead)
+    {
+        this.safeToRead = newSafeToRead;
+    }
+
+    protected void unsafeSetBootstrapBeganAt(NavigableMap<TxnId, Ranges> newBootstrapBeganAt)
     {
         this.bootstrapBeganAt = newBootstrapBeganAt;
-    }
-
-    public DurableBefore durableBefore()
-    {
-        return durableBefore;
-    }
-
-    /**
-     * To be overridden by implementations, to ensure the new state is persisted.
-     */
-    public void setDurableBefore(DurableBefore durableBefore)
-    {
-        this.durableBefore = durableBefore;
-    }
-
-    /**
-     * To be overridden by implementations, to ensure the new state is persisted.
-     */
-    protected void setRedundantBefore(RedundantBefore newRedundantBefore)
-    {
-        this.redundantBefore = newRedundantBefore;
     }
 
     /**
@@ -293,29 +307,21 @@ public abstract class CommandStore implements AgentExecutor
         setMaxConflicts(maxConflicts.update(keysOrRanges, executeAt));
     }
 
-    /**
-     * This method may be invoked on a non-CommandStore thread
-     */
-    protected synchronized void setSafeToRead(NavigableMap<Timestamp, Ranges> newSafeToRead)
-    {
-        this.safeToRead = newSafeToRead;
-    }
-
     public final void markExclusiveSyncPoint(SafeCommandStore safeStore, TxnId txnId, Ranges ranges)
     {
         // TODO (desired): narrow ranges to those that are owned
         Invariants.checkArgument(txnId.kind() == ExclusiveSyncPoint);
         ReducingRangeMap<Timestamp> newRejectBefore = rejectBefore != null ? rejectBefore : new ReducingRangeMap<>();
         newRejectBefore = ReducingRangeMap.add(newRejectBefore, ranges, txnId, Timestamp::max);
-        setRejectBefore(newRejectBefore);
+        unsafeSetRejectBefore(newRejectBefore);
     }
 
     public final void markExclusiveSyncPointLocallyApplied(SafeCommandStore safeStore, TxnId txnId, Ranges ranges)
     {
         // TODO (desired): narrow ranges to those that are owned
         Invariants.checkArgument(txnId.kind() == ExclusiveSyncPoint);
-        RedundantBefore newRedundantBefore = RedundantBefore.merge(redundantBefore, RedundantBefore.create(ranges, txnId, TxnId.NONE, TxnId.NONE));
-        setRedundantBefore(newRedundantBefore);
+        RedundantBefore newRedundantBefore = RedundantBefore.merge(redundantBefore, RedundantBefore.create(ranges, txnId, TxnId.NONE, TxnId.NONE, TxnId.NONE));
+        unsafeSetRedundantBefore(newRedundantBefore);
         updatedRedundantBefore(safeStore, txnId, ranges);
     }
 
@@ -334,10 +340,7 @@ public abstract class CommandStore implements AgentExecutor
             return time.uniqueNow(txnId).asRejected();
 
         if (txnId.kind() == ExclusiveSyncPoint)
-        {
-            markExclusiveSyncPoint(safeStore, txnId, (Ranges)keys);
             return txnId;
-        }
 
         // TODO (expected): reject if any transaction exists with a higher timestamp OR a higher epoch
         //   this permits us to agree fast path decisions across epoch changes
@@ -475,7 +478,7 @@ public abstract class CommandStore implements AgentExecutor
             }
             else
             {
-                // TODO (correcness) : PreLoadContext only works with Seekables, which doesn't allow mixing Keys and Ranges... But Deps has both Keys AND Ranges!
+                // TODO (correctness) : PreLoadContext only works with Seekables, which doesn't allow mixing Keys and Ranges... But Deps has both Keys AND Ranges!
                 // ATM all known implementations store ranges in-memory, but this will not be true soon, so this will need to be addressed
                 execute(contextFor(null, deps.txnIds(), deps.keyDeps.keys(), COMMANDS), safeStore -> {
                     safeStore.registerHistoricalTransactions(deps);
@@ -511,23 +514,36 @@ public abstract class CommandStore implements AgentExecutor
 
     final void markBootstrapping(SafeCommandStore safeStore, TxnId globalSyncId, Ranges ranges)
     {
-        setBootstrapBeganAt(bootstrap(globalSyncId, ranges, bootstrapBeganAt));
-        RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, globalSyncId);
-        setRedundantBefore(RedundantBefore.merge(redundantBefore, addRedundantBefore));
-        DurableBefore addDurableBefore = DurableBefore.create(ranges, TxnId.NONE, TxnId.NONE);
-        setDurableBefore(DurableBefore.merge(durableBefore, addDurableBefore));
+        safeStore.setBootstrapBeganAt(bootstrap(globalSyncId, ranges, bootstrapBeganAt));
+        RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, TxnId.NONE, globalSyncId);
+        safeStore.upsertRedundantBefore(addRedundantBefore);
+        safeStore.upsertDurableBefore(DurableBefore.create(ranges, TxnId.NONE, TxnId.NONE));
+        // TODO: can we use `upsert` for notifications?
         updatedRedundantBefore(safeStore, globalSyncId, ranges);
     }
 
     // TODO (expected): we can immediately truncate dependencies locally once an exclusiveSyncPoint applies, we don't need to wait for the whole shard
-    public void markShardDurable(SafeCommandStore safeStore, TxnId globalSyncId, Ranges ranges)
+    public void markShardDurable(SafeCommandStore safeStore, TxnId globalSyncId, Ranges durableRanges)
     {
-        ranges = ranges.slice(safeStore.ranges().allUntil(globalSyncId.epoch()), Minimal);
-        RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, globalSyncId, TxnId.NONE);
-        setRedundantBefore(RedundantBefore.merge(redundantBefore, addRedundantBefore));
-        DurableBefore addDurableBefore = DurableBefore.create(ranges, globalSyncId, globalSyncId);
-        setDurableBefore(DurableBefore.merge(durableBefore, addDurableBefore));
-        updatedRedundantBefore(safeStore, globalSyncId, ranges);
+        final Ranges slicedRanges = durableRanges.slice(safeStore.ranges().allUntil(globalSyncId.epoch()), Minimal);
+        RedundantBefore addShardRedundant = RedundantBefore.create(slicedRanges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, globalSyncId, TxnId.NONE, TxnId.NONE);
+        safeStore.upsertRedundantBefore(addShardRedundant);
+        DurableBefore addDurableBefore = DurableBefore.create(slicedRanges, globalSyncId, globalSyncId);
+        safeStore.upsertDurableBefore(addDurableBefore);
+        updatedRedundantBefore(safeStore, globalSyncId, slicedRanges);
+        safeStore = safeStore; // make unusable in lambda
+        safeStore.dataStore().snapshot(slicedRanges, globalSyncId).begin((success, fail) -> {
+            if (fail != null)
+            {
+                logger.error("Unsuccessful dataStore snapshot; unable to update GC markers", fail);
+                return;
+            }
+
+            execute(PreLoadContext.empty(), safeStore0 -> {
+                RedundantBefore addGc = RedundantBefore.create(slicedRanges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, globalSyncId, TxnId.NONE);
+                safeStore0.upsertRedundantBefore(addGc);
+            });
+        });
     }
 
     protected void updatedRedundantBefore(SafeCommandStore safeStore, TxnId syncId, Ranges ranges)
@@ -552,21 +568,39 @@ public abstract class CommandStore implements AgentExecutor
         }
         agent.onStale(staleSince, ranges);
 
-        RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, TxnId.NONE, TxnId.NONE, TxnId.NONE, staleUntilAtLeast);
-        setRedundantBefore(RedundantBefore.merge(redundantBefore, addRedundantBefore));
+        RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE, staleUntilAtLeast);
+        safeStore.upsertRedundantBefore(addRedundantBefore);
         // find which ranges need to bootstrap, subtracting those already in progress that cover the id
 
         markUnsafeToRead(ranges);
     }
 
     // MUST be invoked before CommandStore reference leaks to anyone
+    // The integration may have already loaded persisted values for these fields before this is called
+    // so it must be a merge for each field with the initialization values. These starting values don't need to be
+    // persisted since we can synthesize them at startup every time
+    // TODO (review): This needs careful thought about not persisting and that purgeAndInsert is doing the right thing
+    // with safeToRead
     Supplier<EpochReady> initialise(long epoch, Ranges ranges)
     {
-        DurableBefore addDurableBefore = DurableBefore.create(ranges, TxnId.NONE, TxnId.NONE);
-        setDurableBefore(DurableBefore.merge(durableBefore, addDurableBefore));
-        setBootstrapBeganAt(ImmutableSortedMap.of(TxnId.NONE, ranges));
-        setSafeToRead(ImmutableSortedMap.of(Timestamp.NONE, ranges));
-        return () -> new EpochReady(epoch, DONE, DONE, DONE, DONE);
+        return () -> {
+            AsyncResult<Void> done = execute(empty(), (safeStore) -> {
+                // Merge in a base for any ranges that needs to be covered
+                DurableBefore addDurableBefore = DurableBefore.create(ranges, TxnId.NONE, TxnId.NONE);
+                safeStore.upsertDurableBefore(addDurableBefore);
+                // TODO (review): Convoluted check to not overwrite existing bootstraps with TxnId.NONE
+                // If loading from disk didn't finish before this then we might initialize the range at TxnId.NONE?
+                // Does CommandStores.topology ensure that doesn't happen? Is it fine if it does because it will get superseded?
+                Ranges newBootstrapRanges = ranges;
+                for (Ranges existing : bootstrapBeganAt.values())
+                    newBootstrapRanges = newBootstrapRanges.without(existing);
+                if (!newBootstrapRanges.isEmpty())
+                    bootstrapBeganAt = bootstrap(TxnId.NONE, newBootstrapRanges, bootstrapBeganAt);
+                safeStore.setSafeToRead(purgeAndInsert(safeToRead, TxnId.NONE, ranges));
+            }).beginAsResult();
+
+            return new EpochReady(epoch, DONE, DONE, DONE, DONE);
+        };
     }
 
     public final Ranges safeToReadAt(Timestamp at)
@@ -585,10 +619,15 @@ public abstract class CommandStore implements AgentExecutor
         return redundantBefore;
     }
 
-    @VisibleForImplementationTesting
-    public NavigableMap<TxnId, Ranges> bootstrapBeganAt() { return bootstrapBeganAt; }
+    public DurableBefore durableBefore()
+    {
+        return durableBefore;
+    }
 
-    @VisibleForImplementationTesting
+    @VisibleForTesting
+    public final NavigableMap<TxnId, Ranges> bootstrapBeganAt() { return bootstrapBeganAt; }
+
+    @VisibleForTesting
     public NavigableMap<Timestamp, Ranges> safeToRead() { return safeToRead; }
 
     public final boolean isRejectedIfNotPreAccepted(TxnId txnId, Unseekables<?> participants)
@@ -739,21 +778,30 @@ public abstract class CommandStore implements AgentExecutor
         return redundantBefore.status(minimumDependencyId, executeAt, participantsOfWaitingTxn).compareTo(RedundantStatus.PARTIALLY_PRE_BOOTSTRAP_OR_STALE) >= 0;
     }
 
-    final synchronized void markUnsafeToRead(Ranges ranges)
+    final void markUnsafeToRead(Ranges ranges)
     {
         if (safeToRead.values().stream().anyMatch(r -> r.intersects(ranges)))
-            setSafeToRead(purgeHistory(safeToRead, ranges));
+        {
+            execute(empty(), safeStore -> {
+                safeStore.setSafeToRead(purgeHistory(safeToRead, ranges));
+            }).beginAsResult();
+        }
     }
 
     final synchronized void markSafeToRead(Timestamp forBootstrapAt, Timestamp at, Ranges ranges)
     {
-        Ranges validatedSafeToRead = redundantBefore.validateSafeToRead(forBootstrapAt, ranges);
-        setSafeToRead(purgeAndInsert(safeToRead, at, validatedSafeToRead));
+        execute(empty(), safeStore -> {
+            Ranges validatedSafeToRead = redundantBefore.validateSafeToRead(forBootstrapAt, ranges);
+            safeStore.setSafeToRead(purgeAndInsert(safeToRead, at, validatedSafeToRead));
+        }).beginAsResult();
     }
 
-    private static <T extends Timestamp> ImmutableSortedMap<T, Ranges> bootstrap(T at, Ranges ranges, NavigableMap<T, Ranges> bootstrappedAt)
+    public static ImmutableSortedMap<TxnId, Ranges> bootstrap(TxnId at, Ranges ranges, NavigableMap<TxnId, Ranges> bootstrappedAt)
     {
-        Invariants.checkArgument(bootstrappedAt.lastKey().compareTo(at) < 0);
+        Invariants.checkArgument(bootstrappedAt.lastKey().compareTo(at) < 0 || at == TxnId.NONE);
+        if (at == TxnId.NONE)
+            for (Ranges rs : bootstrappedAt.values())
+                checkState(!ranges.intersects(rs));
         Invariants.checkArgument(!ranges.isEmpty());
         // if we're bootstrapping these ranges, then any period we previously owned the ranges for is effectively invalidated
         return purgeAndInsert(bootstrappedAt, at, ranges);

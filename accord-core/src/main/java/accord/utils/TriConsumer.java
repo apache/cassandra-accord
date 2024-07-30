@@ -16,22 +16,9 @@
  * limitations under the License.
  */
 
-package accord.impl.basic;
+package accord.utils;
 
-import java.util.List;
-import java.util.concurrent.TimeUnit;
-import java.util.function.Predicate;
-
-public interface PendingQueue extends Iterable<Pending>
+public interface TriConsumer<P1, P2, P3>
 {
-    void add(Pending item);
-    void addNoDelay(Pending item);
-    void add(Pending item, long delay, TimeUnit units);
-    boolean remove(Pending item);
-    Pending poll();
-    List<Pending> drain(Predicate<Pending> toDrain);
-    int size();
-    long nowInMillis();
-
-    boolean hasNonRecurring();
+    void consume(P1 p1, P2 p2, P3 p3);
 }

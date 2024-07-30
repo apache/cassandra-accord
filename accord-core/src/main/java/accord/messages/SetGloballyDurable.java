@@ -18,8 +18,8 @@
 
 package accord.messages;
 
-import accord.local.PreLoadContext;
 import accord.local.DurableBefore;
+import accord.local.PreLoadContext;
 import accord.local.SafeCommandStore;
 import accord.primitives.TxnId;
 
@@ -51,7 +51,8 @@ public class SetGloballyDurable extends AbstractEpochRequest<SimpleReply>
     {
         DurableBefore cur = safeStore.commandStore().durableBefore();
         DurableBefore upd = DurableBefore.merge(durableBefore, cur);
-        safeStore.commandStore().setDurableBefore(upd);
+        // This is done asynchronously
+        safeStore.upsertDurableBefore(upd);
         return Ok;
     }
 

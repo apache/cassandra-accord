@@ -138,23 +138,58 @@ public interface PreLoadContext
     static PreLoadContext contextFor(TxnId primary, Collection<TxnId> additional, Seekables<?, ?> keys, KeyHistory keyHistory)
     {
         Invariants.checkState(!additional.contains(primary));
-        return new PreLoadContext()
+        return new Standard(primary, additional, keys, keyHistory);
+    }
+
+    class Standard implements PreLoadContext
+    {
+        private final TxnId primary;
+        private final Collection<TxnId> additional;
+        private final Seekables<?, ?> keys;
+        private final KeyHistory keyHistory;
+
+        public Standard(TxnId primary, Collection<TxnId> additional, Seekables<?, ?> keys, KeyHistory keyHistory)
         {
-            @Override
-            public TxnId primaryTxnId()
-            {
-                return primary;
-            }
+            this.primary = primary;
+            this.additional = additional;
+            this.keys = keys;
+            this.keyHistory = keyHistory;
+        }
 
-            @Override
-            public Collection<TxnId> additionalTxnIds() { return additional; }
+        public String toString()
+        {
+            return "PreLoadContext{" +
+                   "primary=" + primary +
+                   ", additional=" + additional +
+                   ", keys=" + keys +
+                   ", keyHistory=" + keyHistory +
+                   '}';
+        }
 
-            @Override
-            public Seekables<?, ?> keys() { return keys; }
+        @Override
+        @Nullable
+        public TxnId primaryTxnId()
+        {
+            return primary;
+        }
 
-            @Override
-            public KeyHistory keyHistory() { return keyHistory; }
-        };
+        @Override
+        public Collection<TxnId> additionalTxnIds()
+        {
+            return additional;
+        }
+
+        @Override
+        public Seekables<?, ?> keys()
+        {
+            return keys;
+        }
+
+        @Override
+        public KeyHistory keyHistory()
+        {
+            return keyHistory;
+        }
     }
 
     static PreLoadContext contextFor(TxnId primary, Collection<TxnId> additional, Seekables<?, ?> keys)
