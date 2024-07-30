@@ -612,6 +612,12 @@ public class SimpleProgressLog implements ProgressLog.Factory
         }
 
         @Override
+        public void clear()
+        {
+            stateMap.clear();
+        }
+
+        @Override
         public void durable(Command command)
         {
             State state = ensure(command.txnId());

@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Queue;
 import java.util.concurrent.Callable;
 import java.util.function.BiConsumer;
@@ -35,7 +36,6 @@ import java.util.stream.Collectors;
 import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.ProgressLog;
-import accord.api.Result;
 import accord.impl.InMemoryCommandStore;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.InMemorySafeCommand;
@@ -43,7 +43,6 @@ import accord.impl.InMemorySafeCommandsForKey;
 import accord.impl.InMemorySafeTimestampsForKey;
 import accord.impl.PrefixedIntHashKey;
 import accord.impl.basic.TaskExecutorService.Task;
-import accord.impl.mock.MockStore;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.CommandStores;
@@ -52,6 +51,7 @@ import accord.local.NodeTimeService;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommandStore;
 import accord.local.ShardDistributor;
+import accord.primitives.Deps;
 import accord.primitives.Range;
 import accord.primitives.RoutableKey;
 import accord.primitives.Txn;
@@ -174,11 +174,8 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
             if (current.txnId().kind() == Txn.Kind.EphemeralRead)
                 return;
 
-            Result result = current.result();
-            if (result == null)
-                result = MockStore.RESULT;
             // Journal will not have result persisted. This part is here for test purposes and ensuring that we have strict object equality.
-            Command reconstructed = journal.reconstruct(id, current.txnId(), result);
+            Command reconstructed = journal.reconstruct(id, current.txnId());
             List<Difference<?>> diff = ReflectionUtils.recursiveEquals(current, reconstructed);
             List<String> filteredDiff = diff.stream().filter(d -> !DelayedCommandStores.hasKnownIssue(d.path)).map(Object::toString).collect(Collectors.toList());
             Invariants.checkState(filteredDiff.isEmpty(), "Commands did not match: expected %s, given %s, node %s, store %d, diff %s", current, reconstructed, time, id(), new LazyToString(() -> String.join("\n", filteredDiff)));
@@ -271,6 +268,13 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         {
             return new DelayedSafeStore(this, ranges, context, commands, timestampsForKey, commandsForKeys);
         }
+
+        @Override
+        protected void registerHistoricalTransactions(Deps deps, SafeCommandStore safeStore)
+        {
+            journal.registerHistoricalTransactions(id(), deps);
+            super.registerHistoricalTransactions(deps, safeStore);
+        }
     }
 
     public static class DelayedSafeStore extends InMemoryCommandStore.InMemorySafeStore
@@ -285,16 +289,16 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         @Override
         public void postExecute()
         {
-            super.postExecute();
             commands.entrySet().forEach(e -> {
                 InMemorySafeCommand safe = e.getValue();
                 if (!safe.isModified()) return;
 
                 Command before = safe.original();
                 Command after = safe.current();
-                commandStore.journal.onExecute(commandStore.id(), before, after, context.primaryTxnId().equals(after.txnId()));
+                commandStore.journal.onExecute(commandStore.id(), before, after, Objects.equals(context.primaryTxnId(), after.txnId()));
                 commandStore.validateRead(safe.current());
             });
+            super.postExecute();
         }
     }
 

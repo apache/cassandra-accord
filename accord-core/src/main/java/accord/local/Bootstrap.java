@@ -150,7 +150,7 @@ class Bootstrap
                        return AsyncResults.success(Ranges.EMPTY);
 
                    Commands.createBootstrapCompleteMarkerTransaction(safeStore1, localSyncId, valid);
-                   safeStore1.registerHistoricalTransactions(syncPoint.waitFor);
+                   safeStore1.commandStore().registerHistoricalTransactions(syncPoint.waitFor, safeStore1);
                    return fetch = safeStore1.dataStore().fetch(node, safeStore1, valid, syncPoint, this);
                })))
                .flatMap(i -> i)

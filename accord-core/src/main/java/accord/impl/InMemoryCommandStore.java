@@ -98,10 +98,11 @@ public abstract class InMemoryCommandStore extends CommandStore
     final NavigableMap<Timestamp, GlobalCommand> commandsByExecuteAt = new TreeMap<>();
     private final NavigableMap<RoutableKey, GlobalTimestampsForKey> timestampsForKey = new TreeMap<>();
     private final NavigableMap<RoutableKey, GlobalCommandsForKey> commandsForKey = new TreeMap<>();
-    // TODO (find library, efficiency): this is obviously super inefficient, need some range map
 
+    // TODO (find library, efficiency): this is obviously super inefficient, need some range map
     private final TreeMap<TxnId, RangeCommand> rangeCommands = new TreeMap<>();
     private final TreeMap<TxnId, Ranges> historicalRangeCommands = new TreeMap<>();
+    // TODO (desired): use `redundantBefore` information instead
     protected Timestamp maxRedundant = Timestamp.NONE;
 
     private InMemorySafeStore current;
@@ -143,11 +144,6 @@ public abstract class InMemoryCommandStore extends CommandStore
     TreeMap<TxnId, Ranges> historicalRangeCommands()
     {
         return historicalRangeCommands;
-    }
-
-    TreeMap<TxnId, RangeCommand> rangeCommands()
-    {
-        return rangeCommands;
     }
 
     public GlobalCommand commandIfPresent(TxnId txnId)
@@ -361,7 +357,11 @@ public abstract class InMemoryCommandStore extends CommandStore
     public void markShardDurable(SafeCommandStore safeStore, TxnId syncId, Ranges ranges)
     {
         super.markShardDurable(safeStore, syncId, ranges);
+        markShardDurable(syncId, ranges);
+    }
 
+    private void markShardDurable(TxnId syncId, Ranges ranges)
+    {
         if (!rangeCommands.containsKey(syncId))
             historicalRangeCommands.merge(syncId, ranges, Ranges::with);
 
@@ -383,8 +383,6 @@ public abstract class InMemoryCommandStore extends CommandStore
             }
         });
     }
-
-
 
     protected InMemorySafeStore createSafeStore(PreLoadContext context, RangesForEpoch ranges,
                                                 Map<TxnId, InMemorySafeCommand> commands,
@@ -759,7 +757,6 @@ public abstract class InMemoryCommandStore extends CommandStore
             slice = commandStore.redundantBefore().removeShardRedundant(txnId, updated.executeAt(), slice);
             commandStore.rangeCommands.computeIfAbsent(txnId, ignore -> new RangeCommand(commandStore.commands.get(txnId)))
                          .update(((Ranges)keysOrRanges).slice(slice, Minimal));
-
         }
 
         @Override
@@ -790,43 +787,6 @@ public abstract class InMemoryCommandStore extends CommandStore
         public RangesForEpoch ranges()
         {
             return ranges;
-        }
-
-        // TODO (desired): this can have protected visibility if under CommandStore, and this is perhaps a better place to put it also
-        @Override
-        public void registerHistoricalTransactions(Deps deps)
-        {
-            RangesForEpoch rangesForEpoch = commandStore.rangesForEpoch;
-            Ranges allRanges = rangesForEpoch.all();
-            deps.keyDeps.keys().forEach(allRanges, key -> {
-                deps.keyDeps.forEach(key, (txnId, txnIdx) -> {
-                    // TODO (desired, efficiency): this can be made more efficient by batching by epoch
-                    if (rangesForEpoch.coordinates(txnId).contains(key))
-                        return; // already coordinates, no need to replicate
-                    // TODO (required): check this logic, esp. next line, matches C*
-                    if (!rangesForEpoch.allAfter(txnId.epoch()).contains(key))
-                        return;
-
-                    get(key).registerHistorical(this, txnId);
-                });
-
-            });
-            TreeMap<TxnId, RangeCommand> rangeCommands = commandStore.rangeCommands();
-            TreeMap<TxnId, Ranges> historicalRangeCommands = commandStore.historicalRangeCommands();
-            deps.rangeDeps.forEachUniqueTxnId(allRanges, null, (ignore, txnId) -> {
-
-                if (rangeCommands.containsKey(txnId))
-                    return;
-
-                Ranges ranges = deps.rangeDeps.ranges(txnId);
-                if (rangesForEpoch.coordinates(txnId).intersects(ranges))
-                    return; // already coordinates, no need to replicate
-                // TODO (required): check this logic, esp. next line, matches C*
-                if (!rangesForEpoch.allAfter(txnId.epoch()).intersects(ranges))
-                    return;
-
-                historicalRangeCommands.merge(txnId, ranges.slice(allRanges), Ranges::with);
-            });
         }
 
         @Override
@@ -1336,5 +1296,105 @@ public abstract class InMemoryCommandStore extends CommandStore
         {
             logDependencyGraph(commandStore, txnId, true);
         }
+    }
+
+    /**
+     * Replay and loading logic
+     */
+
+    // For now, we are not clearing TimestampsForKey, since there is a plan to merge it into CommandsForKey.
+    // Similarly, there is a plan to use redundantBefore instead of maxRedundant, so we do not clear it here either.
+    @VisibleForTesting
+    public void clearForTesting()
+    {
+        Invariants.checkState(current == null);
+        commands.clear();
+        commandsByExecuteAt.clear();
+        commandsForKey.clear();
+        rangeCommands.clear();
+        historicalRangeCommands.clear();
+    }
+
+    public interface Load
+    {
+        void load(Command prev, Command loading);
+    }
+
+    @VisibleForTesting
+    public boolean load(Command prev, Command loading)
+    {
+        GlobalCommand globalCommand = command(loading.txnId());
+        globalCommand.value(loading);
+
+        if (loading.executeAt() != null)
+            this.commandsByExecuteAt.put(loading.executeAt(), globalCommand);
+
+        executeInContext(this,
+                         loading.keysOrRanges() == null ?
+                         PreLoadContext.contextFor(loading.txnId()) :
+                         PreLoadContext.contextFor(loading.txnId(), loading.keysOrRanges(), KeyHistory.COMMANDS),
+                         safeStore -> {
+                             ((InMemorySafeStore) safeStore).update(prev, loading);
+                             return null;
+                         });
+
+        return true;
+    }
+
+
+    @VisibleForTesting
+    public void load(Deps loading)
+    {
+        registerHistoricalTransactions(loading,
+                                       ((key, txnId) -> {
+                                           GlobalCommandsForKey globalCfk = commandsForKey(key);
+                                           if (globalCfk.isEmpty())
+                                               globalCfk.value(new CommandsForKey(key));
+                                           CommandsForKey cfk = globalCfk.createSafeReference().current();
+                                           Invariants.checkState(cfk != null);
+                                           globalCfk.value(cfk.registerHistorical(txnId).cfk());
+                                       }));
+    }
+
+    @Override
+    protected void registerHistoricalTransactions(Deps deps, SafeCommandStore safeStore)
+    {
+        registerHistoricalTransactions(deps, (key, txnId) -> safeStore.get(key).registerHistorical(safeStore, txnId));
+    }
+
+    private void registerHistoricalTransactions(Deps deps, BiConsumer<Key, TxnId> registerHistorical)
+    {
+        RangesForEpoch rangesForEpoch = this.rangesForEpoch;
+        Ranges allRanges = rangesForEpoch.all();
+        deps.keyDeps.keys().forEach(allRanges, key -> {
+            deps.keyDeps.forEach(key, (txnId, txnIdx) -> {
+                // TODO (desired, efficiency): this can be made more efficient by batching by epoch
+                if (rangesForEpoch.coordinates(txnId).contains(key))
+                    return; // already coordinates, no need to replicate
+                // TODO (required): check this logic, esp. next line, matches C*
+                if (!rangesForEpoch.allAfter(txnId.epoch()).contains(key))
+                    return;
+
+                registerHistorical.accept(key, txnId);
+            });
+
+        });
+
+        TreeMap<TxnId, RangeCommand> rangeCommands = this.rangeCommands;
+        TreeMap<TxnId, Ranges> historicalRangeCommands = historicalRangeCommands();
+        deps.rangeDeps.forEachUniqueTxnId(allRanges, null, (ignore, txnId) -> {
+
+            if (rangeCommands.containsKey(txnId))
+                return;
+
+            Ranges ranges = deps.rangeDeps.ranges(txnId);
+            if (rangesForEpoch.coordinates(txnId).intersects(ranges))
+                return; // already coordinates, no need to replicate
+            // TODO (required): check this logic, esp. next line, matches C*
+            if (!rangesForEpoch.allAfter(txnId.epoch()).intersects(ranges))
+                return;
+
+            historicalRangeCommands.merge(txnId, ranges.slice(allRanges), Ranges::with);
+        });
     }
 }

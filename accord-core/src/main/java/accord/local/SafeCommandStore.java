@@ -29,7 +29,6 @@ import accord.api.RoutingKey;
 import accord.impl.ErasedSafeCommand;
 import accord.local.cfk.CommandsForKey;
 import accord.local.cfk.SafeCommandsForKey;
-import accord.primitives.Deps;
 import accord.primitives.EpochSupplier;
 import accord.primitives.Keys;
 import accord.primitives.Participants;
@@ -265,7 +264,9 @@ public abstract class SafeCommandStore
         Keys keys = next.asCommitted().waitingOn.keys;
         // TODO (required): consider how execution works for transactions that await future deps and where the command store inherits additional keys in execution epoch
         Ranges ranges = safeStore.ranges().allAt(next.executeAt());
-        PreLoadContext context = PreLoadContext.contextFor(txnId, keys, COMMANDS);
+        PreLoadContext context = PreLoadContext.EMPTY_PRELOADCONTEXT;
+        if (!keys.isEmpty())
+            context = PreLoadContext.contextFor(txnId, keys, COMMANDS);
         // TODO (expected): execute immediately for any keys we already have loaded, and save only those we haven't for later
         if (safeStore.canExecuteWith(context))
         {
@@ -309,8 +310,6 @@ public abstract class SafeCommandStore
     public abstract ProgressLog progressLog();
     public abstract NodeTimeService time();
     public abstract CommandStores.RangesForEpoch ranges();
-
-    public abstract void registerHistoricalTransactions(Deps deps);
 
     public boolean isTruncated(Command command)
     {

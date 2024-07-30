@@ -690,6 +690,16 @@ public abstract class CommandStores
         return shards[supplier.random.nextInt(shards.length)].store;
     }
 
+    public CommandStore[] all()
+    {
+        ShardHolder[] shards = current.shards;
+        CommandStore[] all = new CommandStore[shards.length];
+        if (shards.length == 0) throw illegalState("Unable to get CommandStore; non defined");
+        for (int i = 0; i < shards.length; i++)
+            all[i] = shards[i].store;
+        return all;
+    }
+
     public CommandStore forId(int id)
     {
         Snapshot snapshot = current;

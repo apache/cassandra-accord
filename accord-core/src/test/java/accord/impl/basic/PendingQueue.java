@@ -20,7 +20,7 @@ package accord.impl.basic;
 
 import java.util.concurrent.TimeUnit;
 
-public interface PendingQueue
+public interface PendingQueue extends Iterable<Pending>
 {
     void add(Pending item);
     void addNoDelay(Pending item);
@@ -29,4 +29,6 @@ public interface PendingQueue
     Pending poll();
     int size();
     long nowInMillis();
+
+    boolean hasNonRecurring();
 }

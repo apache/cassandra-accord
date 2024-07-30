@@ -211,4 +211,6 @@ public interface ProgressLog
      * We have finished processing this transaction; ensure its state is cleared
      */
     void clear(TxnId txnId);
+
+    void clear();
 }

@@ -112,6 +112,7 @@ public class ImmutableCommandTest
         @Override public void waiting(SafeCommand blockedBy, LocalExecution blockedUntil, Route<?> blockedOnRoute, Participants<?> blockedOnParticipants) {}
         @Override public void waiting(TxnId blockedBy, LocalExecution blockedUntil, @Nullable Route<?> blockedOnRoute, @Nullable Participants<?> blockedOnParticipants) {}
         @Override public void clear(TxnId txnId) {}
+        @Override public void clear() {}
     }
 
     private static Node createNode(Id id, CommandStoreSupport storeSupport)
