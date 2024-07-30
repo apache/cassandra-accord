@@ -725,7 +725,7 @@ class Updating
      *  - {@code !register, update == null}: fails if any dependencies are missing; always returns a CommandsForKey
      *  - {@code !register && update != null}: fails if any dependencies are missing; always returns the original CommandsForKey, and maybe adds a new Unmanaged to {@code update}
      */
-    static CommandsForKeyUpdate updateUnmanaged(CommandsForKey cfk, SafeCommand safeCommand, boolean register, @Nullable List<CommandsForKey.Unmanaged> update)
+    static CommandsForKeyUpdate updateUnmanaged(final CommandsForKey cfk, SafeCommand safeCommand, boolean register, @Nullable List<CommandsForKey.Unmanaged> update)
     {
         Invariants.checkArgument(!register || update == null);
         if (safeCommand.current().hasBeen(Status.Truncated))

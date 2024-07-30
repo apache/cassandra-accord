@@ -29,6 +29,7 @@ import javax.annotation.Nullable;
 import accord.api.Agent;
 
 import accord.local.CommandStores.RangesForEpoch;
+import accord.primitives.Deps;
 import accord.primitives.KeyDeps;
 import accord.primitives.Keys;
 import accord.primitives.Range;
@@ -234,6 +235,8 @@ public abstract class CommandStore implements AgentExecutor
 
     public abstract <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> apply);
     public abstract void shutdown();
+
+    protected abstract void registerHistoricalTransactions(Deps deps, SafeCommandStore safeStore);
 
     // implementations are expected to override this for persistence
     protected void setRejectBefore(ReducingRangeMap<Timestamp> newRejectBefore)
@@ -478,7 +481,7 @@ public abstract class CommandStore implements AgentExecutor
                 // TODO (correcness) : PreLoadContext only works with Seekables, which doesn't allow mixing Keys and Ranges... But Deps has both Keys AND Ranges!
                 // ATM all known implementations store ranges in-memory, but this will not be true soon, so this will need to be addressed
                 execute(contextFor(null, deps.txnIds(), deps.keyDeps.keys(), COMMANDS), safeStore -> {
-                    safeStore.registerHistoricalTransactions(deps);
+                    registerHistoricalTransactions(deps, safeStore);
                 }).begin((success, fail2) -> {
                     if (fail2 != null) fetchMajorityDeps(coordination, node, epoch, ranges);
                     else coordination.setSuccess(null);

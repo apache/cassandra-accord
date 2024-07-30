@@ -43,6 +43,14 @@ interface NotifySink
 
     void waitingOn(SafeCommandStore safeStore, TxnInfo txn, Key key, SaveStatus waitingOnStatus, BlockedUntil blockedUntil, boolean notifyCfk);
 
+    class NoOpSink implements NotifySink
+    {
+        static final NotifySink INSTANCE = new NoOpSink();
+
+        public void notWaiting(SafeCommandStore safeStore, TxnId txnId, Key key) {}
+        public void notWaiting(SafeCommandStore safeStore, SafeCommand safeCommand, Key key) {}
+        public void waitingOn(SafeCommandStore safeStore, TxnInfo txn, Key key, SaveStatus waitingOnStatus, BlockedUntil blockedUntil, boolean notifyCfk) {}
+    }
     class DefaultNotifySink implements NotifySink
     {
         static final DefaultNotifySink INSTANCE = new DefaultNotifySink();

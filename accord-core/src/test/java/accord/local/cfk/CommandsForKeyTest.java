@@ -837,12 +837,6 @@ public class CommandsForKeyTest
         {
             throw new UnsupportedOperationException();
         }
-
-        @Override
-        public void registerHistoricalTransactions(Deps deps)
-        {
-            throw new UnsupportedOperationException();
-        }
     }
 
     private static final class TestRead implements Read
@@ -959,6 +953,12 @@ public class CommandsForKeyTest
         public void shutdown()
         {
             Invariants.checkState(queue.isEmpty());
+        }
+
+        @Override
+        protected void registerHistoricalTransactions(Deps deps, SafeCommandStore safeStore)
+        {
+            throw new UnsupportedOperationException();
         }
 
         @Override

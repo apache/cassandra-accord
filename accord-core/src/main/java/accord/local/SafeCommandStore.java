@@ -29,7 +29,6 @@ import accord.api.RoutingKey;
 import accord.impl.ErasedSafeCommand;
 import accord.local.cfk.CommandsForKey;
 import accord.local.cfk.SafeCommandsForKey;
-import accord.primitives.Deps;
 import accord.primitives.EpochSupplier;
 import accord.primitives.Keys;
 import accord.primitives.Participants;
@@ -58,6 +57,20 @@ import static accord.primitives.Route.isFullRoute;
  */
 public abstract class SafeCommandStore
 {
+    boolean replayMode = false;
+
+    public boolean replay()
+    {
+        return replayMode;
+    }
+
+    public void replay(Runnable run)
+    {
+        replayMode = true;
+        run.run();
+        replayMode = false;
+    }
+
     public interface CommandFunction<P1, I, O>
     {
         O apply(P1 p1, Seekable keyOrRange, TxnId txnId, Timestamp executeAt, I in);
@@ -208,7 +221,7 @@ public abstract class SafeCommandStore
         updateCommandsForKey(prev, updated);
     }
 
-    private void updateMaxConflicts(Command prev, Command updated)
+    public void updateMaxConflicts(Command prev, Command updated)
     {
         SaveStatus oldSaveStatus = prev == null ? SaveStatus.Uninitialised : prev.saveStatus();
         SaveStatus newSaveStatus = updated.saveStatus();
@@ -222,7 +235,7 @@ public abstract class SafeCommandStore
         commandStore().updateMaxConflicts(prev, updated);
     }
 
-    private void updateCommandsForKey(Command prev, Command next)
+    public void updateCommandsForKey(Command prev, Command next)
     {
         if (!CommandsForKey.needsUpdate(prev, next))
             return;
@@ -245,7 +258,7 @@ public abstract class SafeCommandStore
         //    Once committed without a given key, we should be effectively erasing the command from that CFK
         PreLoadContext context = PreLoadContext.contextFor(txnId, keys, COMMANDS);
         // TODO (expected): execute immediately for any keys we already have loaded, and save only those we haven't for later
-        if (safeStore.canExecuteWith(context))
+        if (safeStore.replayMode || safeStore.canExecuteWith(context))
         {
             for (Key key : keys)
             {
@@ -254,6 +267,7 @@ public abstract class SafeCommandStore
         }
         else
         {
+            Invariants.checkState(!safeStore.replayMode);
             safeStore = safeStore; // prevent accidental usage inside lambda
             safeStore.commandStore().execute(context, safeStore0 -> updateManagedCommandsForKey(safeStore0, prev, next))
                           .begin(safeStore.commandStore().agent);
@@ -266,7 +280,9 @@ public abstract class SafeCommandStore
         Keys keys = next.asCommitted().waitingOn.keys;
         // TODO (required): consider how execution works for transactions that await future deps and where the command store inherits additional keys in execution epoch
         Ranges ranges = safeStore.ranges().allAt(next.executeAt());
-        PreLoadContext context = PreLoadContext.contextFor(txnId, keys, COMMANDS);
+        PreLoadContext context = PreLoadContext.EMPTY_PRELOADCONTEXT;
+        if (!keys.isEmpty())
+            context = PreLoadContext.contextFor(txnId, keys, COMMANDS);
         // TODO (expected): execute immediately for any keys we already have loaded, and save only those we haven't for later
         if (safeStore.canExecuteWith(context))
         {
@@ -277,6 +293,7 @@ public abstract class SafeCommandStore
         }
         else
         {
+            Invariants.checkState(!safeStore.replayMode);
             safeStore = safeStore;
             safeStore.commandStore().execute(context, safeStore0 -> updateUnmanagedExecutionCommandsForKey(safeStore0, next))
                           .begin(safeStore.commandStore().agent);
@@ -310,8 +327,6 @@ public abstract class SafeCommandStore
     public abstract ProgressLog progressLog();
     public abstract NodeTimeService time();
     public abstract CommandStores.RangesForEpoch ranges();
-
-    public abstract void registerHistoricalTransactions(Deps deps);
 
     public boolean isTruncated(Command command)
     {

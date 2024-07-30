@@ -547,16 +547,24 @@ public class Commands
         return safeStore.ranges().applyRanges(executeAt);
     }
 
-    private static AsyncChain<Void> applyChain(SafeCommandStore safeStore, PreLoadContext context, TxnId txnId)
+    public static AsyncChain<Void> applyChain(SafeCommandStore safeStore, PreLoadContext context, TxnId txnId)
     {
         Command.Executed command = safeStore.get(txnId).current().asExecuted();
         if (command.hasBeen(Applied))
+        {
             return AsyncChains.success(null);
+        }
+        return apply(safeStore, context, txnId);
+    }
 
+    public static AsyncChain<Void> apply(SafeCommandStore safeStore, PreLoadContext context, TxnId txnId)
+    {
+        Command.Executed command = safeStore.get(txnId).current().asExecuted();
         // TODO (required): make sure we are correctly handling (esp. C* side with validation logic) executing a transaction
         //  that was pre-bootstrap for some range (so redundant and we may have gone ahead of), but had to be executed locally
         //  for another range
         CommandStore unsafeStore = safeStore.commandStore();
+        // TODO: avoid allocating a timestamp here
         long t0 = safeStore.time().now();
         return command.writes().apply(safeStore, applyRanges(safeStore, command.executeAt()), command.partialTxn())
                .flatMap(unused -> unsafeStore.submit(context, ss -> {
@@ -568,7 +576,25 @@ public class Commands
                }));
     }
 
-    private static void apply(SafeCommandStore safeStore, Command.Executed command)
+    public static AsyncChain<Void> applyFromReplay(SafeCommandStore safeStore, PreLoadContext context, TxnId txnId)
+    {
+        Command.Executed command = safeStore.get(txnId).current().asExecuted();
+        // TODO (required): make sure we are correctly handling (esp. C* side with validation logic) executing a transaction
+        //  that was pre-bootstrap for some range (so redundant and we may have gone ahead of), but had to be executed locally
+        //  for another range
+        CommandStore unsafeStore = safeStore.commandStore();
+        long t0 = safeStore.time().now();
+        return command.writes().apply(safeStore, applyRanges(safeStore, command.executeAt()), command.partialTxn())
+                      .flatMap(unused -> unsafeStore.submit(context, ss -> {
+                          Command cmd = ss.get(txnId).current();
+                          if (!cmd.hasBeen(Applied))
+                              ss.agent().metricsEventsListener().onApplied(cmd, t0);
+                          postApply(ss, txnId);
+                          return null;
+                      }));
+    }
+
+    public static void apply(SafeCommandStore safeStore, Command command)
     {
         CommandStore unsafeStore = safeStore.commandStore();
         TxnId txnId = command.txnId();
@@ -588,7 +614,7 @@ public class Commands
         }
     }
 
-    private static boolean maybeExecute(SafeCommandStore safeStore, SafeCommand safeCommand, boolean alwaysNotifyListeners, boolean notifyWaitingOn)
+    public static boolean maybeExecute(SafeCommandStore safeStore, SafeCommand safeCommand, boolean alwaysNotifyListeners, boolean notifyWaitingOn)
     {
         final Command command = safeCommand.current();
         if (logger.isTraceEnabled())
@@ -614,7 +640,6 @@ public class Commands
 
         // TODO (required): slice our execute ranges based on any pre-bootstrap state
         // FIXME: need to communicate to caller that we didn't execute if we take one of the above paths
-
         switch (command.status())
         {
             case Stable:
@@ -851,6 +876,16 @@ public class Commands
                               || (command.route() == null || Infer.safeToCleanup(safeStore, command, command.route(), command.executeAt()) || safeStore.isFullyPreBootstrapOrStale(command, command.route().participants()))
         , "Command %s could not be truncated", command);
 
+        Command result = purge(command, maybeFullRoute, cleanup);
+        safeCommand.update(safeStore, result);
+        safeStore.progressLog().clear(safeCommand.txnId());
+        if (notifyListeners)
+            safeStore.notifyListeners(safeCommand, result);
+        return result;
+    }
+
+    public static Command purge(Command command, @Nullable Unseekables<?> maybeFullRoute, Cleanup cleanup)
+    {
         Command result;
         switch (cleanup)
         {
@@ -868,8 +903,8 @@ public class Commands
 
             case TRUNCATE:
                 Invariants.checkState(command.saveStatus().compareTo(TruncatedApply) < 0);
-                Invariants.checkState(command.hasBeen(PreApplied));
-                result = truncatedApply(command, Route.tryCastToFullRoute(maybeFullRoute));
+                if (!command.hasBeen(PreCommitted)) result = Command.Truncated.erasedOrInvalidOrVestigial(command);
+                else result = truncatedApply(command, Route.tryCastToFullRoute(maybeFullRoute));
                 break;
 
             case ERASE:
@@ -877,11 +912,6 @@ public class Commands
                 result = erased(command);
                 break;
         }
-
-        safeCommand.update(safeStore, result);
-        safeStore.progressLog().clear(safeCommand.txnId());
-        if (notifyListeners)
-            safeStore.notifyListeners(safeCommand, command);
         return result;
     }
 
@@ -930,6 +960,7 @@ public class Commands
 
         public NotifyWaitingOn(SafeCommand root)
         {
+            new RuntimeException("notify waiting on").printStackTrace();
             Invariants.checkArgument(root.current().hasBeen(Stable));
             this.waitingId = root.txnId();
         }

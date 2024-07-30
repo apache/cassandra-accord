@@ -303,7 +303,10 @@ abstract class WaitingState extends BaseTxnState
         BlockedUntil blockedUntil = blockedUntil();
         Command command = safeCommand.current();
         Invariants.checkState(!owner.hasActive(Waiting, txnId));
-        Invariants.checkState(command.saveStatus().compareTo(blockedUntil.minSaveStatus) < 0, "Command has met desired criteria but progress log entry has not been cancelled");
+        Invariants.checkState(command.saveStatus().compareTo(blockedUntil.minSaveStatus) < 0,
+                              () -> String.format("Command has met desired criteria (%s) but progress log entry has not been cancelled: %s",
+                                                  blockedUntil.minSaveStatus,
+                                                  command));
 
         set(safeStore, owner, blockedUntil, Querying);
         TxnId txnId = safeCommand.txnId();

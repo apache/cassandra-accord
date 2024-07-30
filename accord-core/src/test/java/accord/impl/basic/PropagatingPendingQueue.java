@@ -18,6 +18,7 @@
 
 package accord.impl.basic;
 
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -98,5 +99,17 @@ public class PropagatingPendingQueue implements PendingQueue
     public long nowInMillis()
     {
         return wrapped.nowInMillis();
+    }
+
+    @Override
+    public boolean hasNonRecurring()
+    {
+        return wrapped.hasNonRecurring();
+    }
+
+    @Override
+    public Iterator<Pending> iterator()
+    {
+        return wrapped.iterator();
     }
 }

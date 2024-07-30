@@ -79,6 +79,7 @@ import accord.impl.list.ListStore;
 import accord.local.AgentExecutor;
 import accord.local.Command;
 import accord.local.Node.Id;
+import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.NodeTimeService;
 import accord.local.SaveStatus;
@@ -222,14 +223,27 @@ public class Cluster implements Scheduler
     public boolean processPending()
     {
         checkFailures.run();
-        if (pending.size() == recurring)
-            return false;
+        if (recurring > 0 && pending.size() == recurring)
+        {
+            boolean hasNonRecurring = false;
+            for (Pending p : pending)
+            {
+                if (((RecurringPendingRunnable) p).requeue.hasNonRecurring())
+                {
+                    hasNonRecurring = true;
+                    break;
+                }
+            }
+            if (!hasNonRecurring)
+                return false;
+        }
 
         Object next = pending.poll();
         if (next == null)
             return false;
 
         processNext(next);
+
         checkFailures.run();
         return true;
     }
@@ -475,11 +489,35 @@ public class Cluster implements Scheduler
             }, 5L, SECONDS);
 
             Scheduled reconfigure = sinks.recurring(configRandomizer::maybeUpdateTopology, 1, SECONDS);
+
+            Scheduled purge = sinks.recurring(() -> {
+                trace.debug("Triggering purge.");
+                for (Node node : nodeMap.values())
+                {
+                    Journal journal = journalMap.get(node.id());
+                    CommandStore[] stores = nodeMap.get(node.id()).commandStores().all();
+                    journal.purge((i) -> stores[i]);
+                }
+            }, 5, SECONDS);
+
+            Scheduled restart = sinks.recurring(() -> {
+                Id node = random.pick(nodes);
+                Journal journal = journalMap.get(node);
+                CommandStore[] stores = nodeMap.get(node).commandStores().all();
+                DelayedCommandStores.DelayedCommandStore store = (DelayedCommandStores.DelayedCommandStore) random.pick(stores);
+                trace.debug("Triggering journal cleanup.");
+                store.clearForTesting();
+                journal.reconstructAll(store::load, store.id());
+                journal.loadHistoricalTransactions(store::load, store.id());
+            }, 10, SECONDS);
+
             durabilityScheduling.forEach(CoordinateDurabilityScheduling::start);
             services.forEach(Service::start);
 
             noMoreWorkSignal.accept(() -> {
                 reconfigure.cancel();
+                purge.cancel();
+                restart.cancel();
                 durabilityScheduling.forEach(CoordinateDurabilityScheduling::stop);
                 services.forEach(Service::close);
             });

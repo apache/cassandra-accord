@@ -901,7 +901,7 @@ public enum Status
 
         public static Durability merge(Durability a, Durability b)
         {
-            int c = a.compareTo(b);
+            int c = a == null ? -1 : a.compareTo(b);
             if (c < 0) { Durability tmp = a; a = b; b = tmp; }
             // if we know we are applied, we can remove the OrInvalidated qualifier
             if (a == UniversalOrInvalidated && (b == Majority || b == ShardUniversal || b == Local)) a = Universal;
@@ -913,7 +913,7 @@ public enum Status
 
         public static Durability mergeAtLeast(Durability a, Durability b)
         {
-            int c = a.compareTo(b);
+            int c = a == null ? -1 : a.compareTo(b);
             if (c < 0) { Durability tmp = a; a = b; b = tmp; }
             if (a == UniversalOrInvalidated && (b == Majority || b == ShardUniversal || b == Local)) a = Universal;
             return a;

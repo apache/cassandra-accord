@@ -392,6 +392,8 @@ public class RemoteListenersTest
         @Override public AsyncChain<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer) { return null; }
         @Override public <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> apply) { return null; }
         @Override public void shutdown() {}
+        @Override protected void registerHistoricalTransactions(Deps deps, SafeCommandStore safeStore) {}
+
         @Override public <T> AsyncChain<T> submit(Callable<T> task) { return null; }
     }
 
@@ -418,6 +420,5 @@ public class RemoteListenersTest
         @Override public ProgressLog progressLog() { return null; }
         @Override public NodeTimeService time() { return null; }
         @Override public CommandStores.RangesForEpoch ranges() { return null; }
-        @Override public void registerHistoricalTransactions(Deps deps) { }
     }
 }
