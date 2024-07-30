@@ -45,10 +45,11 @@ import accord.primitives.Txn.Kind;
 import accord.primitives.Txn.Kind.Kinds;
 import accord.primitives.TxnId;
 import accord.utils.ArrayBuffers;
+import accord.utils.ArrayBuffers.RecursiveObjectBuffers;
 import accord.utils.Invariants;
 import accord.utils.RelationMultiMap.SortedRelationList;
 import accord.utils.SortedArrays;
-import accord.utils.SortedList;
+import accord.utils.SortedCursor;
 import accord.utils.btree.BTree;
 import accord.utils.btree.BTreeRemoval;
 import accord.utils.btree.UpdateFunction;
@@ -60,7 +61,7 @@ import static accord.local.CommandsForKey.InternalStatus.COMMITTED;
 import static accord.local.CommandsForKey.InternalStatus.PREACCEPTED_OR_ACCEPTED_INVALIDATE;
 import static accord.local.CommandsForKey.InternalStatus.STABLE;
 import static accord.local.CommandsForKey.InternalStatus.HISTORICAL;
-import static accord.local.CommandsForKey.InternalStatus.INVALID_OR_TRUNCATED;
+import static accord.local.CommandsForKey.InternalStatus.INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED;
 import static accord.local.CommandsForKey.InternalStatus.TRANSITIVELY_KNOWN;
 import static accord.local.CommandsForKey.Unmanaged.Pending.APPLY;
 import static accord.local.CommandsForKey.Unmanaged.Pending.COMMIT;
@@ -69,8 +70,10 @@ import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestDep.WITH;
 import static accord.local.SaveStatus.LocalExecution.WaitingToApply;
 import static accord.local.SaveStatus.LocalExecution.WaitingToExecute;
+import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static accord.primitives.Txn.Kind.Kinds.AnyGloballyVisible;
 import static accord.primitives.Txn.Kind.Write;
+import static accord.utils.ArrayBuffers.cachedTimestamps;
 import static accord.utils.ArrayBuffers.cachedTxnIds;
 import static accord.utils.Invariants.Paranoia.LINEAR;
 import static accord.utils.Invariants.Paranoia.NONE;
@@ -89,6 +92,17 @@ import static accord.utils.SortedArrays.Search.FAST;
  *
  * Every command we know about that is not shard-redundant is listed in the {@code byId} collection, which is sorted by {@code TxnId}.
  * This includes all transitive dependencies we have witnessed via other transactions, but not witnessed directly.
+ *
+ * <h2>Contents</h2>
+ * This collection tracks various transactions differently:
+ * - Range transactions are tracked ONLY as dependencies; if no managed key transactions witness a range transaction
+ *   it will not be tracked here. The dependencies of range transactions are not themselves tracked at all.
+ *   A range transaction that depends on some key for execution will be registered as an unmanaged transaction
+ *   to track when it may be executed.
+ * - Key (Exclusive)?SyncPoints are tracked fully until execution; we fully encode their dependencies, and track their lifecycle.
+ *   This permits them to be consulted for recovery. Once they are stable, they will be registered as unmanaged transactions for execution.
+ * - Key Reads and Writes are first class citizens. We fully encode their dependencies, track their lifecycle and also
+ *   directly manage their execution.
  *
  * <h2>Dependency Encoding</h2>
  * The byId list implies the contents of the deps of all commands in the collection - that is, it is assumed that in
@@ -154,6 +168,7 @@ import static accord.utils.SortedArrays.Search.FAST;
  * TODO (expected): avoid updating transactions we don't manage the execution of - perhaps have a dedicated InternalStatus
  * TODO (expected): minimise repeated notification, either by logic or marking a command as notified once ready-to-execute
  * TODO (required): linearizability violation detection
+ * TODO (desired): introduce a new status or other fast and simple mechanism for filtering treatment of range or unmanaged transactions
  */
 public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSummary
 {
@@ -184,14 +199,6 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
     public static boolean managesExecution(TxnId txnId)
     {
         return Write.witnesses(txnId.kind()) && txnId.domain().isKey();
-    }
-
-    /**
-     * managesExecution when we already know the TxnId covers keys
-     */
-    public static boolean managesKeyExecution(TxnId txnId)
-    {
-        return Write.witnesses(txnId.kind());
     }
 
     public static class Unmanaged implements Comparable<Unmanaged>
@@ -257,7 +264,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         COMMITTED(true, true),
         STABLE(true, false),
         APPLIED(true, false),
-        INVALID_OR_TRUNCATED(false, false);
+        INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED(false, false);
 
         static final EnumMap<SaveStatus, InternalStatus> convert = new EnumMap<>(SaveStatus.class);
         static final InternalStatus[] VALUES = values();
@@ -277,12 +284,12 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             convert.put(SaveStatus.PreApplied, STABLE);
             convert.put(SaveStatus.Applying, STABLE);
             convert.put(SaveStatus.Applied, APPLIED);
-            convert.put(SaveStatus.TruncatedApplyWithDeps, INVALID_OR_TRUNCATED);
-            convert.put(SaveStatus.TruncatedApplyWithOutcome, INVALID_OR_TRUNCATED);
-            convert.put(SaveStatus.TruncatedApply, INVALID_OR_TRUNCATED);
-            convert.put(SaveStatus.ErasedOrInvalidated, INVALID_OR_TRUNCATED);
-            convert.put(SaveStatus.Erased, INVALID_OR_TRUNCATED);
-            convert.put(SaveStatus.Invalidated, INVALID_OR_TRUNCATED);
+            convert.put(SaveStatus.TruncatedApplyWithDeps, INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED);
+            convert.put(SaveStatus.TruncatedApplyWithOutcome, INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED);
+            convert.put(SaveStatus.TruncatedApply, INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED);
+            convert.put(SaveStatus.ErasedOrInvalidated, INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED);
+            convert.put(SaveStatus.Erased, INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED);
+            convert.put(SaveStatus.Invalidated, INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED);
         }
 
         public final boolean hasInfo;
@@ -322,7 +329,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             {
                 default: throw new AssertionError("Unhandled InternalStatus: " + this);
                 case TRANSITIVELY_KNOWN:
-                case INVALID_OR_TRUNCATED:
+                case INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED:
                 case HISTORICAL:
                     throw new AssertionError("Invalid InternalStatus to know deps");
 
@@ -431,8 +438,9 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             // TODO (desired): this is O(n.lg n), whereas we could import the accumulate function and perform in O(max(m, lg n))
             for (int i = 0 ; i < ceilIndex ; ++i)
             {
-                TxnId[] loadingFor = ((LoadingPruned)BTree.findByIndex(loadingPruned, i)).witnessedBy;
-                if (Arrays.binarySearch(loadingFor, waitingId) >= 0)
+                LoadingPruned loading = BTree.findByIndex(loadingPruned, i);
+                if (!managesExecution(loading)) continue;
+                if (Arrays.binarySearch(loading.witnessedBy, waitingId) >= 0)
                     return true;
             }
 
@@ -576,7 +584,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 
         Timestamp executeAtIfKnownElseTxnId()
         {
-            return status == INVALID_OR_TRUNCATED ? this : executeAt;
+            return status == INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED ? this : executeAt;
         }
     }
 
@@ -643,6 +651,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
     private final TxnInfo[] byId;
     // reads and writes ONLY that are committed or stable or applied, keyed by executeAt
     // TODO (required): validate that it is always a prefix that is Applied (i.e. never a gap)
+    // TODO (desired): filter transactions whose execution we don't manage
     private final TxnInfo[] committedByExecuteAt;
     private final int minUndecidedById, maxAppliedWriteByExecuteAt;
     private final Unmanaged[] unmanageds;
@@ -666,7 +675,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         if (isParanoid())
         {
             Invariants.checkState(prunedBefore == NO_INFO || (prunedBefore.status == APPLIED && prunedBefore.kind().isWrite()));
-            Invariants.checkState(minUndecidedById < 0 || byId[minUndecidedById].status.compareTo(COMMITTED) < 0);
+            Invariants.checkState(minUndecidedById < 0 || byId[minUndecidedById].status.compareTo(COMMITTED) < 0 && managesExecution(byId[minUndecidedById]));
             Invariants.checkState(maxAppliedWriteByExecuteAt < 0 || committedByExecuteAt[maxAppliedWriteByExecuteAt].status == APPLIED);
 
             if (testParanoia(LINEAR, NONE, LOW))
@@ -674,8 +683,8 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 Invariants.checkArgument(SortedArrays.isSortedUnique(byId));
                 Invariants.checkArgument(SortedArrays.isSortedUnique(committedByExecuteAt, TxnInfo::compareExecuteAt));
 
-                if (minUndecidedById >= 0) for (int i = 0 ; i < minUndecidedById ; ++i) Invariants.checkState(byId[i].status.compareTo(COMMITTED) >= 0);
-                else for (TxnInfo txn : byId) Invariants.checkState(txn.status.compareTo(COMMITTED) >= 0);
+                if (minUndecidedById >= 0) for (int i = 0 ; i < minUndecidedById ; ++i) Invariants.checkState(byId[i].status.compareTo(COMMITTED) >= 0 || !managesExecution(byId[i]));
+                else for (TxnInfo txn : byId) Invariants.checkState(txn.status.compareTo(COMMITTED) >= 0 || !managesExecution(txn));
 
                 if (maxAppliedWriteByExecuteAt >= 0)
                 {
@@ -697,12 +706,13 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 }
                 for (TxnInfo txn : byId)
                 {
-                    Invariants.checkState(manages(txn));
                     for (TxnId missingId : txn.missing())
                     {
                         Invariants.checkState(txn.kind().witnesses(missingId));
                         Invariants.checkState(get(missingId, byId).status.compareTo(COMMITTED) < 0);
                     }
+                    if (txn.status.isCommitted())
+                        Invariants.checkState(txn == committedByExecuteAt[Arrays.binarySearch(committedByExecuteAt, 0, committedByExecuteAt.length, txn, TxnInfo::compareExecuteAt)]);
                 }
                 for (LoadingPruned txn : BTree.<LoadingPruned>iterable(loadingPruned))
                 {
@@ -728,16 +738,16 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         for (int i = 0; i < byId.length ; ++i)
         {
             TxnInfo txn = byId[i];
-            if (txn.status == INVALID_OR_TRUNCATED) continue;
-            if (txn.status.compareTo(COMMITTED) >= 0 && managesExecution(txn)) ++countCommitted;
-            else if (txn.status.compareTo(COMMITTED) < 0 && minUndecided == -1) minUndecided = i;
+            if (txn.status == INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED) continue;
+            if (txn.status.compareTo(COMMITTED) >= 0) ++countCommitted;
+            else if (minUndecided == -1 && managesExecution(txn)) minUndecided = i;
         }
         this.minUndecidedById = minUndecided;
         this.committedByExecuteAt = new TxnInfo[countCommitted];
         countCommitted = 0;
         for (TxnInfo txn : byId)
         {
-            if (txn.status.compareTo(COMMITTED) >= 0 && txn.status != INVALID_OR_TRUNCATED && managesExecution(txn))
+            if (txn.status.compareTo(COMMITTED) >= 0 && txn.status != INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED)
                 committedByExecuteAt[countCommitted++] = txn;
         }
         Arrays.sort(committedByExecuteAt, TxnInfo::compareExecuteAt);
@@ -879,11 +889,14 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                                    CommandFunction<P1, T, T> map, P1 p1, T initialValue)
     {
         int start, end, loadingIndex = 0;
+        // if this is null the TxnId is known in byId
+        // otherwise, it must be non-null and represents the transactions (if any) that have requested it be loaded due to being pruned
         TxnId[] loadingFor = null;
         {
             int insertPos = Arrays.binarySearch(byId, testTxnId);
             if (insertPos < 0)
             {
+                loadingFor = NO_TXNIDS;
                 insertPos = -1 - insertPos;
                 switch (testDep)
                 {
@@ -925,7 +938,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                     if (status == ACCEPTED || status == COMMITTED) break;
                     else continue;
                 case IS_STABLE:
-                    if (status.compareTo(STABLE) >= 0 && status.compareTo(INVALID_OR_TRUNCATED) < 0) break;
+                    if (status.compareTo(STABLE) >= 0 && status.compareTo(INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED) < 0) break;
                     else continue;
                 case ANY_STATUS:
                     if (status == TRANSITIVELY_KNOWN)
@@ -1004,7 +1017,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                     if (!ELIDE_TRANSITIVE_DEPENDENCIES || maxCommittedBefore == null || txn.executeAt.compareTo(maxCommittedBefore) >= 0 || !Write.witnesses(txn))
                         break;
                 case TRANSITIVELY_KNOWN:
-                case INVALID_OR_TRUNCATED:
+                case INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED:
                     continue;
             }
 
@@ -1017,6 +1030,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
     @VisibleForTesting
     public CommandsForKeyUpdate update(Command next)
     {
+        Invariants.checkState(manages(next.txnId()));
         InternalStatus newStatus = InternalStatus.from(next.saveStatus());
         if (newStatus == null)
             return this;
@@ -1029,20 +1043,21 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         InternalStatus newStatus = InternalStatus.from(next.saveStatus());
         if (newStatus == null)
             newStatus = TRANSITIVELY_KNOWN;
-
+        if (!manages(next.txnId()))
+            newStatus = newStatus.compareTo(COMMITTED) < 0 ? TRANSITIVELY_KNOWN : INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED;
         return update(newStatus, next, true);
     }
 
     private CommandsForKeyUpdate update(InternalStatus newStatus, Command next, boolean wasPruned)
     {
         TxnId txnId = next.txnId();
-        Invariants.checkArgument(manages(txnId));
+        Invariants.checkArgument(wasPruned || manages(txnId));
         int pos = Arrays.binarySearch(byId, txnId);
         CommandsForKeyUpdate result;
         if (pos < 0)
         {
             pos = -1 - pos;
-            if (newStatus.hasExecuteAtOrDeps && !wasPruned) result = insert(pos, txnId, newStatus, next);
+            if (newStatus.hasExecuteAtOrDeps && !wasPruned && txnId.domain().isKey()) result = insert(pos, txnId, newStatus, next);
             else result = insert(pos, txnId, TxnInfo.create(txnId, newStatus, next));
         }
         else
@@ -1144,30 +1159,43 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 
         int newMinUndecidedById = minUndecidedById;
         {
-            TxnId updatedIfUndecided = newInfo.status.compareTo(COMMITTED) < 0 ? newInfo : null;
-            TxnId minNewUndecided = additionCount == 0 ? updatedIfUndecided : TxnId.nonNullOrMin(updatedIfUndecided, additions[0]);
-            TxnId prevMinUndecided = minUndecided();
-            if (minNewUndecided == null)
+            TxnInfo curMinUndecided = minUndecided();
+            int additionsBeforeOldUndecided = additionCount;
+            if (curMinUndecided != null && additionCount > 0)
             {
-                // ==> additionCount == 0
-                if (insertPos <= minUndecidedById)
-                {
-                    if (insertPos == minUndecidedById)
-                        newMinUndecidedById = nextUndecided(newById, newMinUndecidedById + 1);
-                    else if (updatePos < 0)
-                        ++newMinUndecidedById;
-                }
+                additionsBeforeOldUndecided = Arrays.binarySearch(additions, 0, additionCount, curMinUndecided);
+                if (additionsBeforeOldUndecided < 0)
+                    additionsBeforeOldUndecided = -1 - additionsBeforeOldUndecided;
             }
-            else
+
+            TxnId newMinUndecided = null;
+            for (int i = 0 ; i < additionsBeforeOldUndecided ; ++i)
             {
-                // TODO (desired): can probably be more efficient in some cases by narrowing search range
-                if (prevMinUndecided == null || prevMinUndecided.compareTo(minNewUndecided) >= 0)
-                    newMinUndecidedById = additionCount == 0 ? insertPos : Arrays.binarySearch(newById, 0, newById.length, minNewUndecided);
-                else if (insertPos < minUndecidedById && updatePos < 0)
-                    ++newMinUndecidedById;
-                else if (insertPos == minUndecidedById && (updatePos < 0 || updatedIfUndecided == null))
-                    newMinUndecidedById = nextUndecided(newById, newMinUndecidedById + 1);
+                TxnId addition = additions[i];
+                if (!managesExecution(addition))
+                    continue;
+
+                newMinUndecided = addition;
+                break;
             }
+
+            if ((newMinUndecided == null || newMinUndecided.compareTo(newInfo) > 0) && newInfo.status.compareTo(COMMITTED) < 0 && managesExecution(newInfo))
+                newMinUndecided = newInfo;
+
+            if (newMinUndecided != null && curMinUndecided != null && curMinUndecided.compareTo(newMinUndecided) < 0)
+                newMinUndecided = null;
+
+            if (updatePos < 0 && newMinUndecided == null && curMinUndecided != null && newInfo.compareTo(curMinUndecided) < 0)
+                ++additionsBeforeOldUndecided;
+
+            if (newMinUndecided == null && curMinUndecided == curInfo)
+                newMinUndecidedById = nextUndecided(newById, insertPos + 1);
+            else if (newMinUndecided == null && newMinUndecidedById >= 0)
+                newMinUndecidedById += additionsBeforeOldUndecided;
+            else if (newMinUndecided == newInfo)
+                newMinUndecidedById = insertPos + -1 - Arrays.binarySearch(additions, 0, additionCount, newInfo);
+            else if (newMinUndecided != null)
+                newMinUndecidedById = Arrays.binarySearch(newById, 0, newById.length, newMinUndecided);
         }
 
         cachedTxnIds().forceDiscard(additions, additionCount + prunedIds.length);
@@ -1197,14 +1225,14 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             if (pos == infos.length)
                 return -1;
 
-            if (infos[pos].status.compareTo(COMMITTED) < 0)
+            if (infos[pos].status.compareTo(COMMITTED) < 0 && managesExecution(infos[pos]))
                 return pos;
 
             ++pos;
         }
     }
 
-    private void insertOrUpdateWithAdditions(int sourceInsertPos, int sourceUpdatePos, TxnId updatePlainTxnId, TxnInfo info, TxnId[] additions, int additionCount, TxnInfo[] newInfos, TxnId[] withAsDep)
+    private void insertOrUpdateWithAdditions(int sourceInsertPos, int sourceUpdatePos, TxnId updatePlainTxnId, TxnInfo info, TxnId[] additions, int additionCount, TxnInfo[] newInfos, TxnId[] witnessedBy)
     {
         int additionInsertPos = Arrays.binarySearch(additions, 0, additionCount, updatePlainTxnId);
         additionInsertPos = Invariants.checkArgument(-1 - additionInsertPos, additionInsertPos < 0);
@@ -1253,7 +1281,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                         if (to > 0)
                         {
                             TxnId skipInsertMissing = null;
-                            if (withAsDep != null && Arrays.binarySearch(withAsDep, updatePlainTxnId) >= 0)
+                            if (witnessedBy != null && Arrays.binarySearch(witnessedBy, updatePlainTxnId) >= 0)
                                 skipInsertMissing = updatePlainTxnId;
 
                             newMissing = mergeAndFilterMissing(txn, prevMissing, missingSource, to, skipInsertMissing);
@@ -1306,6 +1334,75 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         }
     }
 
+    private void insertAdditionsOnly(TxnInfo[] newInfos, TxnId[] additions, int additionCount)
+    {
+        // the most recently constructed pure insert missing array, so that it may be reused if possible
+        int minByExecuteAtSearchIndex = 0;
+        int i = 0, j = 0, missingCount = 0, count = 0;
+        TxnInfo[] newCommittedByExecuteAt = null;
+        while (i < byId.length)
+        {
+            int c = j == additionCount ? -1 : byId[i].compareTo(additions[j]);
+            if (c < 0)
+            {
+                TxnInfo txn = byId[i];
+                if (txn.status.hasDeps())
+                {
+                    Timestamp depsKnownBefore = txn.depsKnownBefore();
+
+                    int to = to(txn, depsKnownBefore, additions, missingCount, additionCount);
+                    if (to > 0)
+                    {
+                        TxnId[] prevMissing = txn.missing();
+                        TxnId[] newMissing = mergeAndFilterMissing(txn, prevMissing, additions, to, null);
+                        if (newMissing != prevMissing)
+                        {
+                            TxnInfo newTxn = txn.update(newMissing);
+                            if (txn.status.isCommitted())
+                            {
+                                if (newCommittedByExecuteAt == null)
+                                    newCommittedByExecuteAt = committedByExecuteAt.clone();
+
+                                int ci;
+                                if (txn.executeAt == txn)
+                                {
+                                    ci = SortedArrays.exponentialSearch(committedByExecuteAt, minByExecuteAtSearchIndex, committedByExecuteAt.length, txn, TxnInfo::compareExecuteAt, FAST);
+                                    minByExecuteAtSearchIndex = 1 + ci;
+                                }
+                                else
+                                {
+                                    ci = Arrays.binarySearch(committedByExecuteAt, txn, TxnInfo::compareExecuteAt);
+                                }
+                                Invariants.checkState(committedByExecuteAt[ci] == txn);
+                                committedByExecuteAt[ci] = newTxn;
+                            }
+                            txn = newTxn;
+                        }
+                    }
+                }
+                newInfos[count] = txn;
+                i++;
+            }
+            else if (c > 0)
+            {
+                TxnId txnId = additions[j++];
+                newInfos[count] = TxnInfo.create(txnId, TRANSITIVELY_KNOWN, txnId, Ballot.ZERO);
+                ++missingCount;
+            }
+            else
+            {
+                throw illegalState(byId[i] + " should be an insertion, but found match when merging with origin");
+            }
+            count++;
+        }
+
+        while (j < additionCount)
+        {
+            TxnId txnId = additions[j++];
+            newInfos[count++] = TxnInfo.create(txnId, TRANSITIVELY_KNOWN, txnId, Ballot.ZERO);
+        }
+    }
+
     private static void validateMissing(TxnInfo[] byId, TxnId[] additions, int additionCount, TxnInfo curInfo, TxnInfo newInfo, TxnId[] shouldNotHaveMissing)
     {
         for (TxnInfo txn : byId)
@@ -1341,19 +1438,24 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             System.arraycopy(byId, 0, newInfos, 0, pos);
             newInfos[pos] = newInfo;
             System.arraycopy(byId, pos, newInfos, pos + 1, byId.length - pos);
-            if (newInfo.status.compareTo(COMMITTED) >= 0)
+            if (managesExecution(newInfo))
             {
-                if (newMinUndecidedById < 0 || pos <= newMinUndecidedById)
+                if (newInfo.status.compareTo(COMMITTED) >= 0)
                 {
-                    if (pos < newMinUndecidedById) ++newMinUndecidedById;
-                    else newMinUndecidedById = nextUndecided(newInfos, pos + 1);
+                    if (newMinUndecidedById < 0 || pos <= newMinUndecidedById)
+                    {
+                        if (pos < newMinUndecidedById) ++newMinUndecidedById;
+                        else newMinUndecidedById = nextUndecided(newInfos, pos + 1);
+                    }
+                }
+                else
+                {
+                    if (newMinUndecidedById < 0 || pos < newMinUndecidedById)
+                        newMinUndecidedById = pos;
                 }
             }
-            else
-            {
-                if (newMinUndecidedById < 0 || pos < newMinUndecidedById)
-                    newMinUndecidedById = pos;
-            }
+            else if (pos <= newMinUndecidedById)
+                ++newMinUndecidedById;
         }
         else
         {
@@ -1404,7 +1506,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 TxnId[] newMissing = removeOneMissing(missing, removeTxnId);
                 if (missing == newMissing) continue;
 
-                newMinSearchIndex = updateInfoArrays(i, txn, txn.update(newMissing), minSearchIndex, byId, committedByExecuteAt);
+                newMinSearchIndex = updateInfoArraysByExecuteAt(i, txn, txn.update(newMissing), minSearchIndex, byId, committedByExecuteAt);
             }
 
             minSearchIndex = removeFromMissingArraysById(byId, minSearchIndex, newMinSearchIndex, removeTxnId);
@@ -1481,7 +1583,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 if (missing == NO_TXNIDS) missing = oneMissing = ensureOneMissing(insertTxnId, oneMissing);
                 else missing = SortedArrays.insert(missing, insertTxnId, TxnId[]::new);
 
-                newMinSearchIndex = updateInfoArrays(i, txn, txn.update(missing), minByIdSearchIndex, byId, committedByExecuteAt);
+                newMinSearchIndex = updateInfoArraysByExecuteAt(i, txn, txn.update(missing), minByIdSearchIndex, byId, committedByExecuteAt);
             }
 
             for (; minByIdSearchIndex < newMinSearchIndex ; ++minByIdSearchIndex)
@@ -1529,7 +1631,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
      * Return the updated minSearchIndex used for querying {@code byId} - this will be updated only if txnId==executeAt
      */
     @Inline
-    private static int updateInfoArrays(int i, TxnInfo prevTxn, TxnInfo newTxn, int minSearchIndex, TxnInfo[] byId, TxnInfo[] committedByExecuteAt)
+    private static int updateInfoArraysByExecuteAt(int i, TxnInfo prevTxn, TxnInfo newTxn, int minSearchIndex, TxnInfo[] byId, TxnInfo[] committedByExecuteAt)
     {
         int j;
         if (prevTxn.executeAt == prevTxn)
@@ -1671,14 +1773,14 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             ballot = command.acceptedOrCommitted();
 
         Timestamp depsKnownBefore = newStatus.depsKnownBefore(txnId, executeAt);
-        return computeInfoAndAdditions(insertPos, updatePos, txnId, newStatus, ballot, executeAt, depsKnownBefore, command.partialDeps().keyDeps.txnIds(key));
+        return computeInfoAndAdditions(insertPos, updatePos, txnId, newStatus, ballot, executeAt, depsKnownBefore, command.partialDeps().txnIds(key));
     }
 
     /**
      * We return an Object here to avoid wasting allocations; most of the time we expect a new TxnInfo to be returned,
      * but if we have transitive dependencies to insert we return an InfoWithAdditions
      */
-    private Object computeInfoAndAdditions(int insertPos, int updatePos, TxnId plainTxnId, InternalStatus newStatus, Ballot ballot, Timestamp executeAt, Timestamp depsKnownBefore, SortedList<TxnId> deps)
+    private Object computeInfoAndAdditions(int insertPos, int updatePos, TxnId plainTxnId, InternalStatus newStatus, Ballot ballot, Timestamp executeAt, Timestamp depsKnownBefore, SortedCursor<TxnId> deps)
     {
         int depsKnownBeforePos;
         if (depsKnownBefore == plainTxnId)
@@ -1695,18 +1797,17 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         TxnId[] additions = NO_TXNIDS, missing = NO_TXNIDS;
         int additionCount = 0, missingCount = 0;
 
-        int depsIndex = deps.find(redundantBefore.shardRedundantBefore());
-        if (depsIndex < 0) depsIndex = -1 - depsIndex;
+        deps.find(redundantBefore.shardRedundantBefore());
         int txnIdsIndex = 0;
-        while (txnIdsIndex < depsKnownBeforePos && depsIndex < deps.size())
+        while (txnIdsIndex < depsKnownBeforePos && deps.hasCur())
         {
             TxnInfo t = byId[txnIdsIndex];
-            TxnId d = deps.get(depsIndex);
+            TxnId d = deps.cur();
             int c = t.compareTo(d);
             if (c == 0)
             {
                 ++txnIdsIndex;
-                ++depsIndex;
+                deps.advance();
             }
             else if (c < 0)
             {
@@ -1722,11 +1823,21 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             }
             else
             {
-                if (additionCount >= additions.length)
-                    additions = cachedTxnIds().resize(additions, additionCount, Math.max(8, additionCount * 2));
+                if (plainTxnId.kind().witnesses(d))
+                {
+                    if (additionCount >= additions.length)
+                        additions = cachedTxnIds().resize(additions, additionCount, Math.max(8, additionCount * 2));
 
-                additions[additionCount++] = d;
-                depsIndex++;
+                    additions[additionCount++] = d;
+                }
+                else
+                {
+                    // we can take dependencies on ExclusiveSyncPoints to represent a GC point in the log
+                    // if we don't ordinarily witness a transaction it is meaningless to include it as a dependency
+                    // as we will not logically be able to work with it (the missing collection will not correctly represent it anyway)
+                    Invariants.checkState(d.kind() == ExclusiveSyncPoint);
+                }
+                deps.advance();
             }
         }
 
@@ -1745,11 +1856,12 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             txnIdsIndex++;
         }
 
-        while (depsIndex < deps.size())
+        while (deps.hasCur())
         {
             if (additionCount >= additions.length)
                 additions = cachedTxnIds().resize(additions, additionCount, Math.max(8, additionCount * 2));
-            additions[additionCount++] = deps.get(depsIndex++);
+            additions[additionCount++] = deps.cur();
+            deps.advance();
         }
 
         TxnInfo info = TxnInfo.create(plainTxnId, newStatus, executeAt, cachedTxnIds().completeAndDiscard(missing, missingCount), ballot);
@@ -1840,10 +1952,10 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 removeFromMissingArrays(newById, newCommittedByExecuteAt, plainTxnId);
             }
         }
-        else if (curInfo != null && newInfo.status == INVALID_OR_TRUNCATED)
+        else if (curInfo != null && newInfo.status == INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED)
         {
             if (curInfo.status.compareTo(COMMITTED) < 0) removeFromMissingArrays(newById, newCommittedByExecuteAt, plainTxnId);
-            else if (curInfo.status != INVALID_OR_TRUNCATED)
+            else if (curInfo.status != INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED)
             {
                 // we can transition from COMMITTED, STABLE or APPLIED to INVALID_OR_TRUNCATED if the local command store ERASES a command
                 // in this case, we not only need to update committedByExecuteAt, we also need to update any unmanaged transactions that
@@ -1861,7 +1973,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 }
             }
         }
-        else if (curInfo == null && maybeInsertMissing && newInfo.status != INVALID_OR_TRUNCATED)
+        else if (curInfo == null && maybeInsertMissing && newInfo.status != INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED)
         {
             // TODO (desired): for consistency, move this to insertOrUpdate (without additions), while maintaining the efficiency
             addToMissingArrays(newById, newCommittedByExecuteAt, newInfo, plainTxnId, loadingAsPrunedFor);
@@ -1918,7 +2030,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             }
         }
 
-        if (newInfo.status == APPLIED)
+        if (newInfo.status.compareTo(APPLIED) >= 0)
         {
             TxnInfo maxContiguousApplied = maxContiguousManagedApplied();
             if (maxContiguousApplied != null && maxContiguousApplied.compareExecuteAt(newInfo) < 0)
@@ -1936,7 +2048,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 }
             }
         }
-        else if (newInfo.status == INVALID_OR_TRUNCATED && curInfo != null && curInfo.status.isCommitted())
+        if (newInfo.status == INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED && curInfo != null && curInfo.status.isCommitted())
         {
             // this is a rare edge case, but we might have unmanaged transactions waiting on this command we must re-schedule or notify
             int start = findFirstApply(unmanageds);
@@ -2055,7 +2167,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 {
                     TxnInfo txn = cfk.byId[j];
                     Invariants.checkState(txn.status.compareTo(COMMITTED) >= 0);
-                    if (txn.status != INVALID_OR_TRUNCATED && (waitingTxnId.kind().awaitsOnlyDeps() || txn.executeAt.compareTo(waitingExecuteAt) < 0))
+                    if (txn.status != INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED && (waitingTxnId.kind().awaitsOnlyDeps() || txn.executeAt.compareTo(waitingExecuteAt) < 0))
                     {
                         readyToExecute &= txn.status == APPLIED;
                         executesAt = Timestamp.nonNullOrMax(executesAt, txn.executeAt);
@@ -2140,7 +2252,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 {
                     TxnInfo txn = byId[j];
                     if (txn.status.compareTo(COMMITTED) < 0) readyToExecute = waitingToApply = false;
-                    else if (txn.status != INVALID_OR_TRUNCATED && (waitingTxnId.kind().awaitsOnlyDeps() || txn.executeAt.compareTo(waitingExecuteAt) < 0))
+                    else if (txn.status != INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED && (waitingTxnId.kind().awaitsOnlyDeps() || txn.executeAt.compareTo(waitingExecuteAt) < 0))
                     {
                         readyToExecute &= txn.status == APPLIED;
                         executesAt = Timestamp.nonNullOrMax(executesAt, txn.executeAt);
@@ -2165,6 +2277,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 int newMinUndecidedById = minUndecidedById;
                 Object[] newLoadingPruned = loadingPruned;
                 TxnId[] loadPruned = NO_TXNIDS;
+                int clearMissingCount = missingCount;
                 if (missingCount > 0)
                 {
                     int prunedIndex = Arrays.binarySearch(missing, 0, missingCount, prunedBefore);
@@ -2177,25 +2290,15 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 
                     if (prunedIndex != missingCount)
                     {
-                        newInfos = new TxnInfo[(missingCount - prunedIndex) + byId.length];
-                        i = prunedIndex;
-                        j = 0;
-                        int count = 0;
-                        while (i < missingCount && j < byId.length)
-                        {
-                            int c = missing[i].compareTo(byId[j]);
-                            if (c < 0) newInfos[count++] = TxnInfo.create(missing[i++], TRANSITIVELY_KNOWN);
-                            else newInfos[count++] = byId[j++];
-                        }
-                        while (i < missingCount)
-                            newInfos[count++] = TxnInfo.create(missing[i++], TRANSITIVELY_KNOWN);
-                        while (j < byId.length)
-                            newInfos[count++] = byId[j++];
-
-                        newMinUndecidedById = Arrays.binarySearch(newInfos, TxnId.nonNullOrMin(missing[prunedIndex], minUndecided()));
+                        missingCount -= prunedIndex;
+                        System.arraycopy(missing, prunedIndex, missing, 0, missingCount);
+                        newInfos = new TxnInfo[byId.length + missingCount];
+                        insertAdditionsOnly(newInfos, missing, missingCount);
+                        // we can safely use missing[prunedIndex] here because we only fill missing with transactions for which we manage execution
+                        newMinUndecidedById = Arrays.binarySearch(newInfos, TxnId.nonNullOrMin(missing[0], minUndecided()));
                     }
                 }
-                cachedTxnIds().discard(missing, missingCount);
+                cachedTxnIds().discard(missing, clearMissingCount);
 
                 Unmanaged newPendingRecord;
                 if (waitingToApply)
@@ -2263,7 +2366,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         TxnInfo prevInfo = prevCfk.get(updatedTxnId);
         InternalStatus prevStatus = prevInfo == null ? TRANSITIVELY_KNOWN : prevInfo.status;
 
-        int byExecuteAtIndex = newStatus == INVALID_OR_TRUNCATED ? -1 : checkNonNegative(Arrays.binarySearch(committedByExecuteAt, newInfo, TxnInfo::compareExecuteAt));
+        int byExecuteAtIndex = newStatus == INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED ? -1 : checkNonNegative(Arrays.binarySearch(committedByExecuteAt, newInfo, TxnInfo::compareExecuteAt));
 
         Kinds mayExecuteKinds;
         int mayExecuteToIndex, mayNotExecuteBeforeIndex = 0;
@@ -2280,7 +2383,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 case TRANSITIVELY_KNOWN:
                     throw illegalState("Invalid status: command has been committed but we have InternalStatus " + newInfo.status);
 
-                case INVALID_OR_TRUNCATED:
+                case INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED:
                 case APPLIED:
                     mayExecuteToIndex = committedByExecuteAt.length;
                     break;
@@ -2300,7 +2403,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             mayExecuteKinds = updatedTxnId.kind().witnessedBy();
             mayExecuteToIndex = committedByExecuteAt.length;
         }
-        else if (newStatus == INVALID_OR_TRUNCATED && prevStatus != INVALID_OR_TRUNCATED)
+        else if (newStatus == INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED && prevStatus != INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED)
         {
             // rare case of us erasing a command that has been committed, so simply try to execute the next executable thing
             mayExecuteKinds = AnyGloballyVisible;
@@ -2322,7 +2425,6 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 
     private void notifyManaged(SafeCommandStore safeStore, Kinds kinds, int mayNotExecuteBeforeIndex, int mayExecuteToIndex, int mayExecuteAny, NotifySink notifySink)
     {
-        // TODO (now): handle loadingPruned
         Participants<?> asParticipants = null;
         int undecidedIndex = minUndecidedById < 0 ? byId.length : minUndecidedById;
         long unappliedCounters = 0L;
@@ -2331,7 +2433,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         for (int i = maxAppliedWriteByExecuteAt + 1; i < mayExecuteToIndex ; ++i)
         {
             TxnInfo txn = committedByExecuteAt[i];
-            if (txn.status == APPLIED || !managesKeyExecution(txn))
+            if (txn.status == APPLIED || !managesExecution(txn))
                 continue;
 
             Kind kind = txn.kind();
@@ -2357,7 +2459,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                             while (undecidedIndex < nextUndecidedIndex)
                             {
                                 TxnInfo backfillTxn = byId[undecidedIndex++];
-                                if (backfillTxn.status.compareTo(COMMITTED) >= 0) continue;
+                                if (backfillTxn.status.compareTo(COMMITTED) >= 0 || !managesExecution(backfillTxn)) continue;
                                 unappliedCounters += unappliedCountersDelta(backfillTxn.kind());
                             }
                         }
@@ -2371,11 +2473,20 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                         // this command's dependency on this key for execution.
                         TxnId[] missing = txn.missing();
                         int missingCount = missing.length;
-                        if (missingCount > 0 && minUndecided != null)
+                        if (missingCount > 0)
                         {
-                            int missingFrom = SortedArrays.binarySearch(missing, 0, missing.length, minUndecided, TxnId::compareTo, FAST);
-                            if (missingFrom < 0) missingFrom = -1 - missingFrom;
-                            missingCount -= missingFrom;
+                            int missingFrom = 0;
+                            if (minUndecided != null)
+                            {
+                                missingFrom = SortedArrays.binarySearch(missing, 0, missing.length, minUndecided, TxnId::compareTo, FAST);
+                                if (missingFrom < 0) missingFrom = -1 - missingFrom;
+                                missingCount -= missingFrom;
+                            }
+                            for (int j = missingFrom ; j < missing.length ; ++j)
+                            {
+                                if (!managesExecution(missing[j]))
+                                    --missingCount;
+                            }
                         }
                         if (expectMissingCount == missingCount)
                         {
@@ -2498,14 +2609,23 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         return pruneBefore(newPrunedBefore, pos);
     }
 
+    /**
+     * We can prune anything transitively applied where some later stable command replicates each of its missing array entries.
+     * These later commands can durably stand in for any recovery or dependency calculations.
+     */
     private CommandsForKey pruneBefore(TxnInfo newPrunedBefore, int pos)
     {
         Invariants.checkArgument(newPrunedBefore.compareTo(prunedBefore) >= 0, "Expect new prunedBefore to be ahead of existing one");
 
         int minUndecidedById = -1;
         int retainCount = 0, removedCommittedCount = 0;
+        Timestamp[] removedExecuteAts = NO_TXNIDS;
+        int removedExecuteAtCount = 0;
         TxnInfo[] newInfos;
         {
+            RecursiveObjectBuffers<TxnId> missingBuffers = new RecursiveObjectBuffers<>(cachedTxnIds());
+            TxnId[] mergedMissing = newPrunedBefore.missing();
+            int mergedMissingCount = mergedMissing.length;
             for (int i = 0 ; i < pos ; ++i)
             {
                 TxnInfo txn = byId[i];
@@ -2521,16 +2641,35 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                     case TRANSITIVELY_KNOWN:
                     case PREACCEPTED_OR_ACCEPTED_INVALIDATE:
                     case ACCEPTED:
-                        if (minUndecidedById < 0)
+                        if (minUndecidedById < 0 && managesExecution(txn))
                             minUndecidedById = retainCount;
                         ++retainCount;
                         break;
 
                     case APPLIED:
-                        if (txn.executeAt.compareTo(newPrunedBefore.executeAt) < 0) ++removedCommittedCount;
-                        else ++retainCount;
+                        if (txn.executeAt.compareTo(newPrunedBefore.executeAt) < 0)
+                        {
+                            TxnId[] missing = txn.missing();
+                            if (missing == NO_TXNIDS || SortedArrays.isSubset(missing, 0, missing.length, mergedMissing, 0, mergedMissingCount))
+                            {
+                                if (missing != NO_TXNIDS)
+                                {
+                                    if (removedExecuteAtCount == removedExecuteAts.length)
+                                        removedExecuteAts = cachedTimestamps().resize(removedExecuteAts, removedExecuteAtCount, Math.max(8, removedExecuteAtCount + (removedExecuteAtCount >> 1)));
+                                    removedExecuteAts[removedExecuteAtCount++] = txn.executeAt;
+                                }
+                                ++removedCommittedCount;
+                                continue;
+                            }
+                            if (txn.executeAt == txn)
+                            {
+                                mergedMissing = SortedArrays.linearUnion(missing, missing.length, mergedMissing, mergedMissingCount, missingBuffers);
+                                mergedMissingCount = missingBuffers.sizeOfLast(mergedMissing);
+                            }
+                        }
+                        ++retainCount;
 
-                    case INVALID_OR_TRUNCATED:
+                    case INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED:
                         break;
                 }
             }
@@ -2542,60 +2681,67 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             newInfos = new TxnInfo[byId.length - removedByIdCount];
             if (minUndecidedById < 0 && this.minUndecidedById >= 0) // must occur later, so deduct all removals
                 minUndecidedById = this.minUndecidedById - removedByIdCount;
+            missingBuffers.discardBuffers();
         }
 
-        {   // copy to new byTxnId array, and update missing()
-            int count = 0;
-            for (int i = 0; i < pos ; ++i)
+        {   // copy to new byTxnId array
+            int insertPos = retainCount;
+            int removedExecuteAtPos = removedExecuteAtCount - 1;
+            for (int i = pos - 1; i >= 0 ; --i)
             {
                 TxnInfo txn = byId[i];
-                if (txn.status == INVALID_OR_TRUNCATED || (txn.status == APPLIED && txn.executeAt.compareTo(newPrunedBefore.executeAt) < 0))
+                if (txn.status == INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED)
                     continue;
 
-                newInfos[count++] = txn;
-            }
-            System.arraycopy(byId, pos, newInfos, count, byId.length - pos);
-
-            for (int i = 0; i < newInfos.length ; ++i)
-            {
-                TxnInfo txn = newInfos[i];
-                TxnId[] missing = txn.missing();
-                TxnId[] newMissing = pruneMissing(missing, prunedBefore, newInfos, retainCount);
-                if (missing != newMissing)
-                    txn = txn.update(newMissing);
-
-                newInfos[i] = txn;
-            }
-        }
-
-        int newMaxAppliedWriteByExecuteAt;
-        TxnInfo[] newCommittedByExecuteAt;
-        {
-            newCommittedByExecuteAt = new TxnInfo[committedByExecuteAt.length - removedCommittedCount];
-
-            int count = 0;
-            int minByIdIndex = 0;
-            for (TxnInfo txn : committedByExecuteAt)
-            {
-                if (txn.status == APPLIED && txn.compareTo(newPrunedBefore) < 0 && txn.executeAt.compareTo(newPrunedBefore.executeAt) < 0)
-                    continue;
-
-                TxnId[] missing = txn.missing();
-                if (missing != NO_TXNIDS)
+                if (txn.status == APPLIED && txn.executeAt.compareTo(newPrunedBefore.executeAt) < 0)
                 {
-                    // TODO (desired): can probably make this more efficient esp. for second case
-                    int j = txn.executeAt == txn ? minByIdIndex = SortedArrays.exponentialSearch(newInfos, minByIdIndex, newInfos.length, txn)
-                                                 : Arrays.binarySearch(newInfos, 0, newInfos.length, txn);
-                    txn = newInfos[j];
+                    TxnId[] missing = txn.missing();
+                    if (missing == NO_TXNIDS)
+                        continue;
+
+                    if (removedExecuteAtPos >= 0 && removedExecuteAts[removedExecuteAtPos] == txn.executeAt)
+                    {
+                        --removedExecuteAtPos;
+                        continue;
+                    }
                 }
-                else if (txn.executeAt == txn) ++minByIdIndex;
 
-                newCommittedByExecuteAt[count++] = txn;
+                newInfos[--insertPos] = txn;
             }
-
+            Invariants.checkState(retainCount + byId.length - pos == newInfos.length);
+            System.arraycopy(byId, pos, newInfos, retainCount, byId.length - pos);
         }
-        newMaxAppliedWriteByExecuteAt = maxAppliedWriteByExecuteAt - removedCommittedCount;
 
+        TxnInfo[] newCommittedByExecuteAt;
+        {   // copy to new committedByExecuteAt array
+            Arrays.sort(removedExecuteAts, 0, removedExecuteAtCount);
+            newCommittedByExecuteAt = new TxnInfo[committedByExecuteAt.length - removedCommittedCount];
+            int sourcePos = Arrays.binarySearch(committedByExecuteAt, newPrunedBefore, TxnInfo::compareExecuteAt);
+            int insertPos = sourcePos - removedCommittedCount;
+            int removedExecuteAtPos = removedExecuteAtCount - 1;
+            for (int i = sourcePos - 1; i >= 0 ; --i)
+            {
+                TxnInfo txn = committedByExecuteAt[i];
+                if (txn.status == APPLIED && txn.compareTo(newPrunedBefore) < 0)
+                {
+                    TxnId[] missing = txn.missing();
+                    if (missing == NO_TXNIDS)
+                        continue;
+
+                    if (removedExecuteAtPos >= 0 && removedExecuteAts[removedExecuteAtPos] == txn.executeAt)
+                    {
+                        --removedExecuteAtPos;
+                        continue;
+                    }
+                }
+
+                newCommittedByExecuteAt[--insertPos] = txn;
+            }
+            System.arraycopy(committedByExecuteAt, sourcePos, newCommittedByExecuteAt, sourcePos - removedCommittedCount, committedByExecuteAt.length - sourcePos);
+        }
+
+        cachedTimestamps().forceDiscard(removedExecuteAts, removedExecuteAtCount);
+        int newMaxAppliedWriteByExecuteAt = maxAppliedWriteByExecuteAt - removedCommittedCount;
         return new CommandsForKey(key, redundantBefore, newPrunedBefore, loadingPruned, newInfos, newCommittedByExecuteAt, minUndecidedById, newMaxAppliedWriteByExecuteAt, unmanageds);
     }
 
@@ -2609,38 +2755,6 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         if (j <= 0) return missing;
         if (j == missing.length) return NO_TXNIDS;
         return Arrays.copyOfRange(missing, j, missing.length);
-    }
-
-    private TxnId[] pruneMissing(TxnId[] prune, TxnId removeBefore, TxnInfo[] newInfos, int maxPos)
-    {
-        if (prune == NO_TXNIDS)
-            return NO_TXNIDS;
-
-        int j = Arrays.binarySearch(prune, removeBefore);
-        if (j < 0) j = -1 - j;
-        if (j <= 0) return prune;
-
-        TxnId[] retain = cachedTxnIds().get(j);
-        int retainCount = 0;
-        int minSearchIndex = 0;
-        for (int i = 0 ; i < j ; ++i)
-        {
-            int infoIndex = Arrays.binarySearch(newInfos, minSearchIndex, maxPos, prune[i]);
-            if (infoIndex >= 0) retain[retainCount++] = prune[i];
-            else infoIndex = -1 - infoIndex;
-            minSearchIndex = infoIndex;
-        }
-
-        TxnId[] result;
-        if (retainCount == 0 && j == prune.length) result = NO_TXNIDS;
-        else
-        {
-            result = new TxnId[retainCount + prune.length - j];
-            System.arraycopy(retain, 0, result, 0, retainCount);
-            System.arraycopy(prune, j, result, retainCount, prune.length - j);
-        }
-        cachedTxnIds().discard(retain, retainCount);
-        return result;
     }
 
     public CommandsForKeyUpdate registerHistorical(TxnId txnId)
@@ -2719,7 +2833,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         while (i < committedByExecuteAt.length)
         {
             TxnInfo txn = committedByExecuteAt[i];
-            if (txn.status != APPLIED && managesKeyExecution(txn))
+            if (txn.status != APPLIED && managesExecution(txn))
                 break;
             ++i;
         }

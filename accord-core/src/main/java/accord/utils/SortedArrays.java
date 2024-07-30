@@ -210,8 +210,10 @@ public class SortedArrays
                 {
                     if (leftStart == 0)
                         return buffers.completeWithExisting(left, leftEnd);
-                    result = buffers.get(leftEnd - leftStart);
-                    System.arraycopy(left, leftStart, result, 0, leftEnd - leftStart);
+
+                    int size = leftEnd - leftStart;
+                    result = buffers.getAndCompleteExact(size);
+                    System.arraycopy(left, leftStart, result, 0, size);
                     return result;
                 }
                 // no elements matched or only a subset matched
@@ -249,10 +251,13 @@ public class SortedArrays
                 {
                     if (rightStart == 0)
                         return buffers.completeWithExisting(right, rightEnd);
-                    result = buffers.get(rightEnd - rightStart);
-                    System.arraycopy(right, rightStart, result, 0, rightEnd - rightStart);
+
+                    int size = rightEnd - rightStart;
+                    result = buffers.getAndCompleteExact(size);
+                    System.arraycopy(right, rightStart, result, 0, size);
                     return result;
                 }
+
                 // no elements matched or only a subset matched
                 result = buffers.get((rightEnd - rightStart) + (leftEnd - leftIdx));
                 resultSize = rightIdx - rightStart;
@@ -294,11 +299,12 @@ public class SortedArrays
             while (rightIdx < rightEnd)
                 result[resultSize++] = right[rightIdx++];
 
-            return buffers.complete(result, resultSize);
+            return buffers.completeAndDiscard(result, resultSize);
         }
-        finally
+        catch (Throwable t)
         {
             buffers.discard(result, resultSize);
+            throw t;
         }
     }
 
@@ -1311,6 +1317,37 @@ public class SortedArrays
         }
 
         return initialValue;
+    }
+
+    @Inline
+    public static <T extends Comparable<? super T>> boolean isSubset(T[] test, T[] superset)
+    {
+        return isSubset(Comparable::compareTo, test, 0, test.length, superset, 0, superset.length);
+    }
+
+    @Inline
+    public static <T extends Comparable<? super T>> boolean isSubset(T[] test, int testFrom, int testTo, T[] superset, int supersetFrom, int supersetTo)
+    {
+        return isSubset(Comparable::compareTo, test, testFrom, testTo, superset, supersetFrom, supersetTo);
+    }
+
+    @Inline
+    public static <T> boolean isSubset(AsymmetricComparator<? super T, ? super T> comparator, T[] test, int testFrom, int testTo, T[] superset, int supersetFrom, int supersetTo)
+    {
+        while (true)
+        {
+            long abi = findNextIntersection(test, testFrom, testTo, superset, supersetFrom, supersetTo, comparator);
+            if (abi < 0)
+                return true;
+
+            int nextai = (int)(abi);
+            if (testFrom != nextai)
+                return false;
+
+            supersetFrom = (int)(abi >>> 32);
+            ++testFrom;
+            ++supersetFrom;
+        }
     }
 
     public static <T extends Comparable<T>> void assertSorted(T[] array)

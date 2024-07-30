@@ -78,6 +78,7 @@ import static accord.local.SafeCommandStore.TestStartedAt.STARTED_BEFORE;
 import static accord.local.SaveStatus.Applying;
 import static accord.local.SaveStatus.Erased;
 import static accord.local.SaveStatus.ReadyToExecute;
+import static accord.local.Status.Accepted;
 import static accord.local.Status.Applied;
 import static accord.local.Status.Stable;
 import static accord.local.Status.Truncated;

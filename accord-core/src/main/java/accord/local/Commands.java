@@ -690,6 +690,7 @@ public class Commands
 
                 if (intersects)
                 {
+                    // TODO (now): we should set applying within apply to avoid applying multiple times
                     safeCommand.applying(safeStore);
                     safeStore.notifyListeners(safeCommand);
                     logger.trace("{}: applying", command.txnId());

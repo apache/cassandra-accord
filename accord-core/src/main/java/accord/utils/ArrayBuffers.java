@@ -21,6 +21,7 @@ package accord.utils;
 import accord.api.Key;
 import accord.api.RoutingKey;
 import accord.primitives.Range;
+import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 
 import java.lang.reflect.Array;
@@ -57,6 +58,7 @@ public class ArrayBuffers
     private static final ThreadLocal<ObjectBufferCache<RoutingKey>> ROUTINGKEYS = ThreadLocal.withInitial(() -> new ObjectBufferCache<>(3, 1 << 9, RoutingKey[]::new));
     private static final ThreadLocal<ObjectBufferCache<Range>> KEYRANGES = ThreadLocal.withInitial(() -> new ObjectBufferCache<>(3, 1 << 7, Range[]::new));
     private static final ThreadLocal<ObjectBufferCache<TxnId>> TXN_IDS = ThreadLocal.withInitial(() -> new ObjectBufferCache<>(3, 1 << 12, TxnId[]::new));
+    private static final ThreadLocal<ObjectBufferCache<Timestamp>> TIMESTAMPS = ThreadLocal.withInitial(() -> new ObjectBufferCache<>(3, 1 << 12, Timestamp[]::new));
 
     public static IntBuffers cachedInts()
     {
@@ -81,6 +83,11 @@ public class ArrayBuffers
     public static ObjectBuffers<TxnId> cachedTxnIds()
     {
         return TXN_IDS.get();
+    }
+
+    public static ObjectBuffers<Timestamp> cachedTimestamps()
+    {
+        return TIMESTAMPS.get();
     }
 
     public static <T> ObjectBuffers<T> uncached(IntFunction<T[]> allocator) { return new UncachedObjectBuffers<>(allocator); }
@@ -163,6 +170,14 @@ public class ArrayBuffers
         T[] get(int minSize);
 
         /**
+         * Return an {@code T[]} of size at least {@code size}, where size is the exact
+         * number of items that will be populated by the caller. In most cases this
+         * can allocate an output array, but in some use cases it may still return a larger buffer.
+         * No need to invoke complete on the return value.
+         */
+        T[] getAndCompleteExact(int size);
+
+        /**
          * Return an {@code T[]} of size at least {@code minSize}, possibly from a pool,
          * and copy the contents of {@code copyAndDiscard} into it.
          *
@@ -235,7 +250,7 @@ public class ArrayBuffers
          *
          * Depending on implementation, this is either saved from the last such invocation, or else simply returns the size of the buffer parameter.
          */
-        int lengthOfLast(T[] buffer);
+        int sizeOfLast(T[] buffer);
     }
 
     private static final class UncachedIntBuffers implements IntBuffers
@@ -289,6 +304,12 @@ public class ArrayBuffers
         }
 
         @Override
+        public T[] getAndCompleteExact(int size)
+        {
+            return allocator.apply(size);
+        }
+
+        @Override
         public T[] complete(T[] buffer, int usedSize)
         {
             if (usedSize == buffer.length)
@@ -304,7 +325,7 @@ public class ArrayBuffers
         }
 
         @Override
-        public int lengthOfLast(T[] buffer)
+        public int sizeOfLast(T[] buffer)
         {
             return buffer.length;
         }
@@ -457,7 +478,7 @@ public class ArrayBuffers
         }
 
         @Override
-        public int lengthOfLast(T[] buffer)
+        public int sizeOfLast(T[] buffer)
         {
             return buffer.length;
         }
@@ -478,6 +499,12 @@ public class ArrayBuffers
         public T[] get(int minSize)
         {
             return getInternal(minSize);
+        }
+
+        @Override
+        public T[] getAndCompleteExact(int size)
+        {
+            return allocator.apply(size);
         }
     }
 
@@ -506,6 +533,13 @@ public class ArrayBuffers
                 return result;
             }
             return objs.get(minSize);
+        }
+
+        @Override
+        public T[] getAndCompleteExact(int size)
+        {
+            length = size;
+            return get(size);
         }
 
         @Override
@@ -568,11 +602,110 @@ public class ArrayBuffers
         }
 
         @Override
-        public int lengthOfLast(T[] buffer)
+        public int sizeOfLast(T[] buffer)
         {
             if (length == -1)
                 throw illegalState("Attempted to get last length but no call to complete called");
             return length;
+        }
+    }
+
+    /**
+     * Returns the buffer to the caller, saving the length if necessary
+     */
+    public static class RecursiveObjectBuffers<T> implements ObjectBuffers<T>
+    {
+        final ObjectBuffers<T> wrapped;
+        T[] cur, alt;
+        int lastSize, maxBufferSize;
+
+        public RecursiveObjectBuffers(ObjectBuffers<T> wrapped)
+        {
+            this.wrapped = wrapped;
+        }
+
+        @Override
+        public T[] get(int minSize)
+        {
+            if (alt != null)
+            {
+                if (alt.length >= minSize)
+                    return alt;
+
+                wrapped.forceDiscard(alt, Math.min(maxBufferSize, alt.length));
+            }
+            return alt = wrapped.get(minSize);
+        }
+
+        @Override
+        public T[] getAndCompleteExact(int size)
+        {
+            updateSize(size);
+            T[] buf = get(size);
+            this.alt = cur;
+            this.cur = buf;
+            return buf;
+        }
+
+        @Override
+        public T[] complete(T[] buffer, int usedSize)
+        {
+            updateSize(usedSize);
+            Invariants.checkArgument(buffer == alt);
+            alt = cur;
+            cur = buffer;
+            return buffer;
+        }
+
+        @Override
+        public T[] completeAndDiscard(T[] buffer, int usedSize)
+        {
+            return complete(buffer, usedSize);
+        }
+
+        @Override
+        public T[] completeWithExisting(T[] buffer, int usedSize)
+        {
+            updateSize(usedSize);
+            return buffer;
+        }
+
+        private void updateSize(int size)
+        {
+            lastSize = size;
+            maxBufferSize = Math.max(size, maxBufferSize);
+        }
+
+        @Override
+        public boolean discard(T[] buffer, int usedSize)
+        {
+            return false;
+        }
+
+        @Override
+        public boolean forceDiscard(T[] buffer, int usedSize)
+        {
+            return false;
+        }
+
+        @Override
+        public int sizeOfLast(T[] buffer)
+        {
+            return lastSize;
+        }
+
+        public void discardBuffers()
+        {
+            if (cur != null)
+            {
+                wrapped.forceDiscard(cur, Math.min(maxBufferSize, cur.length));
+                cur = null;
+            }
+            if (alt != null)
+            {
+                wrapped.forceDiscard(alt, Math.min(maxBufferSize, alt.length));
+                alt = null;
+            }
         }
     }
 

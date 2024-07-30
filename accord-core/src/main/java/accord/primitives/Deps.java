@@ -18,8 +18,12 @@
 
 package accord.primitives;
 
+import accord.api.Key;
 import accord.local.CommandsForKey;
 import accord.utils.Invariants;
+import accord.utils.MergeFewDisjointSortedListsCursor;
+import accord.utils.SortedCursor;
+import accord.utils.SortedList;
 
 import java.util.AbstractList;
 import java.util.List;
@@ -158,6 +162,23 @@ public class Deps
             return keyDeps.intersects(txnId, ranges);
 
         return directKeyDeps.intersects(txnId, ranges);
+    }
+
+    public SortedCursor<TxnId> txnIds(Key key)
+    {
+        SortedList<TxnId> keyDeps = this.keyDeps.txnIds(key);
+        SortedList<TxnId> rangeDeps = this.rangeDeps.computeTxnIds(key);
+        SortedList<TxnId> directKeyDeps = this.directKeyDeps.txnIds(key);
+        int count = Math.min(1, keyDeps.size()) + Math.min(1, directKeyDeps.size()) + Math.min(1, rangeDeps.size());
+        MergeFewDisjointSortedListsCursor<TxnId> cursor = new MergeFewDisjointSortedListsCursor<>(count);
+        if (keyDeps.size() > 0)
+            cursor.add(keyDeps);
+        if (rangeDeps.size() > 0)
+            cursor.add(rangeDeps);
+        if (directKeyDeps.size() > 0)
+            cursor.add(directKeyDeps);
+        cursor.init();
+        return cursor;
     }
 
     public Deps with(Deps that)

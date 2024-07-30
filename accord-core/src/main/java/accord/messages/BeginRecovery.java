@@ -130,12 +130,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         }
         else
         {
-            // TODO (expected): if we can combine these with the earlierAcceptedNoWitness we can avoid persisting deps on Accept
-            //    the problem is we need some way to ensure liveness. If we were to store witnessedAt as a separate register
-            //    we could return these and filter them by whatever the max witnessedAt is that we discover, OR we could
-            //    filter on replicas to exclude any that are started after anything that is committed, since they will have to adopt
-            //    them as a dependency (but we have to make sure we consider dependency rules, so if there's no write and only reads)
-            //    we might still have new transactions block our execution.
+            // TODO (expected): modify the mapReduce API to perform this check in a single pass
             Ranges ranges = safeStore.ranges().allAt(txnId);
             rejectsFastPath = hasAcceptedOrCommittedStartedAfterWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys());
             if (!rejectsFastPath)
@@ -363,7 +358,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
          * TODO (required): consider carefully how _adding_ ranges to a CommandStore affects this
          */
         return safeStore.mapReduceFull(keys, ranges, startedAfter, startedAfter.kind().witnessedBy(), STARTED_AFTER, WITHOUT, IS_PROPOSED,
-                                             (p1, keyOrRange, txnId, executeAt, prev) -> true, null, false);
+                                       (p1, keyOrRange, txnId, executeAt, prev) -> true, null, false);
     }
 
     private static boolean hasStableExecutesAfterWithoutWitnessing(SafeCommandStore safeStore, TxnId executesAfter, Ranges ranges, Seekables<?, ?> keys)
