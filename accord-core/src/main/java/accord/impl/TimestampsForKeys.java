@@ -43,7 +43,7 @@ public class TimestampsForKeys
         {
             if (!commandStore.safeToReadAt(executeAt).contains(tfk.key().toUnseekable()))
                 return current;
-            throw new IllegalArgumentException(String.format("%s is less than the most recent write timestamp %s", executeAt, lastWrite));
+            throw new IllegalArgumentException(String.format("%s is less than the most recent write timestamp %s for %s", executeAt, lastWrite, tfk.key()));
         }
 
         Timestamp lastExecuted = current.lastExecutedTimestamp();

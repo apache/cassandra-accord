@@ -77,6 +77,10 @@ public class Writes
             accumulate.add(write.apply(key, safeStore, executeAt, safeStore.dataStore(), txn));
             return accumulate;
         }, new ArrayList<>());
+
+        if (futures.isEmpty())
+            return SUCCESS;
+
         return AsyncChains.reduce(futures, (l, r) -> null);
     }
 

@@ -31,7 +31,6 @@ import java.util.function.Function;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
-
 import javax.annotation.Nullable;
 
 import org.junit.jupiter.api.Assertions;
@@ -384,7 +383,14 @@ public class RemoteListenersTest
 
         protected TestCommandStore(int id)
         {
-            super(id, null, null, null, ignore -> new ProgressLog.NoOpProgressLog(), ignore -> new DefaultLocalListeners(new DefaultRemoteListeners((a, b, c, d, e)->{}), DefaultLocalListeners.DefaultNotifySink.INSTANCE), new EpochUpdateHolder());
+            super(id,
+                  null,
+                  null,
+                  null,
+                  ignore -> new ProgressLog.NoOpProgressLog(),
+                  ignore -> new DefaultLocalListeners(new DefaultRemoteListeners((a, b, c, d, e)->{}),
+                                                      DefaultLocalListeners.DefaultNotifySink.INSTANCE),
+                  new EpochUpdateHolder());
             this.storeId = id;
         }
 
@@ -392,6 +398,8 @@ public class RemoteListenersTest
         @Override public AsyncChain<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer) { return null; }
         @Override public <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> apply) { return null; }
         @Override public void shutdown() {}
+        @Override protected void registerHistoricalTransactions(Deps deps, SafeCommandStore safeStore) {}
+
         @Override public <T> AsyncChain<T> submit(Callable<T> task) { return null; }
     }
 
@@ -418,6 +426,5 @@ public class RemoteListenersTest
         @Override public ProgressLog progressLog() { return null; }
         @Override public NodeTimeService time() { return null; }
         @Override public CommandStores.RangesForEpoch ranges() { return null; }
-        @Override public void registerHistoricalTransactions(Deps deps) { }
     }
 }

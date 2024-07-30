@@ -58,7 +58,7 @@ dependencies {
 task burn(type: JavaExec) {
     classpath sourceSets.main.runtimeClasspath, sourceSets.test.runtimeClasspath
     mainClass = 'accord.burn.BurnTest'
-    jvmArgs '-Dlogback.configurationFile=burn-logback.xml'
+    jvmArgs '-Dlogback.configurationFile=burn-logback.xml -Xmx4g'
     args = ['-c', '1']
 }
 
@@ -122,7 +122,7 @@ task burnloop {
         javaexec {
             classpath sourceSets.main.runtimeClasspath, sourceSets.test.runtimeClasspath
             mainClass = 'accord.burn.BurnTest'
-            jvmArgs '-Dlogback.configurationFile=burn-logback.xml'
+            jvmArgs '-Dlogback.configurationFile=burn-logback.xml -Xmx4g'
             args = ['-c', project.hasProperty('burnTimes') ? project.getProperty('burnTimes') : '1000000']
         }
     }
@@ -142,4 +142,8 @@ task allTestJar(type: Jar) {
     from { configurations.testRuntimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
     from { sourceSets.test.output }
     with jar
+}
+
+test {
+    maxHeapSize = '4g'
 }

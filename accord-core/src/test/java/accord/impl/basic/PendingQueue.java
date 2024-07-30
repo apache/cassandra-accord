@@ -18,15 +18,20 @@
 
 package accord.impl.basic;
 
+import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 
-public interface PendingQueue
+public interface PendingQueue extends Iterable<Pending>
 {
     void add(Pending item);
     void addNoDelay(Pending item);
     void add(Pending item, long delay, TimeUnit units);
     boolean remove(Pending item);
     Pending poll();
+    List<Pending> drain(Predicate<Pending> toDrain);
     int size();
     long nowInMillis();
+
+    boolean hasNonRecurring();
 }

@@ -47,10 +47,10 @@ import accord.api.Read;
 import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.api.Update;
-import accord.impl.IntKey;
 import accord.impl.DefaultLocalListeners;
 import accord.impl.DefaultLocalListeners.DefaultNotifySink;
 import accord.impl.DefaultRemoteListeners;
+import accord.impl.IntKey;
 import accord.local.Command;
 import accord.local.Command.AbstractCommand;
 import accord.local.CommandStore;
@@ -224,12 +224,6 @@ public class CommandsForKeyTest
 
             Command.Committed next = Command.Committed.committed(prev, prev, waitingOn.build());
             set(prev, next);
-        }
-
-        @Override
-        public void notWaiting(SafeCommandStore safeStore, SafeCommand safeCommand, Key key)
-        {
-            notWaiting(safeStore, safeCommand.txnId(), key);
         }
 
         @Override
@@ -839,12 +833,6 @@ public class CommandsForKeyTest
         {
             throw new UnsupportedOperationException();
         }
-
-        @Override
-        public void registerHistoricalTransactions(Deps deps)
-        {
-            throw new UnsupportedOperationException();
-        }
     }
 
     private static final class TestRead implements Read
@@ -917,7 +905,13 @@ public class CommandsForKeyTest
 
         protected TestCommandStore(int pruneInterval, int pruneHlcDelta, int maxConflictsHlcDelta, int maxConflictsPruneInterval)
         {
-            super(0, null, null, null, ignore -> new ProgressLog.NoOpProgressLog(), ignore -> new DefaultLocalListeners(new DefaultRemoteListeners((a, b, c, d, e)->{}), DefaultNotifySink.INSTANCE), new EpochUpdateHolder());
+            super(0,
+                  null,
+                  null,
+                  null,
+                  ignore -> new ProgressLog.NoOpProgressLog(),
+                  ignore -> new DefaultLocalListeners(new DefaultRemoteListeners((a, b, c, d, e)->{}), DefaultNotifySink.INSTANCE),
+                  new EpochUpdateHolder());
             this.pruneInterval = pruneInterval;
             this.pruneHlcDelta = pruneHlcDelta;
             this.maxConflictsHlcDelta = maxConflictsHlcDelta;
@@ -963,6 +957,12 @@ public class CommandsForKeyTest
         public void shutdown()
         {
             Invariants.checkState(queue.isEmpty());
+        }
+
+        @Override
+        protected void registerHistoricalTransactions(Deps deps, SafeCommandStore safeStore)
+        {
+            throw new UnsupportedOperationException();
         }
 
         @Override

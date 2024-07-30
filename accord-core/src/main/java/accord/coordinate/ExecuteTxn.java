@@ -159,4 +159,13 @@ public class ExecuteTxn extends ReadCoordinator<ReadReply>
     {
         return node.coordinationAdapter(txnId, Continue);
     }
+
+    @Override
+    public String toString()
+    {
+        return "ExecuteTxn{" +
+               "txn=" + txn +
+               ", route=" + route +
+               '}';
+    }
 }

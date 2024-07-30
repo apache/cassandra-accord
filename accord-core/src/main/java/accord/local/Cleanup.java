@@ -69,6 +69,16 @@ public enum Cleanup
 
     public static Cleanup shouldCleanup(SafeCommandStore safeStore, Command command, EpochSupplier toEpoch, Unseekables<?> maybeFullRoute)
     {
+        return shouldCleanup(safeStore.commandStore(), command, toEpoch, maybeFullRoute);
+    }
+
+    public static Cleanup shouldCleanup(CommandStore commandStore, Command command, EpochSupplier toEpoch, Unseekables<?> maybeFullRoute)
+    {
+        return shouldCleanup(commandStore, command, toEpoch, maybeFullRoute, true);
+    }
+
+    public static Cleanup shouldCleanup(CommandStore commandStore, Command command, EpochSupplier toEpoch, Unseekables<?> maybeFullRoute, boolean enforceInvariants)
+    {
         if (command.saveStatus() == Erased)
             return Cleanup.NO; // once erased we no longer have executeAt, and may consider that a transaction is owned by us that should not be (as its txnId is an earlier epoch than we adopted a range)
 
@@ -85,7 +95,7 @@ public enum Cleanup
             toEpoch = executeAt;
 
         return shouldCleanup(command.txnId(), command.status(), command.durability(), toEpoch, route,
-                               safeStore.commandStore().redundantBefore(), safeStore.commandStore().durableBefore());
+                             commandStore.redundantBefore(), commandStore.durableBefore(), enforceInvariants);
     }
 
     public static Cleanup shouldCleanup(TxnId txnId, Status status, Durability durability, EpochSupplier toEpoch, Route<?> route, RedundantBefore redundantBefore, DurableBefore durableBefore)
@@ -124,7 +134,7 @@ public enum Cleanup
                 //      - we can impose additional validations here IF we receive an epoch upper bound
                 //      - we should be more robust to the presence/absence of executeAt
                 //      - be cognisant of future epochs that participated only for PreAccept/Accept, but where txn was not committed to execute in the epoch (this is why we provide null toEpoch here)
-                illegalState("Command " + txnId + " that is being loaded is not owned by this shard on route " + route);
+                illegalState("Command %s that is being loaded is not owned by this shard on route %s. Redundant before: %s", txnId, route, redundantBefore);
             }
         }
         switch (redundant)

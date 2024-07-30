@@ -41,7 +41,6 @@ import accord.utils.Invariants;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
-import static accord.local.PreLoadContext.contextFor;
 import static accord.local.PreLoadContext.empty;
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
@@ -96,7 +95,7 @@ class Bootstrap
     }
 
     // an attempt to fetch some portion of the range we are bootstrapping
-    class Attempt implements FetchRanges, BiConsumer<Void, Throwable>
+    class Attempt implements FetchRanges, BiConsumer<Object, Throwable>
     {
         final List<SafeToRead> states = new ArrayList<>();
         Runnable cancel;
@@ -117,7 +116,7 @@ class Bootstrap
             this.valid = ranges;
         }
 
-        void start(SafeCommandStore safeStore0)
+        void start(SafeCommandStore safeStore)
         {
             if (valid.isEmpty())
             {
@@ -142,23 +141,16 @@ class Bootstrap
             // we fix here the ranges we use for the synthetic command, even though we may end up only finishing a subset
             // of these ranges as part of this attempt
             Ranges commitRanges = valid;
-            store.markBootstrapping(safeStore0, globalSyncId, valid);
-            CoordinateSyncPoint.exclusive(node, globalSyncId, commitRanges)
-               // ATM all known implementations store ranges in-memory, but this will not be true soon, so this will need to be addressed
-               .flatMap(syncPoint -> node.withEpoch(epoch, () -> store.submit(contextFor(localSyncId, syncPoint.waitFor.keyDeps.keys(), KeyHistory.COMMANDS), safeStore1 -> {
-                   if (valid.isEmpty()) // we've lost ownership of the range
-                       return AsyncResults.success(Ranges.EMPTY);
-
-                   Commands.createBootstrapCompleteMarkerTransaction(safeStore1, localSyncId, valid);
-                   safeStore1.registerHistoricalTransactions(syncPoint.waitFor);
-                   return fetch = safeStore1.dataStore().fetch(node, safeStore1, valid, syncPoint, this);
-               })))
-               .flatMap(i -> i)
-               .flatMap(ranges -> store.execute(contextFor(localSyncId), safeStore -> {
-                   if (!ranges.isEmpty())
-                       Commands.markBootstrapComplete(safeStore, localSyncId, ranges);
-               }))
-               .begin(this);
+            safeStore = safeStore;
+            // we submit a separate execution so that we know markBootstrapping is durable before we initiate the fetch
+            safeStore.commandStore().submit(empty(), safeStore0 -> {
+                store.markBootstrapping(safeStore0, globalSyncId, commitRanges);
+                return CoordinateSyncPoint.exclusive(node, globalSyncId, commitRanges);
+            }).flatMap(i -> i).flatMap(syncPoint -> node.withEpoch(epoch, () -> store.submit(empty(), safeStore1 -> {
+                if (valid.isEmpty()) // we've lost ownership of the range
+                    return AsyncResults.success(Ranges.EMPTY);
+                return fetch = safeStore1.dataStore().fetch(node, safeStore1, valid, syncPoint, this);
+            }))).flatMap(i -> i).begin(this);
         }
 
         // we no longer want to fetch these ranges (perhaps we no longer own them)
@@ -379,7 +371,7 @@ class Bootstrap
         }
 
         @Override
-        public void accept(Void success, Throwable failure)
+        public void accept(Object success, Throwable failure)
         {
             if (completed)
                 return;

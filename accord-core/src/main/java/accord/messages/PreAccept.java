@@ -115,6 +115,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
         //      must consider cleanup though. (alternative is to make recovery more complicated)
         Ranges ranges = safeStore.ranges().allBetween(minEpoch, txnId);
         if (txnId.kind() == ExclusiveSyncPoint)
+            // TODO (required): this must be removed for correctly restoring rejectBefore (so journal can update it). This is expected to happen in a follow-up patch soon after.
             safeStore.commandStore().markExclusiveSyncPoint(safeStore, txnId, ranges);
         return new PreAcceptOk(txnId, txnId, calculatePartialDeps(safeStore, txnId, partialTxn.keys(), scope, EpochSupplier.constant(minEpoch), txnId, ranges));
     }

@@ -18,13 +18,17 @@
 
 package accord.impl.basic;
 
-import accord.burn.random.FrequentLargeRange;
-import accord.utils.RandomSource;
-
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
 import java.util.PriorityQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
+
+import accord.burn.random.FrequentLargeRange;
+import accord.utils.RandomSource;
 
 import static accord.utils.Invariants.illegalArgument;
 
@@ -94,6 +98,7 @@ public class RandomDelayQueue implements PendingQueue
     private final LongSupplier jitterMillis;
     long now;
     int seq;
+    int recurring;
 
     public RandomDelayQueue(RandomSource random)
     {
@@ -115,6 +120,8 @@ public class RandomDelayQueue implements PendingQueue
     public void addNoDelay(Pending item)
     {
         queue.add(new Item(now, seq++, item));
+        if (item instanceof RecurringPendingRunnable)
+            ++recurring;
     }
 
     @Override
@@ -123,11 +130,15 @@ public class RandomDelayQueue implements PendingQueue
         if (delay < 0)
             throw illegalArgument("Delay must be positive or 0, but given " + delay);
         queue.add(new Item(now + units.toMillis(delay) + jitterMillis.getAsLong(), seq++, item));
+        if (item instanceof RecurringPendingRunnable)
+            ++recurring;
     }
 
     @Override
     public boolean remove(Pending item)
     {
+        if (item instanceof RecurringPendingRunnable)
+            --recurring;
         return queue.remove(item);
     }
 
@@ -137,8 +148,33 @@ public class RandomDelayQueue implements PendingQueue
         Item item = queue.poll();
         if (item == null)
             return null;
+
+        if (item.item instanceof RecurringPendingRunnable)
+            --recurring;
+
         now = item.time;
         return item.item;
+    }
+
+    @Override
+    public List<Pending> drain(Predicate<Pending> toDrain)
+    {
+        List<Item> items = new ArrayList<>(queue);
+        queue.clear();
+        recurring = 0;
+        List<Pending> ret = new ArrayList<>();
+        for (Item item : items)
+        {
+            if (toDrain.test(item.item))
+                ret.add(item.item);
+            else
+            {
+                queue.add(item);
+                if (item.item instanceof RecurringPendingRunnable)
+                    ++recurring;
+            }
+        }
+        return ret;
     }
 
     @Override
@@ -151,5 +187,17 @@ public class RandomDelayQueue implements PendingQueue
     public long nowInMillis()
     {
         return now;
+    }
+
+    @Override
+    public boolean hasNonRecurring()
+    {
+        return recurring != queue.size();
+    }
+
+    @Override
+    public Iterator<Pending> iterator()
+    {
+        return queue.stream().map(i -> i.item).iterator();
     }
 }

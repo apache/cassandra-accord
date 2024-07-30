@@ -18,12 +18,15 @@
 
 package accord.topology;
 
+import java.util.AbstractCollection;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 
-import com.google.common.collect.Sets;
+import com.google.common.collect.Iterators;
 
 import accord.api.TopologySorter;
 import accord.local.Node;
@@ -74,7 +77,29 @@ public interface Topologies extends TopologySorter
     // note this can be expensive to evaluate
     SortedList<Id> nodes();
 
-    Set<Node.Id> nonStaleNodes();
+    default Collection<Node.Id> nonStaleNodes()
+    {
+        Topology currentTopology = current();
+        Set<Id> staleIds = currentTopology.staleIds();
+        SortedList<Id> nodes = nodes();
+        if (staleIds.isEmpty())
+            return nodes;
+
+        return new AbstractCollection<>()
+        {
+            @Override
+            public Iterator<Id> iterator()
+            {
+                return Iterators.filter(nodes.iterator(), id -> !staleIds.contains(id));
+            }
+
+            @Override
+            public int size()
+            {
+                return Iterators.size(iterator());
+            }
+        };
+    }
 
     int estimateUniqueNodes();
 
@@ -214,12 +239,6 @@ public interface Topologies extends TopologySorter
         public SortedList<Node.Id> nodes()
         {
             return topology.nodes();
-        }
-
-        @Override
-        public Set<Node.Id> nonStaleNodes()
-        {
-            return topology.nonStaleNodes();
         }
 
         @Override
@@ -400,13 +419,6 @@ public interface Topologies extends TopologySorter
             SortedArrayList<Id> result = new SortedArrayList<>(array);
             merging.discardBuffers();
             return result;
-        }
-
-        @Override
-        public Set<Node.Id> nonStaleNodes()
-        {
-            Topology currentTopology = current();
-            return Sets.filter(nodes(), id -> !currentTopology.staleIds().contains(id));
         }
 
         @Override
