@@ -997,6 +997,10 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                                      Kinds testKind,
                                      CommandFunction<P1, T, T> map, P1 p1, T initialValue)
     {
+        // TODO (required, consider): how to harden state machine when startedBefore < prunedBefore;
+        //   this is fine in principle because if txnId < startedBefore, we either have already applied
+        //   and we will find this out, or else we may find no dependencies during PreAccept but must
+        //   propose a higher executeAt, and this higher executeAt will be after prunedBefore
         Timestamp maxCommittedBefore;
         {
             int from = 0, to = committedByExecuteAt.length;

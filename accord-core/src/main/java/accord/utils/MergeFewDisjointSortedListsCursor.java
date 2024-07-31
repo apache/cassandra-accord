@@ -135,8 +135,15 @@ public class MergeFewDisjointSortedListsCursor<T extends Comparable<? super T>> 
 
             Candidate<T> candidate = heap[i];
             found |= candidate.find(find);
-            if (candidate.item == null) ++removedCount;
-            else if (removedCount > 0) heap[i - removedCount] = candidate;
+            if (candidate.item == null)
+            {
+                Invariants.checkState(candidate.itemIdx == candidate.list.size());
+                ++removedCount;
+            }
+            else if (removedCount > 0)
+            {
+                heap[i - removedCount] = candidate;
+            }
             i++;
         }
 

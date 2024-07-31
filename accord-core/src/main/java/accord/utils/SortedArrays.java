@@ -20,6 +20,7 @@ package accord.utils;
 
 import java.util.AbstractList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.function.IntBinaryOperator;
 import java.util.function.IntFunction;
@@ -48,6 +49,7 @@ public class SortedArrays
         final T[] array;
         public SortedArrayList(T[] array)
         {
+            // implicitly checks entries are non-null
             this.array = checkArgument(array, SortedArrays::isSortedUnique);
         }
 
@@ -105,9 +107,14 @@ public class SortedArrays
 
     public static class ExtendedSortedArrayList<T extends Comparable<? super T>> extends SortedArrayList<T>
     {
-        public static <T extends Comparable<? super T>> ExtendedSortedArrayList<T> sortedCopyOf(Iterable<T> iterator, IntFunction<T[]> allocator)
+        public static <T extends Comparable<? super T>> ExtendedSortedArrayList<T> sortedCopyOf(Collection<T> copy, IntFunction<T[]> allocator)
         {
-            return new ExtendedSortedArrayList<>(checkArgument(StreamSupport.stream(iterator.spliterator(), false).sorted().toArray(allocator), SortedArrays::isSortedUnique), allocator);
+            T[] array = allocator.apply(copy.size());
+            array = copy.toArray(array);
+            Arrays.sort(array);
+            // implicitly checks entries are non-null
+            checkArgument(array, SortedArrays::isSortedUnique);
+            return new ExtendedSortedArrayList<>(array, allocator);
         }
 
         final IntFunction<T[]> allocator;
