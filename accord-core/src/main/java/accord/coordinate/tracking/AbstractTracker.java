@@ -180,6 +180,11 @@ public abstract class AbstractTracker<ST extends ShardTracker>
         return topologies.nodes();
     }
 
+    public Set<Id> nonStaleNodes()
+    {
+        return topologies.nonStaleNodes();
+    }
+
     public ST get(int shardIndex)
     {
         int maxShardsPerEpoch = maxShardsPerEpoch();

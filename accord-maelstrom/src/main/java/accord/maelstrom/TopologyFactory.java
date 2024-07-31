@@ -19,6 +19,7 @@
 package accord.maelstrom;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -85,6 +86,6 @@ public class TopologyFactory
             for (int i = 0 ; i < this.shards ; ++i)
                 shards.add(new Shard(ranges[j][i], copyUnsorted(electorates.get(i % electorates.size()), Id[]::new), fastPathElectorates.get(i % fastPathElectorates.size())));
         }
-        return new Topology(1, toArray(shards, Shard[]::new));
+        return new Topology(1, Collections.emptySet(), toArray(shards, Shard[]::new));
     }
 }

@@ -44,14 +44,14 @@ public class CoordinateShardDurable extends ExecuteSyncPoint<Ranges> implements 
 
     protected void start()
     {
-        node.send(tracker.nodes(), to -> new WaitUntilApplied(to, tracker.topologies(), syncPoint.syncId, syncPoint.keysOrRanges, syncPoint.syncId.epoch()), this);
+        node.send(tracker.nonStaleNodes(), to -> new WaitUntilApplied(to, tracker.topologies(), syncPoint.syncId, syncPoint.keysOrRanges, syncPoint.syncId.epoch()), this);
     }
 
     @Override
     protected void onSuccess()
     {
         node.configService().reportEpochRedundant(syncPoint.keysOrRanges, syncPoint.syncId.epoch());
-        node.send(tracker.nodes(), new SetShardDurable(syncPoint));
+        node.send(tracker.nonStaleNodes(), new SetShardDurable(syncPoint));
         super.onSuccess();
     }
 }

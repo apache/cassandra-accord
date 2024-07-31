@@ -57,7 +57,9 @@ public class TopologyUtils
 
     public static Topology withEpoch(Topology topology, long epoch)
     {
-        return new Topology(topology.global == null ? null : withEpoch(topology.global, epoch), epoch, topology.shards, topology.ranges, topology.nodeIds, topology.nodeLookup, topology.subsetOfRanges, topology.supersetIndexes);
+        return new Topology(topology.global == null ? null : withEpoch(topology.global, epoch), epoch,
+                            topology.staleIds, topology.shards, topology.ranges, topology.nodeIds, topology.nodeLookup,
+                            topology.subsetOfRanges, topology.supersetIndexes);
     }
 
     public static Topology topology(long epoch, List<Node.Id> cluster, Ranges ranges, int rf)

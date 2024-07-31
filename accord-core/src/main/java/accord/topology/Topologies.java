@@ -18,6 +18,13 @@
 
 package accord.topology;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Set;
+
+import com.google.common.collect.Sets;
+
 import accord.api.TopologySorter;
 import accord.local.Node;
 import accord.local.Node.Id;
@@ -29,8 +36,6 @@ import accord.utils.Invariants;
 import accord.utils.SortedArrays;
 import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.SortedList;
-
-import java.util.*;
 
 import static accord.utils.Invariants.illegalState;
 
@@ -68,6 +73,8 @@ public interface Topologies extends TopologySorter
 
     // note this can be expensive to evaluate
     SortedList<Id> nodes();
+
+    Set<Node.Id> nonStaleNodes();
 
     int estimateUniqueNodes();
 
@@ -207,6 +214,12 @@ public interface Topologies extends TopologySorter
         public SortedList<Node.Id> nodes()
         {
             return topology.nodes();
+        }
+
+        @Override
+        public Set<Node.Id> nonStaleNodes()
+        {
+            return topology.nonStaleNodes();
         }
 
         @Override
@@ -387,6 +400,13 @@ public interface Topologies extends TopologySorter
             SortedArrayList<Id> result = new SortedArrayList<>(array);
             merging.discardBuffers();
             return result;
+        }
+
+        @Override
+        public Set<Node.Id> nonStaleNodes()
+        {
+            Topology currentTopology = current();
+            return Sets.filter(nodes(), id -> !currentTopology.staleIds().contains(id));
         }
 
         @Override
