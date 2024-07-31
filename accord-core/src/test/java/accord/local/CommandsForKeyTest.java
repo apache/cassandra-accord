@@ -543,8 +543,8 @@ public class CommandsForKeyTest
     @Test
     public void testOne()
     {
-        test(413420604164290L, 1000);
-//        test(System.nanoTime(), 1000);
+//        test(449555883255211L, 1000);
+        test(System.nanoTime(), 1000);
     }
 
     @Test

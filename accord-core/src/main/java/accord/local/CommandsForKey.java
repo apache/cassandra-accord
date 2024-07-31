@@ -130,17 +130,20 @@ import static accord.utils.SortedArrays.Search.FAST;
  * remove from the {@code CommandsForKey} any transaction with a lower {@code TxnId} and {@code executeAt} that is also
  * applied or invalidated.
  *
- * The trick here is that, by virtue of being a local point, we cannot guarantee that no coordinator will contact us
- * with either a new TxnId that is lower than this, or a dependency collection containing a TxnId we have already
- * processed.
+ * [We only do this if there also exists some later transactions we are not pruning that collectively have a superset of
+ * its witnessed collection, so that recovery decisions will be unaffected by the removal of the transaction.]
+ *
+ * The complexity here is that, by virtue of being a local decision point, we cannot guarantee that no coordinator will
+ * contact us in future with either a new TxnId that is lower than this, or a dependency collection containing a TxnId
+ * we have already processed.
  *
  * [We pick a TxnId stale by some time bound so that we can expect that any earlier already-applied TxnId will
  * not be included in a future set of dependencies - we expect that "transitive dependency elision" will ordinarily filter
  * it; but it might not on all replicas.]
  *
  * The difficulty is that we cannot immediately distinguish these two cases, and so on encountering a TxnId that is
- * less than our prunedBefore we must load the local command state for the TxnId. If we have not witnessed the TxnId
- * then we know it is a new transitive dependency. If we have witnessed it, and it is applied, then we load it
+ * less than our {@code prunedBefore} we must load the local command state for the TxnId. If we have not witnessed the
+ * TxnId then we know it is a new transitive dependency. If we have witnessed it, and it is applied, then we load it
  * into the {@code CommandsForKey} until we next prune to avoid reloading it repeatedly. This is managed with the
  * {@link #loadingPruned} btree collection.
  *
@@ -152,7 +155,7 @@ import static accord.utils.SortedArrays.Search.FAST;
  *
  * Both commands must be known at a majority, but neither might be {@code Committed} at any other replica.
  * Either command may therefore be recovered.
- * If the later command is recovered, this replica will report its Stable deps thereby recovering them.
+ * If the later command is recovered, this replica will report its Stable deps, thereby recovering them.
  * If this replica is not contacted, some other replica must participate that either has taken the same action as this replica,
  * or else does not know the later command is Stable, and so will report the earlier command as a dependency again.
  * If the earlier command is recovered, this replica will report that it is {@code Committed}, and so will not consult
@@ -201,6 +204,14 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         return Write.witnesses(txnId.kind()) && txnId.domain().isKey();
     }
 
+    /**
+     * A transaction whose key-dependencies for execution are not natively managed by this class.
+     * This essentially supports all range commands and key sync points for managing their key execution dependencies.
+     *
+     * We maintain a sorted list of waiting transactions; we gate this by simple TxnId and executeAt bounds in two phases:
+     * 1) pick the highest dependency TxnId on the key; wait for all <= TxnId to commit
+     * 2) pick the highest executeAt dependency on the key that executes before the Unmanaged txn, and wait for it and all earlier txn to Apply
+     */
     public static class Unmanaged implements Comparable<Unmanaged>
     {
         public enum Pending { COMMIT, APPLY }
@@ -1026,6 +1037,31 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         return initialValue;
     }
 
+    public static boolean needsUpdate(Command prev, Command updated)
+    {
+        SaveStatus prevStatus;
+        Ballot prevAcceptedOrCommitted;
+        if (prev == null)
+        {
+            prevStatus = SaveStatus.NotDefined;
+            prevAcceptedOrCommitted = Ballot.ZERO;
+        }
+        else
+        {
+            prevStatus = prev.saveStatus();
+            prevAcceptedOrCommitted = prev.acceptedOrCommitted();
+        }
+
+        return needsUpdate(prevStatus, prevAcceptedOrCommitted, updated.saveStatus(), updated.acceptedOrCommitted());
+    }
+
+    public static boolean needsUpdate(SaveStatus prevStatus, Ballot prevAcceptedOrCommitted, SaveStatus updatedStatus, Ballot updatedAcceptedOrCommitted)
+    {
+        InternalStatus prev = InternalStatus.from(prevStatus);
+        InternalStatus updated = InternalStatus.from(updatedStatus);
+        return updated != prev || (updated != null && updated.hasExecuteAtOrDeps && !prevAcceptedOrCommitted.equals(updatedAcceptedOrCommitted));
+    }
+
     // NOTE: prev MAY NOT be the version that last updated us due to various possible race conditions
     @VisibleForTesting
     public CommandsForKeyUpdate update(Command next)
@@ -1052,13 +1088,17 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
     {
         TxnId txnId = next.txnId();
         Invariants.checkArgument(wasPruned || manages(txnId));
+
+        TxnId[] loadingAsPrunedFor = LoadingPruned.get(loadingPruned, txnId, null); // we default to null to distinguish between no match, and a match with NO_TXNIDS
+        wasPruned |= loadingAsPrunedFor != null;
+
         int pos = Arrays.binarySearch(byId, txnId);
         CommandsForKeyUpdate result;
         if (pos < 0)
         {
             pos = -1 - pos;
             if (newStatus.hasExecuteAtOrDeps && !wasPruned && txnId.domain().isKey()) result = insert(pos, txnId, newStatus, next);
-            else result = insert(pos, txnId, TxnInfo.create(txnId, newStatus, next));
+            else result = insert(pos, txnId, TxnInfo.create(txnId, newStatus, next), wasPruned, loadingAsPrunedFor);
         }
         else
         {
@@ -1087,35 +1127,10 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             }
 
             if (newStatus.hasExecuteAtOrDeps && !wasPruned) result = update(pos, txnId, cur, newStatus, next);
-            else result = update(pos, txnId, cur, TxnInfo.create(txnId, newStatus, next));
+            else result = update(pos, txnId, cur, TxnInfo.create(txnId, newStatus, next), wasPruned, loadingAsPrunedFor);
         }
 
         return result;
-    }
-
-    public static boolean needsUpdate(Command prev, Command updated)
-    {
-        SaveStatus prevStatus;
-        Ballot prevAcceptedOrCommitted;
-        if (prev == null)
-        {
-            prevStatus = SaveStatus.NotDefined;
-            prevAcceptedOrCommitted = Ballot.ZERO;
-        }
-        else
-        {
-            prevStatus = prev.saveStatus();
-            prevAcceptedOrCommitted = prev.acceptedOrCommitted();
-        }
-
-        return needsUpdate(prevStatus, prevAcceptedOrCommitted, updated.saveStatus(), updated.acceptedOrCommitted());
-    }
-
-    public static boolean needsUpdate(SaveStatus prevStatus, Ballot prevAcceptedOrCommitted, SaveStatus updatedStatus, Ballot updatedAcceptedOrCommitted)
-    {
-        InternalStatus prev = InternalStatus.from(prevStatus);
-        InternalStatus updated = InternalStatus.from(updatedStatus);
-        return updated != prev || (updated != null && updated.hasExecuteAtOrDeps && !prevAcceptedOrCommitted.equals(updatedAcceptedOrCommitted));
     }
 
     private CommandsForKeyUpdate insert(int insertPos, TxnId plainTxnId, InternalStatus newStatus, Command command)
@@ -1133,14 +1148,14 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         // TODO (now): do not calculate any deps or additions if we're transitioning from Stable to Applied; wasted effort and might trigger LoadPruned
         Object newInfoObj = computeInfoAndAdditions(insertPos, updatePos, plainTxnId, newStatus, command);
         if (newInfoObj.getClass() != InfoWithAdditions.class)
-            return insertOrUpdate(insertPos, plainTxnId, curInfo, (TxnInfo)newInfoObj);
+            return insertOrUpdate(insertPos, plainTxnId, curInfo, (TxnInfo)newInfoObj, false, null);
 
         InfoWithAdditions newInfoWithAdditions = (InfoWithAdditions) newInfoObj;
         TxnId[] additions = newInfoWithAdditions.additions;
         int additionCount = newInfoWithAdditions.additionCount;
         TxnInfo newInfo = newInfoWithAdditions.info;
 
-        TxnId[] prunedIds = removePruned(additions, additionCount, prunedBefore);
+        TxnId[] prunedIds = removePrunedAdditions(additions, additionCount, prunedBefore);
         Object[] newLoadingPruned = loadingPruned;
         if (prunedIds != NO_TXNIDS)
         {
@@ -1148,14 +1163,14 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             newLoadingPruned = LoadingPruned.load(loadingPruned, prunedIds, plainTxnId);
         }
 
-        TxnInfo[] newById = new TxnInfo[byId.length + additionCount + (updatePos < 0 ? 1 : 0)];
-        TxnId[] loadingAsPrunedFor = LoadingPruned.get(newLoadingPruned, plainTxnId, null); // we default to null to distinguish between no match, and a match with NO_TXNIDS
-        if (loadingAsPrunedFor != null) newLoadingPruned = LoadingPruned.remove(newLoadingPruned, plainTxnId);
-        else loadingAsPrunedFor = NO_TXNIDS;
+        int committedByExecuteAtUpdatePos = committedByExecuteAtUpdatePos(curInfo, newInfo);
+        TxnInfo[] newCommittedByExecuteAt = updateCommittedByExecuteAt(committedByExecuteAtUpdatePos, newInfo, false);
+        int newMaxAppliedWriteByExecuteAt = updateMaxAppliedWriteByExecuteAt(committedByExecuteAtUpdatePos, newInfo, newCommittedByExecuteAt, false);
 
-        insertOrUpdateWithAdditions(insertPos, updatePos, plainTxnId, newInfo, additions, additionCount, newById, loadingAsPrunedFor);
+        TxnInfo[] newById = new TxnInfo[byId.length + additionCount + (updatePos < 0 ? 1 : 0)];
+        insertOrUpdateWithAdditions(insertPos, updatePos, plainTxnId, newInfo, additions, additionCount, newById, newCommittedByExecuteAt, NO_TXNIDS);
         if (testParanoia(SUPERLINEAR, NONE, LOW))
-            validateMissing(newById, additions, additionCount, curInfo, newInfo, loadingAsPrunedFor);
+            validateMissing(newById, additions, additionCount, curInfo, newInfo, NO_TXNIDS);
 
         int newMinUndecidedById = minUndecidedById;
         {
@@ -1199,10 +1214,10 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         }
 
         cachedTxnIds().forceDiscard(additions, additionCount + prunedIds.length);
-        return LoadPruned.load(prunedIds, update(newById, newMinUndecidedById, newLoadingPruned, plainTxnId, curInfo, newInfo, false));
+        return LoadPruned.load(prunedIds, update(newById, newMinUndecidedById, newCommittedByExecuteAt, newMaxAppliedWriteByExecuteAt, newLoadingPruned, plainTxnId, curInfo, newInfo));
     }
 
-    private static TxnId[] removePruned(TxnId[] additions, int additionCount, TxnId prunedBefore)
+    private static TxnId[] removePrunedAdditions(TxnId[] additions, int additionCount, TxnId prunedBefore)
     {
         if (additions[0].compareTo(prunedBefore) >= 0)
             return NO_TXNIDS;
@@ -1232,24 +1247,30 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         }
     }
 
-    private void insertOrUpdateWithAdditions(int sourceInsertPos, int sourceUpdatePos, TxnId updatePlainTxnId, TxnInfo info, TxnId[] additions, int additionCount, TxnInfo[] newInfos, TxnId[] witnessedBy)
+    /**
+     * Update newById to insert or update newInfo; insert any additions, and update any relevant missing arrays in
+     * both newById and newCommittedByExecuteAt (for both deletions and insertions).
+     */
+    private void insertOrUpdateWithAdditions(int sourceInsertPos, int sourceUpdatePos, TxnId plainTxnId, TxnInfo newInfo, TxnId[] additions, int additionCount, TxnInfo[] newById, TxnInfo[] newCommittedByExecuteAt, @Nonnull TxnId[] witnessedBy)
     {
-        int additionInsertPos = Arrays.binarySearch(additions, 0, additionCount, updatePlainTxnId);
+        int additionInsertPos = Arrays.binarySearch(additions, 0, additionCount, plainTxnId);
         additionInsertPos = Invariants.checkArgument(-1 - additionInsertPos, additionInsertPos < 0);
         int targetInsertPos = sourceInsertPos + additionInsertPos;
 
-        // additions plus the updateTxnId when necessary
+        // we may need to insert or remove ourselves, depending on the new and prior status
+        boolean insertSelfMissing = sourceUpdatePos < 0 && newInfo.status.compareTo(COMMITTED) < 0;
+        boolean removeSelfMissing = sourceUpdatePos >= 0 && newInfo.status.compareTo(COMMITTED) >= 0 && byId[sourceUpdatePos].status.compareTo(COMMITTED) < 0;
+        // missingSource starts as additions, but if we insertSelfMissing at the relevant moment it becomes the merge of additions and plainTxnId
         TxnId[] missingSource = additions;
-        boolean insertSelfMissing = sourceUpdatePos < 0 && info.status.compareTo(COMMITTED) < 0;
-        boolean removeSelfMissing = sourceUpdatePos >= 0 && info.status.compareTo(COMMITTED) >= 0 && byId[sourceUpdatePos].status.compareTo(COMMITTED) < 0;
 
         // the most recently constructed pure insert missing array, so that it may be reused if possible
         int i = 0, j = 0, missingCount = 0, missingLimit = additionCount, count = 0;
+        int minByExecuteAtSearchIndex = 0;
         while (i < byId.length)
         {
             if (count == targetInsertPos)
             {
-                newInfos[count] = info;
+                newById[count] = newInfo;
                 if (i == sourceUpdatePos) ++i;
                 else if (insertSelfMissing) ++missingCount;
                 ++count;
@@ -1262,45 +1283,67 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 TxnInfo txn = byId[i];
                 if (i == sourceUpdatePos)
                 {
-                    txn = info;
+                    txn = newInfo;
                 }
                 else if (txn.status.hasDeps())
                 {
                     Timestamp depsKnownBefore = txn.depsKnownBefore();
-                    if (insertSelfMissing && missingSource == additions && (missingCount != j || (depsKnownBefore != txn && depsKnownBefore.compareTo(updatePlainTxnId) > 0)))
+                    if (insertSelfMissing && missingSource == additions && (missingCount != j || (depsKnownBefore != txn && depsKnownBefore.compareTo(plainTxnId) > 0)))
                     {
-                        missingSource = insertMissing(additions, additionCount, updatePlainTxnId, additionInsertPos);
+                        // add ourselves to the missing collection
+                        missingSource = insertMissing(additions, additionCount, plainTxnId, additionInsertPos);
                         ++missingLimit;
                     }
 
                     int to = to(txn, depsKnownBefore, missingSource, missingCount, missingLimit);
                     if (to > 0 || removeSelfMissing)
                     {
-                        TxnId[] prevMissing = txn.missing();
-                        TxnId[] newMissing = prevMissing;
+                        TxnId[] curMissing = txn.missing();
+                        TxnId[] newMissing = curMissing;
                         if (to > 0)
                         {
                             TxnId skipInsertMissing = null;
-                            if (witnessedBy != null && Arrays.binarySearch(witnessedBy, updatePlainTxnId) >= 0)
-                                skipInsertMissing = updatePlainTxnId;
+                            if (Arrays.binarySearch(witnessedBy, plainTxnId) >= 0)
+                                skipInsertMissing = plainTxnId;
 
-                            newMissing = mergeAndFilterMissing(txn, prevMissing, missingSource, to, skipInsertMissing);
+                            newMissing = mergeAndFilterMissing(txn, curMissing, missingSource, to, skipInsertMissing);
                         }
 
                         if (removeSelfMissing)
-                            newMissing = removeOneMissing(newMissing, updatePlainTxnId);
+                            newMissing = removeOneMissing(newMissing, plainTxnId);
 
-                        if (newMissing != prevMissing)
-                            txn = txn.update(newMissing);
+                        if (newMissing != curMissing)
+                        {
+                            TxnInfo newTxn = txn.update(newMissing);
+
+                            if (txn.status.isCommitted())
+                            {
+                                // update newCommittedByExecuteAt
+                                int ci;
+                                if (txn.executeAt == txn)
+                                {
+                                    ci = SortedArrays.exponentialSearch(newCommittedByExecuteAt, minByExecuteAtSearchIndex, newCommittedByExecuteAt.length, txn, TxnInfo::compareExecuteAt, FAST);
+                                    minByExecuteAtSearchIndex = 1 + ci;
+                                }
+                                else
+                                {
+                                    ci = Arrays.binarySearch(newCommittedByExecuteAt, minByExecuteAtSearchIndex, newCommittedByExecuteAt.length, txn, TxnInfo::compareExecuteAt);
+                                }
+                                Invariants.checkState(newCommittedByExecuteAt[ci] == txn);
+                                newCommittedByExecuteAt[ci] = newTxn;
+                            }
+
+                            txn = newTxn;
+                        }
                     }
                 }
-                newInfos[count] = txn;
+                newById[count] = txn;
                 i++;
             }
             else if (c > 0)
             {
                 TxnId txnId = additions[j++];
-                newInfos[count] = TxnInfo.create(txnId, TRANSITIVELY_KNOWN, txnId, Ballot.ZERO);
+                newById[count] = TxnInfo.create(txnId, TRANSITIVELY_KNOWN, txnId, Ballot.ZERO);
                 ++missingCount;
             }
             else
@@ -1317,24 +1360,27 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 while (count < targetInsertPos)
                 {
                     TxnId txnId = additions[j++];
-                    newInfos[count++] = TxnInfo.create(txnId, TRANSITIVELY_KNOWN, txnId, Ballot.ZERO);
+                    newById[count++] = TxnInfo.create(txnId, TRANSITIVELY_KNOWN, txnId, Ballot.ZERO);
                 }
-                newInfos[targetInsertPos] = info;
+                newById[targetInsertPos] = newInfo;
                 count = targetInsertPos + 1;
             }
             while (j < additionCount)
             {
                 TxnId txnId = additions[j++];
-                newInfos[count++] = TxnInfo.create(txnId, TRANSITIVELY_KNOWN, txnId, Ballot.ZERO);
+                newById[count++] = TxnInfo.create(txnId, TRANSITIVELY_KNOWN, txnId, Ballot.ZERO);
             }
         }
         else if (count == targetInsertPos)
         {
-            newInfos[targetInsertPos] = info;
+            newById[targetInsertPos] = newInfo;
         }
     }
 
-    private void insertAdditionsOnly(TxnInfo[] newInfos, TxnId[] additions, int additionCount)
+    /**
+     * Similar to insertOrUpdateWithAdditions, but when we only need to insert some additions (i.e. when calling registerUnmanaged)
+     */
+    private TxnInfo[] insertAdditionsOnly(TxnInfo[] newInfos, TxnId[] additions, int additionCount)
     {
         // the most recently constructed pure insert missing array, so that it may be reused if possible
         int minByExecuteAtSearchIndex = 0;
@@ -1366,15 +1412,15 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                                 int ci;
                                 if (txn.executeAt == txn)
                                 {
-                                    ci = SortedArrays.exponentialSearch(committedByExecuteAt, minByExecuteAtSearchIndex, committedByExecuteAt.length, txn, TxnInfo::compareExecuteAt, FAST);
+                                    ci = SortedArrays.exponentialSearch(newCommittedByExecuteAt, minByExecuteAtSearchIndex, newCommittedByExecuteAt.length, txn, TxnInfo::compareExecuteAt, FAST);
                                     minByExecuteAtSearchIndex = 1 + ci;
                                 }
                                 else
                                 {
-                                    ci = Arrays.binarySearch(committedByExecuteAt, txn, TxnInfo::compareExecuteAt);
+                                    ci = Arrays.binarySearch(newCommittedByExecuteAt, minByExecuteAtSearchIndex, newCommittedByExecuteAt.length, txn, TxnInfo::compareExecuteAt);
                                 }
-                                Invariants.checkState(committedByExecuteAt[ci] == txn);
-                                committedByExecuteAt[ci] = newTxn;
+                                Invariants.checkState(newCommittedByExecuteAt[ci] == txn);
+                                newCommittedByExecuteAt[ci] = newTxn;
                             }
                             txn = newTxn;
                         }
@@ -1401,9 +1447,13 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             TxnId txnId = additions[j++];
             newInfos[count++] = TxnInfo.create(txnId, TRANSITIVELY_KNOWN, txnId, Ballot.ZERO);
         }
+
+        if (newCommittedByExecuteAt == null)
+            newCommittedByExecuteAt = committedByExecuteAt;
+        return newCommittedByExecuteAt;
     }
 
-    private static void validateMissing(TxnInfo[] byId, TxnId[] additions, int additionCount, TxnInfo curInfo, TxnInfo newInfo, TxnId[] shouldNotHaveMissing)
+    private static void validateMissing(TxnInfo[] byId, TxnId[] additions, int additionCount, TxnInfo curInfo, TxnInfo newInfo, @Nonnull TxnId[] shouldNotHaveMissing)
     {
         for (TxnInfo txn : byId)
         {
@@ -1425,19 +1475,26 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         }
     }
 
-    private CommandsForKeyUpdate insertOrUpdate(int pos, TxnId plainTxnId, TxnInfo curInfo, TxnInfo newInfo)
+    private CommandsForKeyUpdate insertOrUpdate(int pos, TxnId plainTxnId, TxnInfo curInfo, TxnInfo newInfo, boolean wasPruned, @Nullable TxnId[] loadingAsPrunedFor)
     {
         if (curInfo == newInfo)
             return this;
 
+        Object[] newLoadingPruned = loadingPruned;
+        if (loadingAsPrunedFor != null) newLoadingPruned = LoadingPruned.remove(newLoadingPruned, plainTxnId);
+
+        int committedByExecuteAtUpdatePos = committedByExecuteAtUpdatePos(curInfo, newInfo);
+        TxnInfo[] newCommittedByExecuteAt = updateCommittedByExecuteAt(committedByExecuteAtUpdatePos, newInfo, wasPruned);
+        int newMaxAppliedWriteByExecuteAt = updateMaxAppliedWriteByExecuteAt(committedByExecuteAtUpdatePos, newInfo, newCommittedByExecuteAt, wasPruned);
+
         int newMinUndecidedById = minUndecidedById;
-        TxnInfo[] newInfos;
+        TxnInfo[] newById;
         if (curInfo == null)
         {
-            newInfos = new TxnInfo[byId.length + 1];
-            System.arraycopy(byId, 0, newInfos, 0, pos);
-            newInfos[pos] = newInfo;
-            System.arraycopy(byId, pos, newInfos, pos + 1, byId.length - pos);
+            newById = new TxnInfo[byId.length + 1];
+            System.arraycopy(byId, 0, newById, 0, pos);
+            newById[pos] = newInfo;
+            System.arraycopy(byId, pos, newById, pos + 1, byId.length - pos);
             if (managesExecution(newInfo))
             {
                 if (newInfo.status.compareTo(COMMITTED) >= 0)
@@ -1445,7 +1502,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                     if (newMinUndecidedById < 0 || pos <= newMinUndecidedById)
                     {
                         if (pos < newMinUndecidedById) ++newMinUndecidedById;
-                        else newMinUndecidedById = nextUndecided(newInfos, pos + 1);
+                        else newMinUndecidedById = nextUndecided(newById, pos + 1);
                     }
                 }
                 else
@@ -1459,26 +1516,46 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         }
         else
         {
-            newInfos = byId.clone();
-            newInfos[pos] = newInfo;
+            newById = byId.clone();
+            newById[pos] = newInfo;
             if (pos == newMinUndecidedById && curInfo.status.compareTo(COMMITTED) < 0 && newInfo.status.compareTo(COMMITTED) >= 0)
-                newMinUndecidedById = nextUndecided(newInfos, pos + 1);
+                newMinUndecidedById = nextUndecided(newById, pos + 1);
         }
 
-        return update(newInfos, newMinUndecidedById, loadingPruned, plainTxnId, curInfo, newInfo, true);
+        if (loadingAsPrunedFor == null)
+            loadingAsPrunedFor = NO_TXNIDS;
+
+        if (newCommittedByExecuteAt.length > committedByExecuteAt.length)
+        {
+            removeFromMissingArrays(newById, newCommittedByExecuteAt, plainTxnId);
+        }
+        else if (curInfo != null && curInfo.status.compareTo(COMMITTED) < 0 && newInfo.status == INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED)
+        {
+            removeFromMissingArrays(newById, newCommittedByExecuteAt, plainTxnId);
+        }
+        else if (curInfo == null && newInfo.status != INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED)
+        {
+            // TODO (desired): for consistency, move this to insertOrUpdate (without additions), while maintaining the efficiency
+            addToMissingArrays(newById, newCommittedByExecuteAt, newInfo, plainTxnId, loadingAsPrunedFor);
+        }
+
+        if (testParanoia(SUPERLINEAR, NONE, LOW) && curInfo == null && newInfo.status.compareTo(COMMITTED) < 0)
+            validateMissing(newById, NO_TXNIDS, 0, curInfo, newInfo, loadingAsPrunedFor);
+
+        return update(newById, newMinUndecidedById, newCommittedByExecuteAt, newMaxAppliedWriteByExecuteAt, newLoadingPruned, plainTxnId, curInfo, newInfo);
     }
 
-    private CommandsForKeyUpdate update(int pos, TxnId plainTxnId, TxnInfo curInfo, TxnInfo newInfo)
+    private CommandsForKeyUpdate update(int pos, TxnId plainTxnId, TxnInfo curInfo, TxnInfo newInfo, boolean wasPruned, TxnId[] loadingAsPrunedFor)
     {
-        return insertOrUpdate(pos, plainTxnId, curInfo, newInfo);
+        return insertOrUpdate(pos, plainTxnId, curInfo, newInfo, wasPruned, loadingAsPrunedFor);
     }
 
     /**
      * Insert a new txnId and info
      */
-    private CommandsForKeyUpdate insert(int pos, TxnId plainTxnId, TxnInfo newInfo)
+    private CommandsForKeyUpdate insert(int pos, TxnId plainTxnId, TxnInfo newInfo, boolean wasPruned, TxnId[] loadingAsPrunedFor)
     {
-        return insertOrUpdate(pos, plainTxnId, null, newInfo);
+        return insertOrUpdate(pos, plainTxnId, null, newInfo, wasPruned, loadingAsPrunedFor);
     }
 
     // TODO (required): additional linearizability violation detection, based on expectation of presence in missing set
@@ -1871,119 +1948,103 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         return new InfoWithAdditions(info, additions, additionCount);
     }
 
-    private CommandsForKeyUpdate update(TxnInfo[] newById, int newMinUndecidedById, Object[] newLoadingPruned, TxnId plainTxnId, @Nullable TxnInfo curInfo, @Nonnull TxnInfo newInfo, boolean maybeInsertMissing)
+    private CommandsForKeyUpdate update(TxnInfo[] newById, int newMinUndecidedById, TxnInfo[] newCommittedByExecuteAt, int newMaxAppliedWriteByExecuteAt, Object[] newLoadingPruned, TxnId plainTxnId, @Nullable TxnInfo curInfo, @Nonnull TxnInfo newInfo)
     {
-        TxnInfo updatedCommitted = newInfo.status.isCommitted() ? newInfo : null;
-        TxnInfo[] newCommittedByExecuteAt = committedByExecuteAt;
+        return new CommandsForKey(key, redundantBefore, prunedBefore, newLoadingPruned, newById, newCommittedByExecuteAt, newMinUndecidedById, newMaxAppliedWriteByExecuteAt, unmanageds)
+               .notifyUnmanaged(curInfo, newInfo);
+    }
 
-        TxnId[] loadingAsPrunedFor = LoadingPruned.get(newLoadingPruned, plainTxnId, null); // we default to null to distinguish between no match, and a match with NO_TXNIDS
-        if (loadingAsPrunedFor != null) newLoadingPruned = LoadingPruned.remove(newLoadingPruned, plainTxnId);
-        else loadingAsPrunedFor = NO_TXNIDS;
-
-        if (!maybeInsertMissing)
+    private int committedByExecuteAtUpdatePos(@Nullable TxnInfo curInfo, TxnInfo newInfo)
+    {
+        if (newInfo.status.isCommitted())
         {
-            // we may have inserted some missing to the newById entries; in this case, update the copies in committedByExecuteAt
-            // TODO (desired): we can make this more efficient than scanning the whole list
-            int i = 0, j = 0, minSearchIndex = 0;
-            while (i < byId.length)
-            {
-                TxnInfo cur = byId[i], next = newById[j];
-                if (cur == next) { ++j; ++i; }
-                else if (cur.equalsStrict(next))
-                {
-                    if (cur != curInfo && cur.status.isCommitted())
-                    {
-                        int k = SortedArrays.exponentialSearch(newCommittedByExecuteAt, minSearchIndex, newCommittedByExecuteAt.length, cur, TxnInfo::compareExecuteAt, FAST);
-                        if (cur.executeAt == cur) minSearchIndex = k;
-                        Invariants.checkState(newCommittedByExecuteAt[k] == cur);
-                        if (committedByExecuteAt == newCommittedByExecuteAt)
-                            newCommittedByExecuteAt = newCommittedByExecuteAt.clone();
-                        newCommittedByExecuteAt[k] = newById[j];
-                    }
-                    ++i; ++j;
-                }
-                else ++j;
-            }
+            return Arrays.binarySearch(committedByExecuteAt, 0, committedByExecuteAt.length, newInfo, TxnInfo::compareExecuteAt);
         }
-
-        int newMaxAppliedWriteByExecuteAt = maxAppliedWriteByExecuteAt;
-        if (updatedCommitted != null)
+        else if (curInfo != null && curInfo.status.isCommitted() && newInfo.status == INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED)
         {
-            Kind updatedKind = updatedCommitted.kind();
-            int pos = Arrays.binarySearch(newCommittedByExecuteAt, 0, newCommittedByExecuteAt.length, updatedCommitted, TxnInfo::compareExecuteAt);
-            if (pos >= 0 && newCommittedByExecuteAt[pos].equals(updatedCommitted))
+            return Arrays.binarySearch(committedByExecuteAt, 0, committedByExecuteAt.length, curInfo, TxnInfo::compareExecuteAt);
+        }
+        return committedByExecuteAt.length;
+    }
+
+    private TxnInfo[] updateCommittedByExecuteAt(int pos, TxnInfo newInfo, boolean wasPruned)
+    {
+        if (pos == committedByExecuteAt.length)
+            return committedByExecuteAt;
+
+        if (newInfo.status != INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED)
+        {
+            if (pos >= 0 && committedByExecuteAt[pos].equals(newInfo))
             {
-                if (newCommittedByExecuteAt == committedByExecuteAt)
-                {
-                    newCommittedByExecuteAt = newCommittedByExecuteAt.clone();
-                    newCommittedByExecuteAt[pos] = updatedCommitted;
-                }
-                if (pos > newMaxAppliedWriteByExecuteAt && updatedCommitted.status == APPLIED)
-                    newMaxAppliedWriteByExecuteAt = maybeUpdateMaxAppliedAndCheckForLinearizabilityViolations(pos, updatedKind, updatedCommitted, loadingAsPrunedFor != null);
+                TxnInfo[] result = committedByExecuteAt.clone();
+                result[pos] = newInfo;
+                return result;
             }
             else
             {
-                if (pos >= 0) logger.error("Execution timestamp clash on key {}: {} and {} both have executeAt {}", key, updatedCommitted.plainTxnId(), newCommittedByExecuteAt[pos].plainTxnId(), updatedCommitted.executeAt);
+                if (pos >= 0) logger.error("Execution timestamp clash on key {}: {} and {} both have executeAt {}", key, newInfo.plainTxnId(), committedByExecuteAt[pos].plainTxnId(), newInfo.executeAt);
                 else pos = -1 - pos;
 
-                TxnInfo[] newInfos = new TxnInfo[newCommittedByExecuteAt.length + 1];
-                System.arraycopy(newCommittedByExecuteAt, 0, newInfos, 0, pos);
-                newInfos[pos] = updatedCommitted;
-                System.arraycopy(newCommittedByExecuteAt, pos, newInfos, pos + 1, newCommittedByExecuteAt.length - pos);
-                newCommittedByExecuteAt = newInfos;
+                TxnInfo[] result = new TxnInfo[committedByExecuteAt.length + 1];
+                System.arraycopy(committedByExecuteAt, 0, result, 0, pos);
+                result[pos] = newInfo;
+                System.arraycopy(committedByExecuteAt, pos, result, pos + 1, committedByExecuteAt.length - pos);
 
                 if (pos <= maxAppliedWriteByExecuteAt)
                 {
-                    if (pos < maxAppliedWriteByExecuteAt && loadingAsPrunedFor == null)
+                    if (pos < maxAppliedWriteByExecuteAt && !wasPruned)
                     {
                         for (int i = pos; i <= maxAppliedWriteByExecuteAt; ++i)
                         {
-                            if (committedByExecuteAt[pos].kind().witnesses(updatedCommitted))
-                                logger.error("Linearizability violation on key {}: {} is committed to execute (at {}) before {} that should witness it but has already applied (at {})", key, updatedCommitted.plainTxnId(), updatedCommitted.plainExecuteAt(), committedByExecuteAt[i].plainTxnId(), committedByExecuteAt[i].plainExecuteAt());
+                            if (committedByExecuteAt[pos].kind().witnesses(newInfo))
+                                logger.error("Linearizability violation on key {}: {} is committed to execute (at {}) before {} that should witness it but has already applied (at {})", key, newInfo.plainTxnId(), newInfo.plainExecuteAt(), committedByExecuteAt[i].plainTxnId(), committedByExecuteAt[i].plainExecuteAt());
                         }
                     }
-                    ++newMaxAppliedWriteByExecuteAt;
-                }
-                else if (updatedCommitted.status == APPLIED)
-                {
-                    newMaxAppliedWriteByExecuteAt = maybeUpdateMaxAppliedAndCheckForLinearizabilityViolations(pos, updatedKind, updatedCommitted, loadingAsPrunedFor != null);
                 }
 
-                removeFromMissingArrays(newById, newCommittedByExecuteAt, plainTxnId);
+                return result;
             }
         }
-        else if (curInfo != null && newInfo.status == INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED)
+        else
         {
-            if (curInfo.status.compareTo(COMMITTED) < 0) removeFromMissingArrays(newById, newCommittedByExecuteAt, plainTxnId);
-            else if (curInfo.status != INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED)
+            // we can transition from COMMITTED, STABLE or APPLIED to INVALID_OR_TRUNCATED if the local command store ERASES a command
+            // in this case, we not only need to update committedByExecuteAt, we also need to update any unmanaged transactions that
+            // might have been waiting for this command's execution, to either wait for the preceding committed command or else to stop waiting
+            TxnInfo[] newInfos = new TxnInfo[committedByExecuteAt.length - 1];
+            System.arraycopy(committedByExecuteAt, 0, newInfos, 0, pos);
+            System.arraycopy(committedByExecuteAt, pos + 1, newInfos, pos, newInfos.length - pos);
+            return newInfos;
+        }
+    }
+
+    private int updateMaxAppliedWriteByExecuteAt(int pos, TxnInfo newInfo, TxnInfo[] newCommittedByExecuteAt, boolean wasPruned)
+    {
+        if (pos == committedByExecuteAt.length)
+            return maxAppliedWriteByExecuteAt;
+
+
+        boolean inserted = pos < 0;
+        if (inserted) pos = -1 - pos;
+        if (pos <= maxAppliedWriteByExecuteAt)
+        {
+            if (inserted)
             {
-                // we can transition from COMMITTED, STABLE or APPLIED to INVALID_OR_TRUNCATED if the local command store ERASES a command
-                // in this case, we not only need to update committedByExecuteAt, we also need to update any unmanaged transactions that
-                // might have been waiting for this command's execution, to either wait for the preceding committed command or else to stop waiting
-                int pos = Arrays.binarySearch(newCommittedByExecuteAt, 0, newCommittedByExecuteAt.length, curInfo, TxnInfo::compareExecuteAt);
-                TxnInfo[] newInfos = new TxnInfo[newCommittedByExecuteAt.length - 1];
-                System.arraycopy(newCommittedByExecuteAt, 0, newInfos, 0, pos);
-                System.arraycopy(newCommittedByExecuteAt, pos + 1, newInfos, pos, newInfos.length - pos);
-                newCommittedByExecuteAt = newInfos;
-                if (pos <= newMaxAppliedWriteByExecuteAt)
-                {
+                return maxAppliedWriteByExecuteAt + 1;
+            }
+            else if (newInfo.status == INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED)
+            {
+                // deleted
+                int newMaxAppliedWriteByExecuteAt = maxAppliedWriteByExecuteAt - 1;
+                while (newMaxAppliedWriteByExecuteAt >= 0 && newCommittedByExecuteAt[newMaxAppliedWriteByExecuteAt].kind() != Write)
                     --newMaxAppliedWriteByExecuteAt;
-                    while (newMaxAppliedWriteByExecuteAt >= 0 && newCommittedByExecuteAt[newMaxAppliedWriteByExecuteAt].kind() != Write)
-                        --newMaxAppliedWriteByExecuteAt;
-                }
+                return newMaxAppliedWriteByExecuteAt;
             }
         }
-        else if (curInfo == null && maybeInsertMissing && newInfo.status != INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED)
+        else if (newInfo.status == APPLIED)
         {
-            // TODO (desired): for consistency, move this to insertOrUpdate (without additions), while maintaining the efficiency
-            addToMissingArrays(newById, newCommittedByExecuteAt, newInfo, plainTxnId, loadingAsPrunedFor);
+            return maybeUpdateMaxAppliedAndCheckForLinearizabilityViolations(pos, newInfo.kind(), newInfo, wasPruned);
         }
-
-        if (testParanoia(SUPERLINEAR, NONE, LOW) && curInfo == null && newInfo.status.compareTo(COMMITTED) < 0)
-            validateMissing(newById, NO_TXNIDS, 0, curInfo, newInfo, loadingAsPrunedFor);
-
-        return new CommandsForKey(key, redundantBefore, prunedBefore, newLoadingPruned, newById, newCommittedByExecuteAt, newMinUndecidedById, newMaxAppliedWriteByExecuteAt, unmanageds)
-               .notifyUnmanaged(curInfo, newInfo);
+        return maxAppliedWriteByExecuteAt;
     }
 
     private int maybeUpdateMaxAppliedAndCheckForLinearizabilityViolations(int appliedPos, Kind appliedKind, TxnInfo applied, boolean wasPruned)
@@ -2273,7 +2334,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 
             if (!readyToExecute)
             {
-                TxnInfo[] newInfos = byId;
+                TxnInfo[] newById = byId, newCommittedByExecuteAt = committedByExecuteAt;
                 int newMinUndecidedById = minUndecidedById;
                 Object[] newLoadingPruned = loadingPruned;
                 TxnId[] loadPruned = NO_TXNIDS;
@@ -2292,10 +2353,10 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                     {
                         missingCount -= prunedIndex;
                         System.arraycopy(missing, prunedIndex, missing, 0, missingCount);
-                        newInfos = new TxnInfo[byId.length + missingCount];
-                        insertAdditionsOnly(newInfos, missing, missingCount);
+                        newById = new TxnInfo[byId.length + missingCount];
+                        newCommittedByExecuteAt = insertAdditionsOnly(newById, missing, missingCount);
                         // we can safely use missing[prunedIndex] here because we only fill missing with transactions for which we manage execution
-                        newMinUndecidedById = Arrays.binarySearch(newInfos, TxnId.nonNullOrMin(missing[0], minUndecided()));
+                        newMinUndecidedById = Arrays.binarySearch(newById, TxnId.nonNullOrMin(missing[0], minUndecided()));
                     }
                 }
                 cachedTxnIds().discard(missing, clearMissingCount);
@@ -2322,8 +2383,8 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 Unmanaged[] newUnmanaged = SortedArrays.insert(unmanageds, newPendingRecord, Unmanaged[]::new);
 
                 CommandsForKey result;
-                if (newInfos == byId) result = new CommandsForKey(this, newLoadingPruned, newUnmanaged);
-                else result = new CommandsForKey(key, redundantBefore, prunedBefore, newLoadingPruned, newInfos, committedByExecuteAt, newMinUndecidedById, maxAppliedWriteByExecuteAt, newUnmanaged);
+                if (newById == byId) result = new CommandsForKey(this, newLoadingPruned, newUnmanaged);
+                else result = new CommandsForKey(key, redundantBefore, prunedBefore, newLoadingPruned, newById, newCommittedByExecuteAt, newMinUndecidedById, maxAppliedWriteByExecuteAt, newUnmanaged);
 
                 if (loadPruned == NO_TXNIDS)
                     return result;
@@ -2767,17 +2828,21 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         {
             if (byId[i].status.compareTo(HISTORICAL) >= 0)
                 return this;
-            return update(i, txnId, byId[i], TxnInfo.create(txnId, HISTORICAL, txnId, Ballot.ZERO));
+            return update(i, txnId, byId[i], TxnInfo.create(txnId, HISTORICAL, txnId, Ballot.ZERO), false, null);
         }
         else if (txnId.compareTo(prunedBefore) >= 0)
         {
-            return insert(-1 - i, txnId, TxnInfo.create(txnId, HISTORICAL, txnId, Ballot.ZERO));
+            return insert(-1 - i, txnId, TxnInfo.create(txnId, HISTORICAL, txnId, Ballot.ZERO), false, null);
         }
         else
         {
+            TxnId[] loadingPrunedFor = LoadingPruned.get(loadingPruned, txnId, null);
+            if (loadingPrunedFor != null && Arrays.binarySearch(loadingPrunedFor, txnId) >= 0)
+                return this;
+
             TxnId[] txnIdArray = new TxnId[] { txnId };
             Object[] newLoadingPruned = LoadingPruned.load(loadingPruned, txnIdArray, NO_TXNIDS);
-            return LoadPruned.load(new TxnId[] { txnId }, update(newLoadingPruned));
+            return LoadPruned.load(txnIdArray, update(newLoadingPruned));
         }
     }
 
