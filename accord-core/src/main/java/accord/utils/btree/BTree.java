@@ -502,9 +502,9 @@ public class BTree
     }
 
     public static <Compare, Existing extends Compare, Insert extends Compare> Object[] updateExisting(Object[] toUpdate,
-                                                                                              Insert insert,
-                                                                                              int index,
-                                                                                              UpdateFunction<Insert, Existing> updateF)
+                                                                                                      Insert insert,
+                                                                                                      int index,
+                                                                                                      UpdateFunction<Insert, Existing> updateF)
     {
         Existing prev = (Existing) toUpdate[index];
         Object next = updateF.merge(prev, insert);

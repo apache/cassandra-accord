@@ -362,6 +362,18 @@ public class Invariants
         }
     }
 
+    public static void checkIndex(int index, int length)
+    {
+        if (!(index >= 0 && index < length))
+        {
+            if (index < 0)
+                throw new IndexOutOfBoundsException("Index " + index + " must not be negative");
+            if (length < 0)
+                throw new IndexOutOfBoundsException("Length " + length + " must not be negative");
+            throw new IndexOutOfBoundsException(String.format("%d must be less than %d", index, length));
+        }
+    }
+
     public static void checkIndexInBounds(int realLength, int offset, int length)
     {
         if (realLength == 0 || length == 0)

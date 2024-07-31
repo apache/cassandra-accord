@@ -835,9 +835,6 @@ public class Commands
 
     static void removeWaitingOnKeyAndMaybeExecute(SafeCommandStore safeStore, SafeCommand safeCommand, Key key)
     {
-        if (safeStore.time().id().id == 3 && safeCommand.txnId().toString().equals("[3,25616,2(KW),3]") && key.toString().startsWith("0:1#"))
-            System.out.printf("");
-
         if (safeCommand.current().hasBeen(Applied))
             return;
 

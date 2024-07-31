@@ -65,6 +65,7 @@ import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 import accord.utils.async.AsyncResults;
+import org.agrona.collections.Int2ObjectHashMap;
 
 import static accord.api.ConfigurationService.EpochReady.DONE;
 import static accord.local.KeyHistory.COMMANDS;
@@ -600,7 +601,7 @@ public abstract class CommandStore implements AgentExecutor
         // TODO (required): make sure we have no races on HLC around SyncPoint else this resolution may not work (we need to know the micros equivalent timestamp of the snapshot)
         class KeyState
         {
-            Map<Integer, Keys> partiallyBootstrapping;
+            Int2ObjectHashMap<Keys> partiallyBootstrapping;
 
             /**
              * Are the participating ranges for the txn fully covered by bootstrapping ranges for this command store
@@ -611,7 +612,7 @@ public abstract class CommandStore implements AgentExecutor
                     return true;
 
                 if (partiallyBootstrapping == null)
-                    partiallyBootstrapping = new HashMap<>();
+                    partiallyBootstrapping = new Int2ObjectHashMap<>();
                 Keys prev = partiallyBootstrapping.get(txnIdx);
                 Keys remaining = prev;
                 if (remaining == null) remaining = builder.directKeyDeps.participatingKeys(txnIdx);

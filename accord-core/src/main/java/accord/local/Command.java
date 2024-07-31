@@ -1283,7 +1283,7 @@ public abstract class Command implements CommonAttributes
 
         public static WaitingOn none(Deps deps)
         {
-            ImmutableBitSet empty = new ImmutableBitSet(deps.txnIdCount() + deps.keyDeps.keys().size());
+            ImmutableBitSet empty = new ImmutableBitSet(deps.rangeDeps.txnIdCount() + deps.directKeyDeps.txnIdCount() + deps.keyDeps.keys().size());
             return new WaitingOn(deps.keyDeps.keys(), deps.rangeDeps, deps.directKeyDeps, empty, empty);
         }
 
@@ -1299,6 +1299,7 @@ public abstract class Command implements CommonAttributes
 
         public boolean isWaitingOnKey(int keyIndex)
         {
+            Invariants.checkIndex(keyIndex, keys.size());
             return waitingOn.get(txnIdCount() + keyIndex);
         }
 
@@ -1520,11 +1521,13 @@ public abstract class Command implements CommonAttributes
 
             public boolean isWaitingOnDirectRangeTxnIdx(int idx)
             {
+                Invariants.checkIndex(idx, directRangeDeps.txnIdCount());
                 return waitingOn.get(idx);
             }
 
             public boolean isWaitingOnDirectKeyTxnIdx(int idx)
             {
+                Invariants.checkIndex(idx, directKeyDeps.txnIdCount());
                 return waitingOn.get(idx + directRangeDeps.txnIdCount());
             }
 
@@ -1535,16 +1538,19 @@ public abstract class Command implements CommonAttributes
 
             boolean removeWaitingOnDirectRangeTxnId(int i)
             {
+                Invariants.checkIndex(i, directRangeDeps.txnIdCount());
                 return removeWaitingOn(i);
             }
 
             boolean removeWaitingOnDirectKeyTxnId(int i)
             {
+                Invariants.checkIndex(i, directKeyDeps.txnIdCount());
                 return removeWaitingOn(i + directRangeDeps.txnIdCount());
             }
 
             boolean removeWaitingOnKey(int i)
             {
+                Invariants.checkIndex(i, keys.size());
                 return removeWaitingOn(txnIdCount() + i);
             }
 
@@ -1577,11 +1583,13 @@ public abstract class Command implements CommonAttributes
 
             private boolean setAppliedOrInvalidatedDirectRangeTxn(int i)
             {
+                Invariants.checkIndex(i, directRangeDeps.txnIdCount());
                 return setAppliedOrInvalidated(i);
             }
 
             private boolean setAppliedOrInvalidatedDirectKeyTxn(int i)
             {
+                Invariants.checkIndex(i, directKeyDeps.txnIdCount());
                 return setAppliedOrInvalidated(i + directRangeDeps.txnIdCount());
             }
 
