@@ -19,7 +19,7 @@
 package accord.primitives;
 
 import accord.api.Key;
-import accord.local.CommandsForKey;
+import accord.local.cfk.CommandsForKey;
 import accord.utils.Invariants;
 import accord.utils.MergeFewDisjointSortedListsCursor;
 import accord.utils.SortedCursor;

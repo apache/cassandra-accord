@@ -29,6 +29,7 @@ import accord.api.RoutingKey;
 import accord.api.VisibleForImplementation;
 import accord.local.Status.Durability;
 import accord.local.Status.Known;
+import accord.local.cfk.CommandsForKey;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
@@ -241,7 +242,7 @@ public abstract class Command implements CommonAttributes
         }
     }
 
-    abstract static class AbstractCommand extends Command
+    public abstract static class AbstractCommand extends Command
     {
         private final TxnId txnId;
         private final SaveStatus status;
@@ -1126,7 +1127,7 @@ public abstract class Command implements CommonAttributes
             return committed(command, common, command.promised(), status, command.waitingOn());
         }
 
-        static Committed committed(Committed command, CommonAttributes common, WaitingOn waitingOn)
+        public static Committed committed(Committed command, CommonAttributes common, WaitingOn waitingOn)
         {
             return committed(command, common, command.promised(), command.saveStatus(), waitingOn);
         }
@@ -1440,7 +1441,7 @@ public abstract class Command implements CommonAttributes
                 throw new IllegalArgumentException("WaitingOn does not track this kind of TxnId: " + txnId);
             }
 
-            int txnIdCount()
+            public int txnIdCount()
             {
                 return directRangeDeps.txnIdCount() + directKeyDeps.txnIdCount();
             }

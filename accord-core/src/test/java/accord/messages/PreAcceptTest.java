@@ -34,7 +34,7 @@ import accord.impl.mock.Network;
 import accord.impl.mock.RecordingMessageSink;
 import accord.local.Command;
 import accord.local.CommandStore;
-import accord.local.CommandsForKey;
+import accord.local.cfk.CommandsForKey;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.PreLoadContext;

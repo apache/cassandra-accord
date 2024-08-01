@@ -19,6 +19,7 @@
 package accord.local;
 
 import accord.api.Key;
+import accord.local.cfk.CommandsForKey;
 import accord.primitives.Keys;
 import accord.primitives.Seekables;
 import accord.primitives.TxnId;

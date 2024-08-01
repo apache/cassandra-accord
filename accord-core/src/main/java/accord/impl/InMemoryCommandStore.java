@@ -52,6 +52,8 @@ import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.ProgressLog;
 import accord.local.CommandStores.RangesForEpoch;
+import accord.local.cfk.CommandsForKey;
+import accord.local.cfk.SafeCommandsForKey;
 import accord.primitives.AbstractKeys;
 import accord.primitives.Deps;
 import accord.primitives.PartialDeps;
@@ -78,7 +80,6 @@ import static accord.local.SafeCommandStore.TestStartedAt.STARTED_BEFORE;
 import static accord.local.SaveStatus.Applying;
 import static accord.local.SaveStatus.Erased;
 import static accord.local.SaveStatus.ReadyToExecute;
-import static accord.local.Status.Accepted;
 import static accord.local.Status.Applied;
 import static accord.local.Status.Stable;
 import static accord.local.Status.Truncated;
@@ -255,7 +256,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         return timestampsForKey.get(key);
     }
 
-    private <O> O mapReduceForKey(InMemorySafeStore safeStore, Routables<?> keysOrRanges, Ranges slice, BiFunction<accord.local.CommandsForKey, O, O> map, O accumulate)
+    private <O> O mapReduceForKey(InMemorySafeStore safeStore, Routables<?> keysOrRanges, Ranges slice, BiFunction<CommandsForKey, O, O> map, O accumulate)
     {
         switch (keysOrRanges.domain()) {
             default:
@@ -265,7 +266,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                 for (Key key : keys)
                 {
                     if (!slice.contains(key)) continue;
-                    accord.local.CommandsForKey commands = safeStore.ifLoadedAndInitialised(key).current();
+                    CommandsForKey commands = safeStore.ifLoadedAndInitialised(key).current();
                     if (commands == null)
                         continue;
 
@@ -282,7 +283,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                     for (Map.Entry<RoutableKey, GlobalCommandsForKey> entry : commandsForKey.subMap(range.start(), range.startInclusive(), range.end(), range.endInclusive()).entrySet())
                     {
                         GlobalCommandsForKey globalCommands = entry.getValue();
-                        accord.local.CommandsForKey commands = globalCommands.value();
+                        CommandsForKey commands = globalCommands.value();
                         if (commands == null)
                             continue;
                         accumulate = map.apply(commands, accumulate);

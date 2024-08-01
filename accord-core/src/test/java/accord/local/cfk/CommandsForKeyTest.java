@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package accord.local;
+package accord.local.cfk;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -48,7 +48,20 @@ import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.api.Update;
 import accord.impl.IntKey;
+import accord.local.Command;
 import accord.local.Command.AbstractCommand;
+import accord.local.CommandStore;
+import accord.local.CommandStores;
+import accord.local.CommonAttributes;
+import accord.local.Listeners;
+import accord.local.Node;
+import accord.local.NodeTimeService;
+import accord.local.PreLoadContext;
+import accord.local.SafeCommand;
+import accord.local.SafeCommandStore;
+import accord.local.SaveStatus;
+import accord.local.Status;
+import accord.local.cfk.CommandsForKey.TxnInfo;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.EpochSupplier;
@@ -72,6 +85,7 @@ import accord.utils.RandomSource;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncResults;
 
+import static accord.local.Command.NotDefined.notDefined;
 import static accord.local.Status.Durability.NotDurable;
 
 // TODO (expected): test setting redundant before
@@ -203,7 +217,7 @@ public class CommandsForKeyTest
         }
 
         @Override
-        public void waitingOnCommit(SafeCommandStore safeStore, CommandsForKey.TxnInfo uncommitted, Key key)
+        public void waitingOnCommit(SafeCommandStore safeStore, TxnInfo uncommitted, Key key)
         {
         }
 
@@ -448,7 +462,7 @@ public class CommandsForKeyTest
 
         Command unwitnessed(TxnId txnId)
         {
-            Command command = new Command.NotDefined(common(txnId), SaveStatus.NotDefined, Ballot.ZERO);
+            Command command = notDefined(common(txnId), Ballot.ZERO);
             unwitnessed.add(txnId);
             undecided.add(txnId);
             candidates.add(txnId);
@@ -463,15 +477,15 @@ public class CommandsForKeyTest
 
         Command acceptedInvalidated(TxnId txnId, SaveStatus saveStatus)
         {
-            return new Command.Accepted(common(txnId, saveStatus.known.definition.isKnown()),
-                                        saveStatus, Ballot.ZERO, txnId, Ballot.ZERO);
+            return Command.Accepted.accepted(common(txnId, saveStatus.known.definition.isKnown()),
+                                        saveStatus, txnId, Ballot.ZERO, Ballot.ZERO);
         }
 
         Command accepted(TxnId txnId, Timestamp executeAt, SaveStatus saveStatus)
         {
             Deps deps = generateDeps(txnId, txnId, Status.Accepted);
-            return new Command.Accepted(common(txnId, saveStatus.known.definition.isKnown()).partialDeps(deps.slice(RANGES)),
-                                        saveStatus, Ballot.ZERO, executeAt, Ballot.ZERO);
+            return Command.Accepted.accepted(common(txnId, saveStatus.known.definition.isKnown()).partialDeps(deps.slice(RANGES)),
+                                        saveStatus, executeAt, Ballot.ZERO, Ballot.ZERO);
         }
 
         Command committed(TxnId txnId, Timestamp executeAt)
@@ -597,7 +611,7 @@ public class CommandsForKeyTest
                     safeCfk.set(result.cfk());
                     if (rnd.decide(pruneChance))
                         safeCfk.set(safeCfk.current.maybePrune(pruneInterval, pruneHlcDelta));
-                    result.notify(safeStore, prev, update.next, canon);
+                    result.postProcess(safeStore, prev, update.next, canon);
                 }
 
                 if (!CommandsForKey.managesExecution(update.next.txnId()) && update.next.hasBeen(Status.Stable) && !update.next.hasBeen(Status.Truncated))
@@ -605,7 +619,7 @@ public class CommandsForKeyTest
                     CommandsForKey prev = safeCfk.current();
                     result = prev.registerUnmanaged(safeStore, safeCommand, canon);
                     safeCfk.set(result.cfk());
-                    result.notify(safeStore, prev, null, canon);
+                    result.postProcess(safeStore, prev, null, canon);
                 }
             }
         }

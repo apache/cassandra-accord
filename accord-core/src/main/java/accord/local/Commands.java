@@ -833,7 +833,7 @@ public class Commands
         }
     }
 
-    static void removeWaitingOnKeyAndMaybeExecute(SafeCommandStore safeStore, SafeCommand safeCommand, Key key)
+    public static void removeWaitingOnKeyAndMaybeExecute(SafeCommandStore safeStore, SafeCommand safeCommand, Key key)
     {
         if (safeCommand.current().hasBeen(Applied))
             return;

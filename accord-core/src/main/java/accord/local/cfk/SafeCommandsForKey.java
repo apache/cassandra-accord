@@ -16,13 +16,18 @@
  * limitations under the License.
  */
 
-package accord.local;
+package accord.local.cfk;
 
 import javax.annotation.Nullable;
 
 import accord.api.Agent;
 import accord.api.Key;
 import accord.impl.SafeState;
+import accord.local.Command;
+import accord.local.RedundantBefore;
+import accord.local.SafeCommand;
+import accord.local.SafeCommandStore;
+import accord.local.Status;
 import accord.primitives.TxnId;
 
 public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
@@ -55,7 +60,7 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
 
     private void update(SafeCommandStore safeStore, @Nullable Command command, CommandsForKey prevCfk, CommandsForKeyUpdate updateCfk)
     {
-        update(safeStore, command, prevCfk, updateCfk, DefaultNotifySink.INSTANCE);
+        update(safeStore, command, prevCfk, updateCfk, NotifySink.DefaultNotifySink.INSTANCE);
     }
 
     private void update(SafeCommandStore safeStore, @Nullable Command command, CommandsForKey prevCfk, CommandsForKeyUpdate updateCfk, NotifySink notifySink)
@@ -74,10 +79,10 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
             set(nextCfk);
         }
 
-        updateCfk.notify(safeStore, prevCfk, command, notifySink);
+        updateCfk.postProcess(safeStore, prevCfk, command, notifySink);
     }
 
-    void registerUnmanaged(SafeCommandStore safeStore, SafeCommand unmanaged)
+    public void registerUnmanaged(SafeCommandStore safeStore, SafeCommand unmanaged)
     {
         CommandsForKey prevCfk = current();
         update(safeStore, null, prevCfk, prevCfk.registerUnmanaged(safeStore, unmanaged));

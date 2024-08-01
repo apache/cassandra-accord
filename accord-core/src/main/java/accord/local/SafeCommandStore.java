@@ -27,6 +27,8 @@ import accord.api.Key;
 import accord.api.ProgressLog;
 import accord.api.RoutingKey;
 import accord.impl.ErasedSafeCommand;
+import accord.local.cfk.CommandsForKey;
+import accord.local.cfk.SafeCommandsForKey;
 import accord.primitives.Deps;
 import accord.primitives.EpochSupplier;
 import accord.primitives.Keys;
@@ -153,6 +155,11 @@ public abstract class SafeCommandStore
     {
         SafeCommand safeCommand = getInternal(txnId);
         return maybeTruncate(safeCommand, safeCommand.current(), null, null);
+    }
+
+    public SafeCommand unsafeGet(TxnId txnId)
+    {
+        return get(txnId);
     }
 
     protected SafeCommandsForKey maybeTruncate(SafeCommandsForKey safeCfk)
