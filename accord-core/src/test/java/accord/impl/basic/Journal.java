@@ -64,6 +64,7 @@ public class Journal implements LocalRequest.Handler, Runnable
     private final MessageListener messageListener;
     private final Map<Key, List<Diff>> diffs = new HashMap<>();
     private Node node;
+    boolean isScheduled;
 
     public Journal(MessageListener messageListener)
     {
@@ -73,7 +74,13 @@ public class Journal implements LocalRequest.Handler, Runnable
     public void start(Node node)
     {
         this.node = node;
-        node.scheduler().recurring(this, 1, TimeUnit.MILLISECONDS);
+    }
+
+    private void ensureScheduled()
+    {
+        if (isScheduled) return;
+        node.scheduler().once(this, 1, TimeUnit.MILLISECONDS);
+        isScheduled = true;
     }
 
     public void shutdown()
@@ -84,6 +91,7 @@ public class Journal implements LocalRequest.Handler, Runnable
     @Override
     public <R> void handle(LocalRequest<R> message, BiConsumer<? super R, Throwable> callback, Node node)
     {
+        ensureScheduled();
         messageListener.onMessage(NodeSink.Action.DELIVER, node.id(), node.id(), -1, message);
         if (message.type().hasSideEffects())
         {
@@ -96,6 +104,7 @@ public class Journal implements LocalRequest.Handler, Runnable
 
     public void handle(Request request, Node.Id from, ReplyContext replyContext)
     {
+        ensureScheduled();
         if (request.type() != null && request.type().hasSideEffects())
         {
             // enqueue
@@ -108,6 +117,7 @@ public class Journal implements LocalRequest.Handler, Runnable
     @Override
     public void run()
     {
+        isScheduled = false;
         if (this.node == null)
             return;
         try

@@ -18,8 +18,10 @@
 
 package accord.local;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Objects;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -70,6 +72,7 @@ import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestDep.WITH;
 import static accord.local.SaveStatus.LocalExecution.WaitingToApply;
 import static accord.local.SaveStatus.LocalExecution.WaitingToExecute;
+import static accord.primitives.Txn.Kind.EphemeralRead;
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static accord.primitives.Txn.Kind.Kinds.AnyGloballyVisible;
 import static accord.primitives.Txn.Kind.Write;
@@ -457,6 +460,28 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 
             return false;
         }
+
+        /**
+         * Return true if {@code waitingId} is waiting for any transaction with a lower TxnId than waitingExecuteAt
+         */
+        static boolean isAnyPredecessorWaiting(Object[] loadingPruned, TxnId waitingId)
+        {
+            if (BTree.isEmpty(loadingPruned))
+                return false;
+
+            int ceilIndex = BTree.ceilIndex(loadingPruned, Timestamp::compareTo, waitingId);
+            // TODO (desired): this is O(n.lg n), whereas we could import the accumulate function and perform in O(max(m, lg n))
+            for (int i = 0 ; i < ceilIndex ; ++i)
+            {
+                LoadingPruned loading = BTree.findByIndex(loadingPruned, i);
+                if (!managesExecution(loading)) continue;
+                // if we exactly match any, or if we sort after the first element then we're waiting for some txnId <= waitingId
+                if (-1 != Arrays.binarySearch(loading.witnessedBy, waitingId))
+                    return true;
+            }
+
+            return false;
+        }
     }
 
     /**
@@ -685,9 +710,14 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
     {
         if (isParanoid())
         {
+            Invariants.checkState(byId.length == 0 || byId[0].compareTo(shardRedundantBefore()) >= 0);
             Invariants.checkState(prunedBefore == NO_INFO || (prunedBefore.status == APPLIED && prunedBefore.kind().isWrite()));
             Invariants.checkState(minUndecidedById < 0 || byId[minUndecidedById].status.compareTo(COMMITTED) < 0 && managesExecution(byId[minUndecidedById]));
-            Invariants.checkState(maxAppliedWriteByExecuteAt < 0 || committedByExecuteAt[maxAppliedWriteByExecuteAt].status == APPLIED);
+            if (maxAppliedWriteByExecuteAt >= 0)
+            {
+                Invariants.checkState(committedByExecuteAt[maxAppliedWriteByExecuteAt].kind() == Write);
+                Invariants.checkState(committedByExecuteAt[maxAppliedWriteByExecuteAt].status == APPLIED);
+            }
 
             if (testParanoia(LINEAR, NONE, LOW))
             {
@@ -699,9 +729,8 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 
                 if (maxAppliedWriteByExecuteAt >= 0)
                 {
-                    Invariants.checkState(committedByExecuteAt[maxAppliedWriteByExecuteAt].kind() == Write);
-                    Invariants.checkState(committedByExecuteAt[maxAppliedWriteByExecuteAt].status == APPLIED);
-                    for (int i = maxAppliedWriteByExecuteAt + 1; i < committedByExecuteAt.length ; ++i) Invariants.checkState(committedByExecuteAt[i].kind() != Kind.Write || committedByExecuteAt[i].status.compareTo(APPLIED) < 0);
+                    for (int i = maxAppliedWriteByExecuteAt + 1; i < committedByExecuteAt.length ; ++i)
+                        Invariants.checkState(committedByExecuteAt[i].kind() != Kind.Write || committedByExecuteAt[i].status.compareTo(APPLIED) < 0);
                 }
                 else
                 {
@@ -997,11 +1026,8 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                                      Kinds testKind,
                                      CommandFunction<P1, T, T> map, P1 p1, T initialValue)
     {
-        // TODO (required, consider): how to harden state machine when startedBefore < prunedBefore;
-        //   this is fine in principle because if txnId < startedBefore, we either have already applied
-        //   and we will find this out, or else we may find no dependencies during PreAccept but must
-        //   propose a higher executeAt, and this higher executeAt will be after prunedBefore
-        Timestamp maxCommittedBefore;
+        int end = insertPos(0, startedBefore);
+        Timestamp maxCommittedWriteBefore;
         {
             int from = 0, to = committedByExecuteAt.length;
             if (maxAppliedWriteByExecuteAt >= 0)
@@ -1013,11 +1039,10 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             if (i < 0) i = -2 - i;
             else --i;
             while (i >= 0 && !committedByExecuteAt[i].kind().isWrite()) --i;
-            maxCommittedBefore = i < 0 ? null : committedByExecuteAt[i].executeAt;
+            maxCommittedWriteBefore = i < 0 ? null : committedByExecuteAt[i].executeAt;
         }
-        int start = 0, end = insertPos(start, startedBefore);
 
-        for (int i = start; i < end ; ++i)
+        for (int i = 0; i < end ; ++i)
         {
             TxnInfo txn = byId[i];
             if (!testKind.test(txn.kind()))
@@ -1029,7 +1054,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 case STABLE:
                 case APPLIED:
                     // TODO (expected): prove the correctness of this approach
-                    if (!ELIDE_TRANSITIVE_DEPENDENCIES || maxCommittedBefore == null || txn.executeAt.compareTo(maxCommittedBefore) >= 0 || !Write.witnesses(txn))
+                    if (!ELIDE_TRANSITIVE_DEPENDENCIES || maxCommittedWriteBefore == null || txn.executeAt.compareTo(maxCommittedWriteBefore) >= 0 || !Write.witnesses(txn))
                         break;
                 case TRANSITIVELY_KNOWN:
                 case INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED:
@@ -1038,6 +1063,22 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 
             initialValue = map.apply(p1, key, txn.plainTxnId(), txn.executeAt, initialValue);
         }
+
+        if (startedBefore.compareTo(prunedBefore) <= 0)
+        {
+            // in the event we have pruned transactions that may execute before us, we take the earliest future dependency we can in their place.
+            // in practice this only has an effect on ExclusiveSyncPoints because they do not agree an execution time
+            // and only take dependencies on TxnId lower than them. Other transactions will propose a timestamp that
+            // occurs after any dependencies witnessed here, or will be invalidated, or have already been agreed
+            // and their dependencies are known.
+            int i = SortedArrays.binarySearch(committedByExecuteAt, 0, maxAppliedWriteByExecuteAt, startedBefore, (f, v) -> f.compareTo(v.executeAt), FAST);
+            if (i < 0) i = -1 - i;
+            while (!committedByExecuteAt[i].kind().isWrite())
+                ++i;
+
+            initialValue = map.apply(p1, key, committedByExecuteAt[i].plainTxnId(), committedByExecuteAt[i].executeAt, initialValue);
+        }
+
         return initialValue;
     }
 
@@ -1092,6 +1133,9 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
     {
         TxnId txnId = next.txnId();
         Invariants.checkArgument(wasPruned || manages(txnId));
+
+        if (txnId.compareTo(redundantBefore.shardRedundantBefore()) < 0)
+            return this;
 
         TxnId[] loadingAsPrunedFor = LoadingPruned.get(loadingPruned, txnId, null); // we default to null to distinguish between no match, and a match with NO_TXNIDS
         wasPruned |= loadingAsPrunedFor != null;
@@ -1863,24 +1907,12 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
      */
     private Object computeInfoAndAdditions(int insertPos, int updatePos, TxnId plainTxnId, InternalStatus newStatus, Ballot ballot, Timestamp executeAt, Timestamp depsKnownBefore, SortedCursor<TxnId> deps)
     {
-        int depsKnownBeforePos;
-        if (depsKnownBefore == plainTxnId)
-        {
-            depsKnownBeforePos = insertPos;
-        }
-        else
-        {
-            depsKnownBeforePos = Arrays.binarySearch(byId, insertPos, byId.length, depsKnownBefore);
-            Invariants.checkState(depsKnownBeforePos < 0);
-            depsKnownBeforePos = -1 - depsKnownBeforePos;
-        }
-
         TxnId[] additions = NO_TXNIDS, missing = NO_TXNIDS;
         int additionCount = 0, missingCount = 0;
 
         deps.find(redundantBefore.shardRedundantBefore());
         int txnIdsIndex = 0;
-        while (txnIdsIndex < depsKnownBeforePos && deps.hasCur())
+        while (txnIdsIndex < byId.length && deps.hasCur())
         {
             TxnInfo t = byId[txnIdsIndex];
             TxnId d = deps.cur();
@@ -1922,27 +1954,41 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             }
         }
 
-        while (txnIdsIndex < depsKnownBeforePos)
+        if (deps.hasCur())
         {
-            if (txnIdsIndex != updatePos && byId[txnIdsIndex].status.compareTo(COMMITTED) < 0)
+            do
             {
-                TxnId txnId = byId[txnIdsIndex].plainTxnId();
-                if ((plainTxnId.kind().witnesses(txnId)))
-                {
-                    if (missingCount == missing.length)
-                        missing = cachedTxnIds().resize(missing, missingCount, Math.max(8, missingCount * 2));
-                    missing[missingCount++] = txnId;
-                }
+                if (additionCount >= additions.length)
+                    additions = cachedTxnIds().resize(additions, additionCount, Math.max(8, additionCount * 2));
+                additions[additionCount++] = deps.cur();
+                deps.advance();
             }
-            txnIdsIndex++;
+            while (deps.hasCur());
         }
-
-        while (deps.hasCur())
+        else if (txnIdsIndex < byId.length)
         {
-            if (additionCount >= additions.length)
-                additions = cachedTxnIds().resize(additions, additionCount, Math.max(8, additionCount * 2));
-            additions[additionCount++] = deps.cur();
-            deps.advance();
+            int depsKnownBeforePos = insertPos;
+            if (depsKnownBefore != plainTxnId)
+            {
+                depsKnownBeforePos = Arrays.binarySearch(byId, Math.max(txnIdsIndex, insertPos), byId.length, depsKnownBefore);
+                Invariants.checkState(depsKnownBeforePos < 0);
+                depsKnownBeforePos = -1 - depsKnownBeforePos;
+            }
+
+            while (txnIdsIndex < depsKnownBeforePos)
+            {
+                if (txnIdsIndex != updatePos && byId[txnIdsIndex].status.compareTo(COMMITTED) < 0)
+                {
+                    TxnId txnId = byId[txnIdsIndex].plainTxnId();
+                    if ((plainTxnId.kind().witnesses(txnId)))
+                    {
+                        if (missingCount == missing.length)
+                            missing = cachedTxnIds().resize(missing, missingCount, Math.max(8, missingCount * 2));
+                        missing[missingCount++] = txnId;
+                    }
+                }
+                txnIdsIndex++;
+            }
         }
 
         TxnInfo info = TxnInfo.create(plainTxnId, newStatus, executeAt, cachedTxnIds().completeAndDiscard(missing, missingCount), ballot);
@@ -1996,7 +2042,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 
                 if (pos <= maxAppliedWriteByExecuteAt)
                 {
-                    if (pos < maxAppliedWriteByExecuteAt && !wasPruned)
+                    if (pos < maxAppliedWriteByExecuteAt && !wasPruned && redundantBefore.bootstrappedAt.compareTo(newInfo) < 0)
                     {
                         for (int i = pos; i <= maxAppliedWriteByExecuteAt; ++i)
                         {
@@ -2053,7 +2099,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 
     private int maybeUpdateMaxAppliedAndCheckForLinearizabilityViolations(int appliedPos, Kind appliedKind, TxnInfo applied, boolean wasPruned)
     {
-        if (!wasPruned)
+        if (!wasPruned && redundantBefore.bootstrappedAt.compareTo(applied) < 0)
         {
             for (int i = maxAppliedWriteByExecuteAt + 1; i < appliedPos ; ++i)
             {
@@ -2181,87 +2227,16 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             notifySink.waitingOnCommit(safeStore, uncommitted, key);
     }
 
-    private static void updateUnmanagedAsync(SafeCommandStore safeStore, TxnId txnId, Key key, NotifySink notifySink)
+    private static void updateUnmanagedAsync(CommandStore commandStore, TxnId txnId, Key key, NotifySink notifySink)
     {
         PreLoadContext context = PreLoadContext.contextFor(txnId, Keys.of(key), COMMANDS);
-        safeStore.commandStore().execute(context, safeStore0 -> {
-            SafeCommandsForKey safeCommandsForKey = safeStore0.get(key);
-            CommandsForKey prev = safeCommandsForKey.current();
-            Unmanaged addPending = updateUnmanaged(safeStore0, safeStore0.get(txnId), prev, notifySink);
-            if (addPending != null)
-            {
-                Unmanaged[] newPending = SortedArrays.insert(prev.unmanageds, addPending, Unmanaged[]::new);
-                safeCommandsForKey.set(new CommandsForKey(prev, prev.loadingPruned, newPending));
-            }
-        }).begin(safeStore.agent());
-    }
-
-    private static Unmanaged updateUnmanaged(SafeCommandStore safeStore, SafeCommand safeCommand, CommandsForKey cfk, NotifySink notifySink)
-    {
-        if (safeCommand.current().hasBeen(Status.Truncated))
-            return null;
-
-        Command.Committed command = safeCommand.current().asCommitted();
-        TxnId waitingTxnId = command.txnId();
-        Timestamp waitingExecuteAt = command.executeAt();
-
-        SortedRelationList<TxnId> txnIds = command.partialDeps().keyDeps.txnIds(cfk.key);
-        int i = txnIds.find(cfk.shardRedundantBefore());
-        if (i < 0) i = -1 - i;
-
-        if (i < txnIds.size())
-        {
-            boolean readyToExecute = true;
-            Timestamp executesAt = null;
-            int j = SortedArrays.binarySearch(cfk.byId, 0, cfk.byId.length, txnIds.get(i), Timestamp::compareTo, FAST);
-            if (j < 0) j = -1 -j;
-            while (i < txnIds.size() && j < cfk.byId.length)
-            {
-                int c = txnIds.get(i).compareTo(cfk.byId[j]);
-                if (c > 0)
-                {
-                    ++j;
-                }
-                else if (c < 0)
-                {
-                    TxnId txnId = txnIds.get(i);
-                    if (txnId.compareTo(cfk.prunedBefore) < 0 || !managesExecution(txnId)) ++i;
-                    else throw illegalState("Transaction not found: " + cfk.byId[j]);
-                }
-                else
-                {
-                    TxnInfo txn = cfk.byId[j];
-                    Invariants.checkState(txn.status.compareTo(COMMITTED) >= 0);
-                    if (txn.status != INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED && (waitingTxnId.kind().awaitsOnlyDeps() || txn.executeAt.compareTo(waitingExecuteAt) < 0))
-                    {
-                        readyToExecute &= txn.status == APPLIED;
-                        executesAt = Timestamp.nonNullOrMax(executesAt, txn.executeAt);
-                    }
-                    ++i;
-                    ++j;
-                }
-            }
-
-            if (!readyToExecute)
-            {
-                if (executesAt instanceof TxnInfo)
-                    executesAt = ((TxnInfo) executesAt).plainExecuteAt();
-
-                if (waitingTxnId.kind().awaitsOnlyDeps() && executesAt != null)
-                {
-                    if (executesAt.compareTo(command.waitingOn.executeAtLeast(Timestamp.NONE)) > 0)
-                    {
-                        Command.WaitingOn.Update waitingOn = new Command.WaitingOn.Update(command.waitingOn);
-                        waitingOn.updateExecuteAtLeast(executesAt);
-                        safeCommand.updateWaitingOn(waitingOn);
-                    }
-                }
-                return new Unmanaged(APPLY, command.txnId(), executesAt);
-            }
-        }
-
-        notifySink.notWaiting(safeStore, safeCommand, cfk.key);
-        return null;
+        commandStore.execute(context, safeStore -> {
+            SafeCommandsForKey safeCommandsForKey = safeStore.get(key);
+            CommandsForKey cur = safeCommandsForKey.current();
+            CommandsForKey next = cur.updateUnmanaged(safeStore, safeStore.get(txnId), notifySink);
+            if (cur != next)
+                safeCommandsForKey.set(next);
+        }).begin(commandStore.agent());
     }
 
     private static int findCommit(Unmanaged[] unmanageds, Timestamp exclusive)
@@ -2291,6 +2266,18 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 
     CommandsForKeyUpdate registerUnmanaged(SafeCommandStore safeStore, SafeCommand safeCommand, NotifySink notifySink)
     {
+        return updateUnmanaged(safeStore, safeCommand, notifySink, true, null);
+    }
+
+    /**
+     * Three modes of operation:
+     *  - {@code register}: inserts any missing dependencies from safeCommand into the collection; may return CommandsForKeyUpdate
+     *  - {@code !register, update == null}: fails if any dependencies are missing; always returns a CommandsForKey
+     *  - {@code !register && update != null}: fails if any dependencies are missing; always returns the original CommandsForKey, and maybe adds a new Unmanaged to {@code update}
+     */
+    private CommandsForKeyUpdate updateUnmanaged(SafeCommandStore safeStore, SafeCommand safeCommand, NotifySink notifySink, boolean register, @Nullable List<Unmanaged> update)
+    {
+        Invariants.checkArgument(!register || update == null);
         if (safeCommand.current().hasBeen(Status.Truncated))
             return this;
 
@@ -2299,16 +2286,18 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         Timestamp waitingExecuteAt = command.executeAt();
 
         SortedRelationList<TxnId> txnIds = command.partialDeps().keyDeps.txnIds(key);
-        TxnId[] missing = cachedTxnIds().get(8);
+        TxnId[] missing = NO_TXNIDS;
         int missingCount = 0;
         int i = txnIds.find(shardRedundantBefore());
         if (i < 0) i = -1 - i;
         if (i < txnIds.size())
         {
-            boolean readyToExecute = true;
-            boolean waitingToApply = true;
+            Kind waitingKind = waitingTxnId.kind();
+            boolean readyToApply = true; // our dependencies have applied, so we are ready to apply
+            boolean waitingToApply = true; // our dependencies have committed, so we know when we execute and are waiting
             Timestamp executesAt = null;
             int j = SortedArrays.binarySearch(byId, 0, byId.length, txnIds.get(i), Timestamp::compareTo, FAST);
+
             if (j < 0) j = -1 -j;
             while (i < txnIds.size())
             {
@@ -2316,27 +2305,60 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 if (c == 0)
                 {
                     TxnInfo txn = byId[j];
-                    if (txn.status.compareTo(COMMITTED) < 0) readyToExecute = waitingToApply = false;
-                    else if (txn.status != INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED && (waitingTxnId.kind().awaitsOnlyDeps() || txn.executeAt.compareTo(waitingExecuteAt) < 0))
+                    if (txn.status.compareTo(COMMITTED) < 0) waitingToApply = readyToApply = false;
+                    else if (txn.status != INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED
+                             && (txn.executeAt.compareTo(waitingExecuteAt) < 0
+                                 || waitingKind == EphemeralRead
+                                 || (waitingKind == ExclusiveSyncPoint && txn.compareTo(waitingTxnId) < 0)))
                     {
-                        readyToExecute &= txn.status == APPLIED;
+                        readyToApply &= txn.status == APPLIED;
                         executesAt = Timestamp.nonNullOrMax(executesAt, txn.executeAt);
                     }
                     ++i;
                     ++j;
                 }
-                else if (c > 0) ++j;
+                else if (c > 0)
+                {
+                    if (waitingKind.isSyncPoint())
+                    {
+                        // we special-case sync points to handle pruning of transactions they should have witnessed as dependencies.
+                        // We require all earlier TxnId to be decided before we can execute; we must be informed of all the necessary TxnId
+                        // transitively by the "future" dependency provided for this purpose in mapReduceActive, so simply ensuring
+                        // all earlier TxnId are committed is sufficient to compute the correct executeAt.
+                        TxnInfo txn = byId[j];
+                        if (managesExecution(txn))
+                        {
+                            if (txn.status.compareTo(COMMITTED) < 0) readyToApply = waitingToApply = false;
+                            else if (txn.status != INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED
+                                     && (txn.executeAt.compareTo(waitingExecuteAt) < 0
+                                         || waitingKind == EphemeralRead
+                                         || (waitingKind == ExclusiveSyncPoint && txn.compareTo(waitingTxnId) < 0)))
+                            {
+                                readyToApply &= txn.status == APPLIED;
+                                executesAt = Timestamp.nonNullOrMax(executesAt, txn.executeAt);
+                            }
+                        }
+                    }
+                    ++j;
+                }
                 else if (!managesExecution(txnIds.get(i))) ++i;
+                else if (register)
+                {
+                    readyToApply = waitingToApply = false;
+                    if (missingCount == missing.length)
+                        missing = cachedTxnIds().resize(missing, missingCount, Math.max(8, missingCount + missingCount/2));
+                    missing[missingCount++] = txnIds.get(i++);
+                }
                 else
                 {
-                    readyToExecute = waitingToApply = false;
-                    if (missingCount == missing.length)
-                        missing = cachedTxnIds().resize(missing, missingCount, missingCount * 2);
-                    missing[missingCount++] = txnIds.get(i++);
+                    Invariants.checkState(txnIds.get(i++).compareTo(prunedBefore) < 0);
                 }
             }
 
-            if (!readyToExecute)
+            if (waitingKind.isSyncPoint() && LoadingPruned.isAnyPredecessorWaiting(loadingPruned, waitingTxnId))
+                readyToApply = waitingToApply = false;
+
+            if (!readyToApply)
             {
                 TxnInfo[] newById = byId, newCommittedByExecuteAt = committedByExecuteAt;
                 int newMinUndecidedById = minUndecidedById;
@@ -2384,6 +2406,13 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                     newPendingRecord = new Unmanaged(APPLY, command.txnId(), executesAt);
                 }
                 else newPendingRecord = new Unmanaged(COMMIT, command.txnId(), txnIds.get(txnIds.size() - 1));
+
+                if (update != null)
+                {
+                    update.add(newPendingRecord);
+                    return this;
+                }
+
                 Unmanaged[] newUnmanaged = SortedArrays.insert(unmanageds, newPendingRecord, Unmanaged[]::new);
 
                 CommandsForKey result;
@@ -2399,6 +2428,13 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 
         notifySink.notWaiting(safeStore, safeCommand, key);
         return this;
+    }
+
+    private CommandsForKey updateUnmanaged(SafeCommandStore safeStore, SafeCommand safeCommand, NotifySink notifySink)
+    {
+        CommandsForKeyUpdate upd = updateUnmanaged(safeStore, safeCommand, notifySink, false, null);
+        Invariants.checkState(upd instanceof CommandsForKey);
+        return (CommandsForKey) upd;
     }
 
     void notify(SafeCommandStore safeStore, CommandsForKey prevCfk, @Nullable Command command, NotifySink notifySink)
@@ -2979,28 +3015,27 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         void doNotify(SafeCommandStore safeStore, Key key, NotifySink notifySink)
         {
             SafeCommandsForKey safeCfk = safeStore.get(key);
-            Unmanaged[] addUnmanageds = new Unmanaged[notify.length];
-            int addCount = 0;
+            CommandsForKey cfk = safeCfk.current();
+            List<Unmanaged> addUnmanageds = new ArrayList<>();
             for (TxnId txnId : notify)
             {
                 SafeCommand safeCommand = safeStore.ifLoadedAndInitialised(txnId);
                 if (safeCommand != null)
                 {
-                    Unmanaged addUnmanaged = updateUnmanaged(safeStore, safeCommand, safeCfk.current(), notifySink);
-                    if (addUnmanaged != null)
-                        addUnmanageds[addCount++] = addUnmanaged;
+                    Invariants.checkState(cfk == cfk.updateUnmanaged(safeStore, safeCommand, notifySink, false, addUnmanageds));
                 }
                 else
                 {
-                    updateUnmanagedAsync(safeStore, txnId, key, notifySink);
+                    updateUnmanagedAsync(safeStore.commandStore(), txnId, key, notifySink);
                 }
             }
 
-            if (addCount > 0)
+            if (!addUnmanageds.isEmpty())
             {
                 CommandsForKey cur = safeCfk.current();
-                Arrays.sort(addUnmanageds, 0, addCount, Unmanaged::compareTo);
-                Unmanaged[] newUnmanageds = SortedArrays.linearUnion(cur.unmanageds, 0, cur.unmanageds.length, addUnmanageds, 0, addCount, Unmanaged::compareTo, ArrayBuffers.uncached(Unmanaged[]::new));
+                addUnmanageds.sort(Unmanaged::compareTo);
+                Unmanaged[] newUnmanageds = addUnmanageds.toArray(new Unmanaged[0]);
+                newUnmanageds = SortedArrays.linearUnion(cur.unmanageds, 0, cur.unmanageds.length, newUnmanageds, 0, newUnmanageds.length, Unmanaged::compareTo, ArrayBuffers.uncached(Unmanaged[]::new));
                 safeCfk.set(cur.update(newUnmanageds));
             }
         }

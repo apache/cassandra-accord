@@ -33,7 +33,28 @@ import java.util.function.Predicate;
 import javax.annotation.Nullable;
 
 /**
- * A collection of transaction dependencies, keyed by the key or range on which they were adopted
+ * A collection of transaction dependencies, keyed by the key or range on which they were adopted.
+ *
+ * Dependencies are used in the following phases:
+ *
+ *  - PreAccept calculates dependencies that contain TxnId < the proposed TxnId
+ *      - if the fast path is taken, these dependencies are used immediately for execution
+ *      - if the slow path is taken, these dependencies are proposed in the Accept phase
+ *  - Accept phase calculates dependencies that contain TxnId < the proposed executeAt; these are merged with those found during the PreAccept phase
+ *  - Commit phase simply makes these dependencies durable
+ *
+ *  Dependencies are mostly calculated by CommandsForKey, which has some efficiency tricks, including pruning both itself
+ *  and transitive dependencies in any calculation. This means that
+ *   - Dependencies will omit any transaction that is known to be a durable dependency of another transaction that has been included.
+ *     This mechanism is performed in isolation by each replica, so a final set of Deps may contain redundant transactions.
+ *   - CommandsForKey may prune already-applied transactions. This means we can in some circumstances try to calculate
+ *     dependencies for a timestamp that occurs before the prune point. If this happens, we insert a future dependency,
+ *     so it is possible for Deps to contain TxnId > their intended bound.
+ *      - This can occur for regular transactions with old TxnId during PreAccept; in this case we always propose an executeAt that is greater than this inserted Dep
+ *      - This can occur for SyncPoint and ExclusiveSyncPoint because they are invisible to other transactions and only
+ *        create happens-before edges. So they may have their dependencies calculated at any point after pruning may happen.
+ *        In this case, CommandsForKey uses this future dependency to ensure its earlier dependencies are up-to-date before
+ *        deciding the execution sequence for the SyncPoint/ExclusiveSyncPoint.
  */
 public class Deps
 {
