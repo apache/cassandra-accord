@@ -43,6 +43,7 @@ import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Shard;
 import accord.topology.Topologies;
+import accord.utils.Invariants;
 
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Fail;
 import static accord.coordinate.tracking.RequestStatus.Failed;
@@ -77,6 +78,7 @@ abstract class Propose<R> implements Callback<AcceptReply>
         this.callback = callback;
         this.acceptOks = new ArrayList<>();
         this.acceptTracker = new QuorumTracker(topologies);
+        Invariants.checkState(txnId.kind().isSyncPoint() || deps.keyDeps.txnIdCount() == 0 || deps.keyDeps.txnId(deps.keyDeps.txnIdCount() - 1).compareTo(executeAt) < 0);
     }
 
     void start()

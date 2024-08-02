@@ -52,6 +52,8 @@ import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.ProgressLog;
 import accord.local.CommandStores.RangesForEpoch;
+import accord.local.cfk.CommandsForKey;
+import accord.local.cfk.SafeCommandsForKey;
 import accord.primitives.AbstractKeys;
 import accord.primitives.Deps;
 import accord.primitives.PartialDeps;
@@ -254,7 +256,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         return timestampsForKey.get(key);
     }
 
-    private <O> O mapReduceForKey(InMemorySafeStore safeStore, Routables<?> keysOrRanges, Ranges slice, BiFunction<accord.local.CommandsForKey, O, O> map, O accumulate)
+    private <O> O mapReduceForKey(InMemorySafeStore safeStore, Routables<?> keysOrRanges, Ranges slice, BiFunction<CommandsForKey, O, O> map, O accumulate)
     {
         switch (keysOrRanges.domain()) {
             default:
@@ -264,7 +266,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                 for (Key key : keys)
                 {
                     if (!slice.contains(key)) continue;
-                    accord.local.CommandsForKey commands = safeStore.ifLoadedAndInitialised(key).current();
+                    CommandsForKey commands = safeStore.ifLoadedAndInitialised(key).current();
                     if (commands == null)
                         continue;
 
@@ -281,7 +283,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                     for (Map.Entry<RoutableKey, GlobalCommandsForKey> entry : commandsForKey.subMap(range.start(), range.startInclusive(), range.end(), range.endInclusive()).entrySet())
                     {
                         GlobalCommandsForKey globalCommands = entry.getValue();
-                        accord.local.CommandsForKey commands = globalCommands.value();
+                        CommandsForKey commands = globalCommands.value();
                         if (commands == null)
                             continue;
                         accumulate = map.apply(commands, accumulate);
@@ -444,9 +446,10 @@ public abstract class InMemoryCommandStore extends CommandStore
     {
         if (store != current)
             throw illegalState("This operation has already been cleared");
+
         try
         {
-            current.complete();
+            current.postExecute();
         }
         catch (Throwable t)
         {
@@ -515,9 +518,7 @@ public abstract class InMemoryCommandStore extends CommandStore
     @Override
     public String toString()
     {
-        return getClass().getSimpleName() + "{" +
-               "id=" + id +
-               '}';
+        return getClass().getSimpleName() + "{id=" + id + ",node=" + time.id().id  + '}';
     }
 
     static class RangeCommand
@@ -1003,7 +1004,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        protected void invalidateSafeState()
+        public void postExecute()
         {
             commands.values().forEach(c -> {
                 if (c != null && c.current() != null)
@@ -1017,9 +1018,21 @@ public abstract class InMemoryCommandStore extends CommandStore
                 }
             });
 
-            commands.values().forEach(InMemorySafeCommand::invalidate);
-            timestampsForKey.values().forEach(InMemorySafeTimestampsForKey::invalidate);
-            commandsForKey.values().forEach(InMemorySafeCommandsForKey::invalidate);
+            commands.values().forEach(c -> {
+                if (c.isUnset())
+                    commandStore.commands.remove(c.txnId());
+                c.invalidate();
+            });
+            timestampsForKey.values().forEach(tfk -> {
+                if (tfk.isUnset())
+                    commandStore.timestampsForKey.remove(tfk.key());
+                tfk.invalidate();
+            });
+            commandsForKey.values().forEach(cfk -> {
+                if (cfk.isUnset())
+                    commandStore.commandsForKey.remove(cfk.key());
+                cfk.invalidate();
+            });
         }
     }
 

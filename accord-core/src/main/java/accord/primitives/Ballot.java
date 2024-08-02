@@ -24,6 +24,9 @@ public class Ballot extends Timestamp
 {
     public static Ballot fromBits(long msb, long lsb, Id node)
     {
+        if (msb == 0 && lsb == 0 && node.equals(Id.NONE))
+            return Ballot.ZERO;
+
         return new Ballot(msb, lsb, node);
     }
 
@@ -34,6 +37,9 @@ public class Ballot extends Timestamp
 
     public static Ballot fromValues(long epoch, long hlc, int flags, Id node)
     {
+        if (epoch == 0 && hlc == 0 && flags == 0 && node.equals(Id.NONE))
+            return ZERO;
+
         return new Ballot(epoch, hlc, flags, node);
     }
 

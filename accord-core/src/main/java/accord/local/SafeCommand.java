@@ -56,11 +56,7 @@ public abstract class SafeCommand
         return txnId;
     }
 
-    // TODO (expected): it isn't ideal to pass keysOrRanges for the special case of Accept. We can either:
-    //   1 - remove the special case that permits accept without the definition
-    //   2 - store some pseudo transaction with only the keys
-    //   3 - just come up with something a bit neater
-    <C extends Command> C update(SafeCommandStore safeStore, C update)
+    public <C extends Command> C update(SafeCommandStore safeStore, C update)
     {
         Command prev = current();
         if (prev == update)

@@ -46,6 +46,7 @@ import static accord.coordinate.ExecutePath.FAST;
 import static accord.coordinate.Propose.Invalidate.proposeAndCommitInvalidate;
 import static accord.primitives.Timestamp.mergeMax;
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
+import static accord.topology.TopologyManager.EpochSufficiencyMode.AT_LEAST;
 import static accord.utils.Functions.foldl;
 import static accord.utils.Invariants.checkArgument;
 
@@ -64,7 +65,7 @@ public class CoordinateSyncPoint<S extends Seekables<?, ?>> extends CoordinatePr
 
     private CoordinateSyncPoint(Node node, TxnId txnId, Txn txn, FullRoute<?> route, CoordinationAdapter<SyncPoint<S>> adapter)
     {
-        super(node, txnId, txn, route, node.topology().withOpenEpochs(route, txnId, txnId));
+        super(node, txnId, txn, route, node.topology().withOpenEpochs(route, txnId, txnId, AT_LEAST));
         this.adapter = adapter;
     }
 

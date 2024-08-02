@@ -515,6 +515,11 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         return txnIds[i];
     }
 
+    public int indexOf(TxnId txnId)
+    {
+        return Arrays.binarySearch(txnIds, txnId);
+    }
+
     public SortedArrayList<TxnId> txnIds()
     {
         return new SortedArrayList<>(txnIds);

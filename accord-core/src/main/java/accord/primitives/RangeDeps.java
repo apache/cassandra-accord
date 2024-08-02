@@ -18,7 +18,6 @@
 
 package accord.primitives;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
 import java.util.Iterator;
@@ -44,6 +43,7 @@ import accord.utils.RelationMultiMap;
 import accord.utils.SearchableRangeList;
 import accord.utils.SortedArrays;
 import accord.utils.SortedArrays.SortedArrayList;
+import accord.utils.SortedList;
 import accord.utils.SymmetricComparator;
 import accord.utils.TriFunction;
 import net.nicoulaj.compilecommand.annotations.DontInline;
@@ -658,20 +658,38 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
         return txnIds(rangesToTxnIds, start, end);
     }
 
-    public List<TxnId> computeTxnIds(Key key)
+    static class ListBuilder
     {
-        List<TxnId> result = new ArrayList<>();
-        forEachUniqueTxnId(key, result::add);
-        result.sort(TxnId::compareTo);
-        return result;
+        TxnId[] buffer = NO_TXNIDS;
+        int count;
+
+        void add(TxnId txnId)
+        {
+            if (count == buffer.length)
+                buffer = cachedTxnIds().resize(buffer, count, Math.max(8, count + (count >> 1)));
+            buffer[count++] = txnId;
+        }
+
+        SortedList<TxnId> build()
+        {
+            TxnId[] txnIds = cachedTxnIds().completeAndDiscard(buffer, count);
+            Arrays.sort(txnIds);
+            return new SortedArrayList<>(txnIds);
+        }
+    }
+
+    public SortedList<TxnId> computeTxnIds(Key key)
+    {
+        ListBuilder builder = new ListBuilder();
+        forEachUniqueTxnId(key, builder::add);
+        return builder.build();
     }
 
     public List<TxnId> computeTxnIds(Range key)
     {
-        List<TxnId> result = new ArrayList<>();
-        forEachUniqueTxnId(key, result::add);
-        result.sort(TxnId::compareTo);
-        return result;
+        ListBuilder builder = new ListBuilder();
+        forEachUniqueTxnId(key, builder::add);
+        return builder.build();
     }
 
     private SortedRelationList<TxnId> txnIds(int[] ids, int start, int end)

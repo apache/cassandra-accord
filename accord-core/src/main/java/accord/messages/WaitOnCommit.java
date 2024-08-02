@@ -187,7 +187,7 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
     @Override
     public PreLoadContext listenerPreLoadContext(TxnId caller)
     {
-        return PreLoadContext.contextFor(txnId, caller, keys());
+        return PreLoadContext.contextFor(txnId, keys());
     }
 
     @Override

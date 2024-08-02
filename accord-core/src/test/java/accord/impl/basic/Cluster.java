@@ -109,10 +109,16 @@ public class Cluster implements Scheduler
 
     public static class Stats
     {
+        final MessageType type;
         int count;
 
+        public Stats(MessageType type)
+        {
+            this.type = type;
+        }
+
         public int count() { return count; }
-        public String toString() { return Integer.toString(count); }
+        public String toString() { return type + ": " + count; }
     }
 
     public static class LinkConfig
@@ -179,7 +185,7 @@ public class Cluster implements Scheduler
     {
         MessageType type = packet.message.type();
         if (type != null)
-            statsMap.computeIfAbsent(type, ignore -> new Stats()).count++;
+            statsMap.computeIfAbsent(type, Stats::new).count++;
         if (trace.isTraceEnabled())
             trace.trace("{} {} {}", clock++, packet.message instanceof Reply ? "RPLY" : "SEND", packet);
         if (lookup.apply(packet.dst) == null) responseSink.accept(packet);

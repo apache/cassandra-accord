@@ -107,6 +107,21 @@ public class ReflectionUtils
         List<Field> fields = getFields(lhs.getClass());
         if (fields.isEmpty())
         {
+            if (lhs instanceof Object[])
+            {
+                Object[] left = (Object[]) lhs;
+                Object[] right = (Object[]) rhs;
+                if (left.length != right.length)
+                    accum.add(new Difference<>(path + "length", left.length, right.length));
+                path = path.substring(0, path.length() - 1); // remove the last '.'
+                for (int i = 0, size = Math.min(left.length, right.length); i < size; i++)
+                {
+                    Object l = left[i];
+                    Object r = right[i];
+                    recursiveEquals(path + "[" + i + "].", seenLhs,  l, seenRhs, r, accum);
+                }
+                return;
+            }
             accum.add(new Difference<>(path, lhs, rhs));
             return;
         }

@@ -342,7 +342,6 @@ public class Commands
         if (!validate(command.status(), command, coordinateRanges, acceptRanges, shard, route, Add, partialTxn, Add, partialDeps, Set))
             return CommitOutcome.Insufficient;
 
-        // FIXME: split up set
         CommonAttributes attrs = set(command, coordinateRanges, acceptRanges, shard, route, partialTxn, Add, partialDeps, Set);
 
         logger.trace("{}: committed with executeAt: {}, deps: {}", txnId, executeAt, partialDeps);
@@ -433,12 +432,10 @@ public class Commands
         if (command.hasBeen(Stable))
             return;
 
-        // TODO (required): by creating synthetic TxnId in future epochs we may not be evictable
-        //   but for ephemeral reads we want parallel eviction - or preferably no durability - anyway
-        txnId = txnId.withEpoch(executeAtEpoch);
-
+        // BREAKING CHANGE NOTE: if in future we support a CommandStore adopting additional ranges (rather than only shedding them)
+        //                       then we need to revisit how we execute transactions that awaitsOnlyDeps, as they may need additional
+        //                       information to execute in the eventual execution epoch (that they didn't know they needed when they were made stable)
         Ranges coordinateRanges = coordinateRanges(safeStore, txnId);
-        // TODO (desired, consider): in the case of sync points, the coordinator is unlikely to be a home shard, do we mind this? should document at least
         ProgressShard progressShard = No;
         Invariants.checkState(validate(command.status(), command, Ranges.EMPTY, coordinateRanges, progressShard, route, Set, partialTxn, Set, partialDeps, Set));
         CommonAttributes attrs = set(command, Ranges.EMPTY, coordinateRanges, progressShard, route, partialTxn, Set, partialDeps, Set);
@@ -649,12 +646,6 @@ public class Commands
 
     private static boolean maybeExecute(SafeCommandStore safeStore, SafeCommand safeCommand, boolean alwaysNotifyListeners, boolean notifyWaitingOn)
     {
-        return maybeExecute(safeStore, safeCommand, alwaysNotifyListeners, notifyWaitingOn, false);
-    }
-
-    // TODO (expected, API consistency): maybe split into maybeExecute and maybeApply?
-    private static boolean maybeExecute(SafeCommandStore safeStore, SafeCommand safeCommand, boolean alwaysNotifyListeners, boolean notifyWaitingOn, boolean executeAsync)
-    {
         Command command = safeCommand.current();
         if (logger.isTraceEnabled())
             logger.trace("{}: Maybe executing with status {}. Will notify listeners on noop: {}", command.txnId(), command.status(), alwaysNotifyListeners);
@@ -674,15 +665,6 @@ public class Commands
 
             if (notifyWaitingOn && waitingOn.isWaitingOnCommand())
                 new NotifyWaitingOn(safeCommand).accept(safeStore);
-            return false;
-        }
-
-        if (executeAsync)
-        {
-            TxnId txnId = command.txnId();
-            safeStore.commandStore().execute(contextFor(command.txnId(), command.keysOrRanges(), KeyHistory.COMMANDS), safeStore0 -> {
-                maybeExecute(safeStore0, safeStore0.get(txnId), alwaysNotifyListeners, notifyWaitingOn, false);
-            }).begin(safeStore.agent());
             return false;
         }
 
@@ -706,6 +688,7 @@ public class Commands
 
                 if (intersects)
                 {
+                    // TODO (now): we should set applying within apply to avoid applying multiple times
                     safeCommand.applying(safeStore);
                     safeStore.notifyListeners(safeCommand);
                     logger.trace("{}: applying", command.txnId());
@@ -739,16 +722,8 @@ public class Commands
 
         Ranges ranges = safeStore.ranges().allAt(waitingExecuteAt);
         PartialDeps deps = waiting.partialDeps();
-        WaitingOn.Update update = new WaitingOn.Update(waitingId, deps);
-        // we select range deps on actual participants rather than covered ranges,
-        // since we may otherwise adopt false dependencies for range txns
 
-        Unseekables<?> executionParticipants = route.participants().slice(ranges, Minimal);
-        deps.rangeDeps.forEach(executionParticipants, update, WaitingOn.Update::initialiseWaiting);
-        deps.keyDeps.keys().foldl(ranges, (u, rd, k, v, i) -> {
-            u.initialiseWaiting(rd.txnIdCount() + i);
-            return null;
-        }, update, deps.rangeDeps, null);
+        WaitingOn.Update update = WaitingOn.Update.initialise(waitingId, route, ranges, deps);
         return updateWaitingOn(safeStore, waiting, waitingExecuteAt, update, route.participants()).build();
     }
 
@@ -757,10 +732,10 @@ public class Commands
         CommandStore commandStore = safeStore.commandStore();
         TxnId minWaitingOnTxnId = update.minWaitingOnTxnId();
         if (minWaitingOnTxnId != null && commandStore.hasLocallyRedundantDependencies(update.minWaitingOnTxnId(), executeAt, participants))
-            safeStore.commandStore().removeRedundantDependencies(participants, waiting.partialDeps(), update);
+            safeStore.commandStore().removeRedundantDependencies(participants, update);
 
         update.forEachWaitingOnId(safeStore, update, waiting, executeAt, (store, upd, w, exec, i) -> {
-            SafeCommand dep = store.ifLoadedAndInitialised(upd.txnIds.get(i));
+            SafeCommand dep = store.ifLoadedAndInitialised(upd.txnId(i));
             if (dep == null || !dep.current().hasBeen(PreCommitted))
                 return;
             updateWaitingOn(store, w, exec, upd, dep);
@@ -856,7 +831,7 @@ public class Commands
         }
     }
 
-    static void removeWaitingOnKeyAndMaybeExecute(SafeCommandStore safeStore, SafeCommand safeCommand, Key key, boolean executeAsync)
+    public static void removeWaitingOnKeyAndMaybeExecute(SafeCommandStore safeStore, SafeCommand safeCommand, Key key)
     {
         if (safeCommand.current().hasBeen(Applied))
             return;
@@ -872,7 +847,7 @@ public class Commands
         waitingOn.removeWaitingOnKey(keyIndex);
         safeCommand.updateWaitingOn(waitingOn);
         if (!waitingOn.isWaiting())
-            maybeExecute(safeStore, safeCommand, false, true, executeAsync);
+            maybeExecute(safeStore, safeCommand, false, true);
     }
 
     // TODO (now): document and justify all calls
@@ -1195,10 +1170,11 @@ public class Commands
     {
         CommandStore commandStore = safeStore.commandStore();
         Command.Committed current = safeCommand.current().asCommitted();
+
         WaitingOn.Update update = new WaitingOn.Update(current.waitingOn);
         TxnId minWaitingOnTxnId = update.minWaitingOnTxnId();
         if (minWaitingOnTxnId != null && commandStore.hasLocallyRedundantDependencies(update.minWaitingOnTxnId(), current.executeAt(), current.route().participants()))
-            safeStore.commandStore().removeRedundantDependencies(current.route().participants(), current.partialDeps(), update);
+            safeStore.commandStore().removeRedundantDependencies(current.route().participants(), update);
 
         // if we are a range transaction, being redundant for this transaction does not imply we are redundant for all transactions
         if (redundant != null)

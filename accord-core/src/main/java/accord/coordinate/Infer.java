@@ -142,10 +142,10 @@ public class Infer
             return a.compareTo(b) <= 0 ? a : b;
         }
 
-        public boolean inferInvalidWithQuorum(IsPreempted isPreempted, Known known)
+        public boolean inferInvalidWithQuorum(IsPreempted isPreempted, Known minKnown)
         {
-            return inferInvalidWithQuorum(undecided, isPreempted, !known.isDecided())
-                   || inferInvalidWithQuorum(unknown, isPreempted, !known.hasDefinitionBeenKnown());
+            return inferInvalidWithQuorum(undecided, isPreempted, !minKnown.isDecided())
+                   || inferInvalidWithQuorum(unknown, isPreempted, !minKnown.hasDefinitionBeenKnown());
         }
 
         private static boolean inferInvalidWithQuorum(InvalidIf invalidIf, IsPreempted isPreempted, boolean hasCondition)

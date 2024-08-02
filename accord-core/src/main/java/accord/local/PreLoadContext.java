@@ -19,10 +19,13 @@
 package accord.local;
 
 import accord.api.Key;
+import accord.local.cfk.CommandsForKey;
 import accord.primitives.Keys;
 import accord.primitives.Seekables;
 import accord.primitives.TxnId;
 import com.google.common.collect.Iterators;
+
+import accord.utils.Invariants;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
 import com.google.common.collect.Sets;
@@ -134,6 +137,7 @@ public interface PreLoadContext
 
     static PreLoadContext contextFor(TxnId primary, Collection<TxnId> additional, Seekables<?, ?> keys, KeyHistory keyHistory)
     {
+        Invariants.checkState(!additional.contains(primary));
         return new PreLoadContext()
         {
             @Override
