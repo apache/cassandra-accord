@@ -39,7 +39,6 @@ import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.Writes;
 import accord.topology.Topologies;
-import accord.topology.TopologyManager;
 import accord.utils.Invariants;
 import accord.utils.async.AsyncResults.SettableResult;
 

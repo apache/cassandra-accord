@@ -18,9 +18,6 @@
 
 package accord.messages;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import accord.api.Data;
 import accord.local.Command;
 import accord.local.Node;

@@ -37,7 +37,6 @@ import accord.primitives.Txn;
 import accord.primitives.Txn.Kind;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
-import accord.topology.TopologyManager;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
