@@ -196,6 +196,17 @@ class Updating
         TxnId[] additions = NO_TXNIDS, missing = NO_TXNIDS;
         int additionCount = 0, missingCount = 0;
 
+        // the position until which we should have witnessed transactions, i.e. for computing the missing collection
+        // *NOT* to be used for terminating *inserts* from deps parameter, as this may see the future
+        // (due to pruning sometimes including a later transaction where it cannot include all earlier ones)
+        int depsKnownBeforePos = insertPos;
+        if (depsKnownBefore != plainTxnId)
+        {
+            depsKnownBeforePos = Arrays.binarySearch(byId, insertPos, byId.length, depsKnownBefore);
+            Invariants.checkState(depsKnownBeforePos < 0);
+            depsKnownBeforePos = -1 - depsKnownBeforePos;
+        }
+
         int txnIdsIndex = 0;
         while (txnIdsIndex < byId.length && deps.hasCur())
         {
@@ -211,7 +222,7 @@ class Updating
             {
                 // we expect to be missing ourselves
                 // we also permit any transaction we have recorded as COMMITTED or later to be missing, as recovery will not need to consult our information
-                if (txnIdsIndex != updatePos && t.status.compareTo(COMMITTED) < 0 && plainTxnId.kind().witnesses(t))
+                if (txnIdsIndex != updatePos && txnIdsIndex < depsKnownBeforePos && t.status.compareTo(COMMITTED) < 0 && plainTxnId.kind().witnesses(t))
                 {
                     if (missingCount == missing.length)
                         missing = cachedTxnIds().resize(missing, missingCount, Math.max(8, missingCount * 2));
@@ -252,14 +263,6 @@ class Updating
         }
         else if (txnIdsIndex < byId.length)
         {
-            int depsKnownBeforePos = insertPos;
-            if (depsKnownBefore != plainTxnId)
-            {
-                depsKnownBeforePos = Arrays.binarySearch(byId, Math.max(txnIdsIndex, insertPos), byId.length, depsKnownBefore);
-                Invariants.checkState(depsKnownBeforePos < 0);
-                depsKnownBeforePos = -1 - depsKnownBeforePos;
-            }
-
             while (txnIdsIndex < depsKnownBeforePos)
             {
                 if (txnIdsIndex != updatePos && byId[txnIdsIndex].status.compareTo(COMMITTED) < 0)

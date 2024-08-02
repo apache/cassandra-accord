@@ -305,6 +305,11 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             return status.depsKnownBefore(this, executeAt);
         }
 
+        Timestamp witnessedAfter()
+        {
+            return status.witnessedAfter(this, executeAt);
+        }
+
         public TxnInfo update(TxnId[] newMissing)
         {
             Invariants.checkState(status.hasExecuteAtOrDeps);
@@ -567,6 +572,25 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 case HISTORICAL:
                     throw new AssertionError("Invalid InternalStatus to know deps");
 
+                case PREACCEPTED_OR_ACCEPTED_INVALIDATE:
+                case ACCEPTED:
+                    return txnId;
+
+                case APPLIED:
+                case STABLE:
+                case COMMITTED:
+                    return executeAt;
+            }
+        }
+
+        public Timestamp witnessedAfter(TxnId txnId, Timestamp executeAt)
+        {
+            switch (this)
+            {
+                default: throw new AssertionError("Unhandled InternalStatus: " + this);
+                case INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED:
+                case TRANSITIVELY_KNOWN:
+                case HISTORICAL:
                 case PREACCEPTED_OR_ACCEPTED_INVALIDATE:
                 case ACCEPTED:
                     return txnId;
@@ -1435,7 +1459,9 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                     for (TxnId missingId : txn.missing())
                     {
                         Invariants.checkState(txn.kind().witnesses(missingId));
-                        Invariants.checkState(get(missingId, byId).status.compareTo(COMMITTED) < 0);
+                        TxnInfo missingInfo = get(missingId, byId);
+                        Invariants.checkState(missingInfo.status.compareTo(COMMITTED) < 0);
+                        Invariants.checkState(txn.depsKnownBefore().compareTo(missingInfo.witnessedAfter()) >= 0);
                     }
                     if (txn.status.isCommitted())
                         Invariants.checkState(txn == committedByExecuteAt[Arrays.binarySearch(committedByExecuteAt, 0, committedByExecuteAt.length, txn, TxnInfo::compareExecuteAt)]);
