@@ -44,7 +44,6 @@ import accord.utils.DefaultRandom;
 import accord.utils.Gen;
 import accord.utils.Gens;
 import accord.utils.RandomSource;
-import accord.utils.RelationMultiMap;
 import accord.utils.RelationMultiMap.Entry;
 import com.google.common.collect.Sets;
 import org.junit.jupiter.api.Assertions;
@@ -61,7 +60,6 @@ import static accord.utils.Gens.lists;
 import static accord.utils.Property.qt;
 import static accord.utils.Utils.toArray;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.in;
 
 // TODO (expected, testing): test Keys with no contents, "without", "with" where TxnId and Keys are the same, but Key -> [TxnId] does not match;
 //  ensure high code coverage

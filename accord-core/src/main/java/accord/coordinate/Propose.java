@@ -48,7 +48,6 @@ import accord.utils.Invariants;
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Fail;
 import static accord.coordinate.tracking.RequestStatus.Failed;
 import static accord.messages.Commit.Invalidate.commitInvalidate;
-import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static accord.utils.Invariants.debug;
 
 abstract class Propose<R> implements Callback<AcceptReply>
