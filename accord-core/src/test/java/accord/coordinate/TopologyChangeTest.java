@@ -18,25 +18,33 @@
 
 package accord.coordinate;
 
+import accord.api.Result;
 import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockConfigurationService;
 import accord.local.Command;
 import accord.local.Node;
-import accord.primitives.Range;
+import accord.local.PreLoadContext;
+import accord.messages.Message;
+import accord.messages.PreAccept;
+import accord.primitives.*;
 import accord.topology.Topology;
-import accord.primitives.Keys;
-import accord.primitives.Txn;
-import accord.primitives.TxnId;
 import accord.utils.EpochFunction;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncChains;
+import com.google.common.base.Predicates;
+import org.checkerframework.checker.units.qual.K;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static accord.Utils.*;
 import static accord.impl.IntKey.keys;
 import static accord.impl.IntKey.range;
 import static accord.primitives.Routable.Domain.Key;
+import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static accord.primitives.Txn.Kind.Write;
 
 import static accord.local.PreLoadContext.contextFor;
@@ -99,6 +107,159 @@ public class TopologyChangeTest
                 catch (ExecutionException e)
                 {
                     throw new AssertionError(e.getCause());
+                }
+            });
+        }
+    }
+
+    private static boolean isExclSyncPoint(Message message)
+    {
+        if (!(message instanceof PreAccept))
+            return false;
+
+        PreAccept preAccept = (PreAccept) message;
+        return preAccept.txnId.kind() == ExclusiveSyncPoint;
+    }
+
+    private static void assertEpochRejection(Node node, Keys keys, long epoch, boolean rejectionExpected)
+    {
+        RoutingKeys participants = keys.toParticipants();
+        try
+        {
+            if (node.epoch() < epoch)
+                throw new AssertionError(String.format("node[%s] epoch %s is less than check epoch %s", node.id(), node.epoch(), epoch));
+
+            node.forEachLocal(PreLoadContext.contextFor(keys), participants, 1, node.epoch(), safeStore -> {
+                boolean rejected = safeStore.commandStore().isRejectedIfNotPreAccepted(TxnId.minForEpoch(epoch), participants);
+                if (rejected != rejectionExpected)
+                {
+                    String msg = String.format("Epoch %s %s rejected on node %s and a rejection %s expected",
+                                               epoch,
+                                               rejected? "was" : "was not",
+                                               node.id(),
+                                               rejectionExpected? "was" : "was not");
+                    throw new AssertionError(msg);
+                }
+            });
+        }
+        catch (Throwable e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static <V> V getUncheckedTimeout(AsyncChain<V> chain, long timeout, TimeUnit unit)
+    {
+        try
+        {
+            return AsyncChains.getUninterruptibly(chain, timeout, unit);
+        }
+        catch (ExecutionException | TimeoutException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Confirm that a new node won't start coordinating before it's applied its own bootstrap exclusiveSync point
+     */
+    @Test
+    void lateBarrierTest() throws Throwable
+    {
+        Keys keys = keys(150);
+        Range range = range(100, 200);
+        Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
+        Topology topology2 = topology(2, shard(range, idList(2, 3, 4), idSet(2, 3)));
+        Topology topology3 = topology(3, shard(range, idList(3, 4, 5), idSet(3, 4)));
+        try (MockCluster cluster = MockCluster.builder()
+                .nodes(5)
+                .topology(topology1)
+                .build())
+        {
+            cluster.nodes(1, 2, 3).forEach(node -> assertEpochRejection(node, keys, 1, false));
+            cluster.networkFilter.addFilter(Predicates.alwaysTrue(), to -> id(4).equals(to), TopologyChangeTest::isExclSyncPoint);
+
+            cluster.configServices(1, 2, 3, 4, 5).forEach(configService -> configService.reportTopology(topology2));
+            cluster.nodes(4).forEach(node -> {
+                MockConfigurationService configService = (MockConfigurationService) node.configService();
+                getUncheckedTimeout(configService.ackFor(2).coordination, 5, TimeUnit.SECONDS);
+                assertEpochRejection(node, keys, 1, false);  // shouldn't have received the sync point preaccept
+            });
+
+            cluster.nodes(2, 3).forEach(node -> {
+                MockConfigurationService configService = (MockConfigurationService) node.configService();
+                getUncheckedTimeout(configService.ackFor(2).coordination, 5, TimeUnit.SECONDS);
+                assertEpochRejection(node, keys, 1, true);
+            });
+
+            Node node4 = cluster.get(4);
+            TxnId epoch2txnId = node4.nextTxnId(Write, Key);
+            Assertions.assertEquals(2, epoch2txnId.epoch());
+
+            cluster.configServices(1, 2, 3, 4, 5).forEach(configService -> configService.reportTopology(topology3));
+            cluster.nodes(2, 3).forEach(node -> {
+                MockConfigurationService configService = (MockConfigurationService) node.configService();
+                getUncheckedTimeout(configService.ackFor(3).coordination, 5, TimeUnit.SECONDS);
+                assertEpochRejection(node, keys, 2, true);
+            });
+
+            // node 4 shouldn't have up to date rejectBefore data
+            cluster.nodes(4).forEach(node -> {
+                MockConfigurationService configService = (MockConfigurationService) node.configService();
+                getUncheckedTimeout(configService.ackFor(3).coordination, 5, TimeUnit.SECONDS);
+                assertEpochRejection(node, keys, 1, false);  // shouldn't have received the sync point preaccept
+                assertEpochRejection(node, keys, 2, false);  // shouldn't have received the sync point preaccept
+            });
+
+            // but if it tries to coordinate a txn with a txnid from epoch2 it should be rejected by the other nodes in the cluster
+            try
+            {
+                AsyncChains.getUninterruptibly(node4.coordinate(epoch2txnId, writeTxn(keys)), 5, TimeUnit.SECONDS);
+                Assertions.fail("Expected to be invalidated");
+            }
+            catch (ExecutionException e)
+            {
+                Throwable cause = e.getCause();
+                Assertions.assertTrue(cause instanceof Invalidated, "Expected failure to be txn invalidation");
+            }
+        }
+    }
+
+    /**
+     * bootstrapping nodes should not be able to coordinate if their bootstrap sync points don't reach a quorum
+     */
+    @Test
+    void lostBarrierTest()
+    {
+        Keys keys = keys(150);
+        Range range = range(100, 200);
+        Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
+        Topology topology2 = topology(2, shard(range, idList(2, 3, 4), idSet(2, 3)));
+        Topology topology3 = topology(3, shard(range, idList(3, 4, 5), idSet(3, 4)));
+        try (MockCluster cluster = MockCluster.builder()
+                .nodes(5)
+                .topology(topology1)
+                .build())
+        {
+            cluster.nodes(1, 2, 3).forEach(node -> assertEpochRejection(node, keys, 1, false));
+            cluster.networkFilter.addFilter(Predicates.alwaysTrue(), to -> id(3).equals(to), TopologyChangeTest::isExclSyncPoint);
+            cluster.networkFilter.addFilter(Predicates.alwaysTrue(), to -> id(4).equals(to), TopologyChangeTest::isExclSyncPoint);
+
+            cluster.configServices(1, 2, 3, 4, 5).forEach(configService -> configService.reportTopology(topology2));
+            cluster.nodes(   4).forEach(node -> {
+                MockConfigurationService configService = (MockConfigurationService) node.configService();
+                try
+                {
+                    AsyncChains.getUninterruptibly(configService.ackFor(2).coordination, 5, TimeUnit.SECONDS);
+                    Assertions.fail("Expected to timeout on node " + node.id());
+                }
+                catch (ExecutionException e)
+                {
+                    throw new RuntimeException(e);
+                }
+                catch (TimeoutException e)
+                {
+                    // expected
                 }
             });
         }
