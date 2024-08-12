@@ -96,7 +96,7 @@ public abstract class ExecuteSyncPoint<S extends Seekables<?, ?>> extends Settab
         @Override
         protected void start()
         {
-            node.send(tracker.nodes(), to -> new WaitUntilApplied(to, tracker.topologies(), syncPoint.syncId, syncPoint.keysOrRanges.toParticipants(), syncPoint.syncId.epoch()), this);
+            node.send(tracker.nodes(), to -> new WaitUntilApplied(to, tracker.topologies(), syncPoint.syncId, syncPoint.keysOrRanges, syncPoint.syncId.epoch()), this);
         }
 
         @Override

@@ -39,6 +39,8 @@ import accord.primitives.Ranges;
 import accord.primitives.SyncPoint;
 import accord.topology.Topology;
 import accord.topology.TopologyUtils;
+import accord.utils.SortedArrays;
+import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.async.AsyncChains;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -51,7 +53,7 @@ class CoordinateSyncPointTest
 {
     static final Node.Id N1 = new Node.Id(1);
     static final Node.Id N2 = new Node.Id(2);
-    static final List<Node.Id> ALL = Arrays.asList(N1, N2);
+    static final SortedArrayList<Node.Id> ALL = new SortedArrayList(new Node.Id[] { N1, N2 });
 
     @Test
     void rangeMovedOffNode()
@@ -60,7 +62,7 @@ class CoordinateSyncPointTest
         Range removed = IntKey.range(10, 100);
         Topology t2 = new Topology(t1.epoch() + 1,
                                    Utils.shard(IntKey.range(0, 10), ALL),
-                                   Utils.shard(removed, Arrays.asList(N2)));
+                                   Utils.shard(removed, new SortedArrayList<>(new Node.Id[] { N2 })));
 
         Node n1 = Utils.createNode(N1, t1, happyPathMessaging(), new MockCluster.Clock(0), new TestAgent.RethrowAgent());
         n1.topology().onTopologyUpdate(t2, () -> null);

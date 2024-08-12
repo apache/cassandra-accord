@@ -573,7 +573,7 @@ public class TopologyManager
 
         EpochState maxEpochState = nonNull(snapshot.get(maxEpoch));
         if (minEpoch == maxEpoch && (mode != AT_LEAST || isSufficientFor.apply(maxEpochState).containsAll(select)))
-            return new Single(sorter, maxEpochState.global.forSelection(select));
+            return new Single(sorter, maxEpochState.global.forSelection(select, mode == AT_MOST));
 
         int i = (int)(snapshot.currentEpoch - maxEpoch);
         int maxi = (int)(Math.min(1 + snapshot.currentEpoch - minEpoch, snapshot.epochs.length));
@@ -586,7 +586,7 @@ public class TopologyManager
         while (i < maxi && !select.isEmpty())
         {
             EpochState epochState = snapshot.epochs[i++];
-            topologies.add(epochState.global.forSelection(select));
+            topologies.add(epochState.global.forSelection(select, mode == AT_MOST));
             select = select.subtract(epochState.addedRanges);
             if (mode == AT_MOST)
                 select = select.subtract(isSufficientFor.apply(epochState));
@@ -618,7 +618,7 @@ public class TopologyManager
                 return topologies.build(sorter);
 
             EpochState next = snapshot.epochs[i++];
-            topologies.add(next.global.forSelection(select));
+            topologies.add(next.global.forSelection(select, false));
             prev = next;
         } while (i < snapshot.epochs.length);
         // needd to remove sufficent / added else remaining may not be empty when the final matches are the last epoch

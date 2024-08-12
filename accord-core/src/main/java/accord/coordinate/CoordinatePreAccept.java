@@ -61,7 +61,7 @@ abstract class CoordinatePreAccept<T> extends AbstractCoordinatePreAccept<T, Pre
 
     CoordinatePreAccept(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Topologies topologies)
     {
-        super(node, route, txnId);
+        super(node, route, txnId, topologies);
         this.tracker = new FastPathTracker(topologies);
         this.oks = new ArrayList<>(topologies.estimateUniqueNodes());
         this.txn = txn;

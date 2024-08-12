@@ -254,12 +254,12 @@ public class Topology
 
     public Topology forSelection(Unseekables<?> select)
     {
-        return forSubset(subsetFor(select));
+        return forSelection(select, false);
     }
 
-    public Topology forSelection(Unseekables<?> select, Collection<Id> nodes)
+    public Topology forSelection(Unseekables<?> select, boolean permitMissing)
     {
-        return forSubset(subsetFor(select), nodes);
+        return forSubset(subsetFor(select, permitMissing));
     }
 
     @VisibleForTesting
@@ -300,7 +300,7 @@ public class Topology
         return new Topology(global(), epoch, shards, ranges, new SortedArrayList<>(nodeIds), nodeLookup, rangeSubset, newSubset);
     }
 
-    private int[] subsetFor(Unseekables<?> select)
+    private int[] subsetFor(Unseekables<?> select, boolean permitMissing)
     {
         int count = 0;
         IntBuffers cachedInts = ArrayBuffers.cachedInts();
@@ -321,13 +321,13 @@ public class Topology
                     long abi = as.findNextIntersection(ai, bs, bi);
                     if (abi < 0)
                     {
-                        if (ailim < as.size())
+                        if (ailim < as.size() && !permitMissing)
                             throw new IllegalArgumentException("Range not found for " + as.get(ailim));
                         break;
                     }
 
                     ai = (int)abi;
-                    if (ailim < ai)
+                    if (ailim < ai && !permitMissing)
                         throw new IllegalArgumentException("Range not found for " + as.get(ailim));
 
                     bi = (int)(abi >>> 32);
@@ -367,7 +367,7 @@ public class Topology
 
     public void visitNodeForKeysOnceOrMore(Unseekables<?> select, Consumer<Id> nodes)
     {
-        for (int shardIndex : subsetFor(select))
+        for (int shardIndex : subsetFor(select, false))
         {
             Shard shard = shards[shardIndex];
             for (Id id : shard.nodes)

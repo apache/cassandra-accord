@@ -147,7 +147,7 @@ public class Utils
         return new Shard(range, nodes, fastPath);
     }
 
-    public static Shard shard(Range range, List<Node.Id> nodes)
+    public static Shard shard(Range range, SortedArrayList<Node.Id> nodes)
     {
         return shard(range, nodes, new TreeSet<>(nodes));
     }
