@@ -33,6 +33,7 @@ import accord.api.Key;
 import accord.coordinate.CoordinateSyncPoint;
 import accord.coordinate.ExecuteSyncPoint;
 import accord.coordinate.ExecuteSyncPoint.SyncPointErased;
+import accord.coordinate.Exhausted;
 import accord.coordinate.Invalidated;
 import accord.coordinate.Preempted;
 import accord.coordinate.Timeout;
@@ -497,7 +498,8 @@ public class ListStore implements DataStore
             if (t instanceof Timeout ||
                 // TODO (expected): why are we not simply handling Insufficient properly?
                 t instanceof RuntimeException && "Insufficient".equals(t.getMessage()) ||
-                t instanceof SimulatedFault)
+                t instanceof SimulatedFault ||
+                t instanceof Exhausted)
                 return awaitSyncPoint(node, exclusiveSyncPoint);
             // cannot loop indefinitely
             if (t instanceof RuntimeException && "Redundant".equals(t.getMessage()))
