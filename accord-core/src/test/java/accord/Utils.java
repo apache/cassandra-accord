@@ -23,9 +23,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
+import accord.api.Agent;
 import com.google.common.collect.Sets;
 
 import accord.api.Key;
@@ -145,6 +147,11 @@ public class Utils
         return new Shard(range, nodes, fastPath);
     }
 
+    public static Shard shard(Range range, List<Node.Id> nodes)
+    {
+        return shard(range, nodes, new TreeSet<>(nodes));
+    }
+
     public static Topology topology(long epoch, Shard... shards)
     {
         return new Topology(epoch, shards);
@@ -162,6 +169,11 @@ public class Utils
 
     public static Node createNode(Id nodeId, Topology topology, MessageSink messageSink, MockCluster.Clock clock)
     {
+        return createNode(nodeId, topology, messageSink, clock, new TestAgent());
+    }
+
+    public static Node createNode(Node.Id nodeId, Topology topology, MessageSink messageSink, MockCluster.Clock clock, Agent agent)
+    {
         MockStore store = new MockStore();
         Scheduler scheduler = new ThreadPoolScheduler();
         LocalConfig localConfig = new MutableLocalConfig();
@@ -173,7 +185,7 @@ public class Utils
                              NodeTimeService.unixWrapper(TimeUnit.MICROSECONDS, clock),
                              () -> store,
                              new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()),
-                             new TestAgent(),
+                             agent,
                              new DefaultRandom(),
                              scheduler,
                              SizeOfIntersectionSorter.SUPPLIER,

@@ -31,20 +31,16 @@ import java.util.stream.Collectors;
 import accord.api.DataStore;
 import accord.api.Key;
 import accord.coordinate.CoordinateSyncPoint;
+import accord.coordinate.ExecuteSyncPoint;
 import accord.coordinate.ExecuteSyncPoint.SyncPointErased;
 import accord.coordinate.Invalidated;
 import accord.coordinate.Preempted;
 import accord.coordinate.Timeout;
 import accord.coordinate.TopologyMismatch;
 import accord.coordinate.tracking.AppliedTracker;
-import accord.coordinate.tracking.RequestStatus;
 import accord.impl.basic.SimulatedFault;
 import accord.local.Node;
 import accord.local.SafeCommandStore;
-import accord.messages.Callback;
-import accord.messages.ReadData;
-import accord.messages.ReadData.ReadReply;
-import accord.messages.WaitUntilApplied;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.RoutableKey;
@@ -52,12 +48,10 @@ import accord.primitives.Seekable;
 import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
-import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.utils.Timestamped;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
-import accord.utils.async.AsyncResults;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.collections.LongArrayList;
 
@@ -432,7 +426,7 @@ public class ListStore implements DataStore
         // * api is range -> TxnId, so we still need a TxnId to be referenced off... so we need to create a TxnId to know when we are in-sync!
         // * if we have a sync point, we really only care if the sync point is applied globally...
         // * even though CoordinateDurabilityScheduling is part of BurnTest, it was seen that shard/global syncs were only happening in around 1/5 of the tests (mostly due to timeouts/invalidates), which would mean purge was called infrequently.
-        currentSyncPoint(node, removed).flatMap(sp -> Await.coordinate(node, epoch - 1, sp)).begin((s, f) -> {
+        currentSyncPoint(node, removed).flatMap(sp -> awaitSyncPoint(node, sp)).begin((s, f) -> {
             if (f != null)
             {
                 node.agent().onUncaughtException(f);
@@ -492,108 +486,37 @@ public class ListStore implements DataStore
                                   });
     }
 
-    // TODO (duplication): this is 95% of accord.coordinate.CoordinateShardDurable
-    //   we already report all this information to EpochState; would be better to use that
-    private static class Await extends AsyncResults.SettableResult<SyncPoint<Ranges>> implements Callback<ReadReply>
+    private static AsyncChain<SyncPoint<Ranges>> awaitSyncPoint(Node node, SyncPoint<Ranges> exclusiveSyncPoint)
     {
-        private final Node node;
-        private final AppliedTracker tracker;
-        private final SyncPoint<Ranges> exclusiveSyncPoint;
+        Await e = new Await(node, exclusiveSyncPoint);
+        e.addCallback(() -> node.configService().reportEpochRedundant(exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.syncId.epoch()));
+        e.start();
+        return e.recover(t -> {
+            if (t.getClass() == SyncPointErased.class)
+                return AsyncChains.success(null);
+            if (t instanceof Timeout ||
+                // TODO (expected): why are we not simply handling Insufficient properly?
+                t instanceof RuntimeException && "Insufficient".equals(t.getMessage()) ||
+                t instanceof SimulatedFault)
+                return awaitSyncPoint(node, exclusiveSyncPoint);
+            // cannot loop indefinitely
+            if (t instanceof RuntimeException && "Redundant".equals(t.getMessage()))
+                return AsyncChains.success(null);
+            return null;
+        });
+    }
 
-        private Await(Node node, long minEpoch, SyncPoint<Ranges> exclusiveSyncPoint)
+    private static class Await extends ExecuteSyncPoint.ExecuteExclusiveSyncPoint
+    {
+        public Await(Node node, SyncPoint<Ranges> syncPoint)
         {
-            Topologies topologies = node.topology().forEpoch(exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.sourceEpoch());
-            this.node = node;
-            this.tracker = new AppliedTracker(topologies);
-            this.exclusiveSyncPoint = exclusiveSyncPoint;
-        }
-
-        public static AsyncChain<SyncPoint<Ranges>> coordinate(Node node, long minEpoch, SyncPoint sp)
-        {
-            Await coordinate = new Await(node, minEpoch, sp);
-            coordinate.start();
-            return coordinate.recover(t -> {
-                if (t.getClass() == SyncPointErased.class)
-                    return AsyncChains.success(null);
-                if (t instanceof Timeout ||
-                    // TODO (expected): why are we not simply handling Insufficient properly?
-                    t instanceof RuntimeException && "Insufficient".equals(t.getMessage()) ||
-                    t instanceof SimulatedFault)
-                    return coordinate(node, minEpoch, sp);
-                // cannot loop indefinitely
-                if (t instanceof RuntimeException && "Redundant".equals(t.getMessage()))
-                    return AsyncChains.success(null);
-                return null;
-            });
-        }
-
-        private void start()
-        {
-            node.send(tracker.nodes(), to -> new WaitUntilApplied(to, tracker.topologies(), exclusiveSyncPoint.syncId, exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.syncId.epoch()), this);
-        }
-        @Override
-        public void onSuccess(Node.Id from, ReadReply reply)
-        {
-            if (!reply.isOk())
-            {
-                ReadData.CommitOrReadNack nack = (ReadData.CommitOrReadNack) reply;
-                switch (nack)
-                {
-                    default: throw new AssertionError("Unhandled: " + reply);
-
-                    case Insufficient:
-                        CoordinateSyncPoint.sendApply(node, from, exclusiveSyncPoint);
-                        return;
-                    case Rejected:
-                        tryFailure(new RuntimeException(nack.name()));
-                    case Redundant:
-                        tryFailure(new SyncPointErased());
-                        return;
-                    case Invalid:
-                        tryFailure(new Invalidated(exclusiveSyncPoint.syncId, exclusiveSyncPoint.homeKey));
-                        return;
-                }
-            }
-            else
-            {
-                if (tracker.recordSuccess(from) == RequestStatus.Success)
-                {
-                    node.configService().reportEpochRedundant(exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.syncId.epoch());
-                    trySuccess(exclusiveSyncPoint);
-                }
-            }
-        }
-
-        private Throwable cause;
-
-        @Override
-        public void onFailure(Node.Id from, Throwable failure)
-        {
-            synchronized (this)
-            {
-                if (cause == null) cause = failure;
-                else
-                {
-                    try
-                    {
-                        cause.addSuppressed(failure);
-                    }
-                    catch (Throwable t)
-                    {
-                        // can not always add suppress
-                        node.agent().onUncaughtException(failure);
-                    }
-                }
-                failure = cause;
-            }
-            if (tracker.recordFailure(from) == RequestStatus.Failed)
-                tryFailure(failure);
+            super(node, syncPoint, AppliedTracker::new);
         }
 
         @Override
-        public void onCallbackFailure(Node.Id from, Throwable failure)
+        public void start()
         {
-            tryFailure(failure);
+            super.start();
         }
     }
 }
