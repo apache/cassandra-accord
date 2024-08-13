@@ -90,9 +90,6 @@ public abstract class CheckShards<U extends Unseekables<?>> extends ReadCoordina
     @Override
     protected Action process(Id from, CheckStatusReply reply)
     {
-        if (debug != null)
-            debug.put(from, reply);
-        
         if (reply.isOk())
         {
             CheckStatusOk ok = (CheckStatusOk) reply;

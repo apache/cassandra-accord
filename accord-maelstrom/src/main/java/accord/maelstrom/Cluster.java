@@ -41,11 +41,13 @@ import java.util.function.Supplier;
 
 import accord.api.MessageSink;
 import accord.api.Scheduler;
-import accord.config.LocalConfig;
-import accord.config.MutableLocalConfig;
+import accord.api.LocalConfig;
 import accord.coordinate.CoordinationAdapter;
+import accord.impl.DefaultRequestTimeouts;
 import accord.impl.InMemoryCommandStores;
-import accord.impl.SimpleProgressLog;
+import accord.impl.DefaultLocalListeners;
+import accord.impl.progresslog.DefaultProgressLogs;
+import accord.impl.DefaultRemoteListeners;
 import accord.impl.SizeOfIntersectionSorter;
 import accord.local.AgentExecutor;
 import accord.local.Node;
@@ -53,7 +55,6 @@ import accord.local.Node.Id;
 import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
 import accord.messages.Callback;
-import accord.messages.LocalRequest;
 import accord.messages.Reply;
 import accord.messages.Reply.FailureReply;
 import accord.messages.ReplyContext;
@@ -257,8 +258,8 @@ public class Cluster implements Scheduler
             if (run != null)
             {
                 run.run();
-                if (recurring)
-                    pending.add(this, delay, units);
+                if (recurring) pending.add(this, delay, units);
+                else run = null;
             }
         }
 
@@ -266,6 +267,12 @@ public class Cluster implements Scheduler
         public void cancel()
         {
             run = null;
+        }
+
+        @Override
+        public boolean isDone()
+        {
+            return run == null;
         }
     }
 
@@ -320,13 +327,13 @@ public class Cluster implements Scheduler
             {
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
                 LongSupplier nowSupplier = nowSupplierSupplier.get();
-                LocalConfig localConfig = new MutableLocalConfig();
-                lookup.put(node, new Node(node, messageSink, LocalRequest::simpleHandler, new SimpleConfigService(topology),
+                LocalConfig localConfig = LocalConfig.DEFAULT;
+                lookup.put(node, new Node(node, messageSink, new SimpleConfigService(topology),
                                           nowSupplier, NodeTimeService.elapsedWrapperFromNonMonotonicSource(TimeUnit.MICROSECONDS, nowSupplier),
                                           MaelstromStore::new, new ShardDistributor.EvenSplit(8, ignore -> new MaelstromKey.Splitter()),
                                           MaelstromAgent.INSTANCE,
-                                          randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
-                                          SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new, new CoordinationAdapter.DefaultFactory(),
+                                          randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER, DefaultRemoteListeners::new, DefaultRequestTimeouts::new,
+                                          DefaultProgressLogs::new, DefaultLocalListeners.Factory::new, InMemoryCommandStores.SingleThread::new, new CoordinationAdapter.DefaultFactory(),
                                           localConfig));
             }
 

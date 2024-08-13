@@ -18,6 +18,8 @@
 
 package accord.primitives;
 
+import java.util.Arrays;
+
 import accord.api.RoutingKey;
 import accord.utils.Invariants;
 
@@ -47,6 +49,14 @@ public class FullKeyRoute extends KeyRoute implements FullRoute<RoutingKey>
     {
         Invariants.checkArgument(contains(withKey));
         return this;
+    }
+
+    @Override
+    public Route<RoutingKey> slice(int from, int to)
+    {
+        if (from == 0 && to == size())
+            return this;
+        return new PartialKeyRoute(homeKey, Arrays.copyOfRange(keys, from, to));
     }
 
     @Override

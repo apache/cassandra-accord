@@ -25,6 +25,9 @@ import accord.utils.Invariants;
 import accord.api.RoutingKey;
 import accord.utils.SortedArrays;
 
+import static accord.utils.Invariants.illegalArgument;
+import static accord.utils.Invariants.illegalState;
+
 /**
  * A slice of a Route that covers
  */
@@ -37,7 +40,6 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
             return new PartialKeyRoute(homeKey, keys);
         }
     }
-
 
     public PartialKeyRoute(RoutingKey homeKey, RoutingKey[] keys)
     {
@@ -54,10 +56,34 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
     }
 
     @Override
-    public Route<RoutingKey> union(Route<RoutingKey> that)
+    public Route<RoutingKey> with(Participants<RoutingKey> that)
     {
-        if (that.kind().isFullRoute()) return that;
-        return union((PartialKeyRoute) that);
+        Unseekables.UnseekablesKind kind = that.kind();
+        switch (kind)
+        {
+            default: throw new AssertionError("Unhandled kind: " + kind);
+            case RoutingRanges:
+            case PartialRangeRoute:
+            case FullRangeRoute:
+                throw illegalState("Incompatible route/participants: %s vs %s", kind(), kind);
+
+            case FullKeyRoute:
+                return (FullKeyRoute) that;
+
+            case PartialKeyRoute:
+                return with((PartialKeyRoute) that);
+
+            case RoutingKeys:
+                return with((RoutingKeys) that);
+        }
+    }
+
+    @Override
+    public Route<RoutingKey> slice(int from, int to)
+    {
+        if (from == 0 && to == size())
+            return this;
+        return new PartialKeyRoute(homeKey, Arrays.copyOfRange(keys, from, to));
     }
 
     @Override
@@ -105,12 +131,16 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
     }
 
     @Override
-    public PartialKeyRoute union(PartialRoute<RoutingKey> with)
+    public PartialKeyRoute with(PartialRoute<RoutingKey> that)
     {
-        if (!(with instanceof PartialKeyRoute))
-            throw new IllegalArgumentException();
+        if (!(that instanceof PartialKeyRoute))
+            throw illegalArgument("Unexpected PartialRoute<RoutingKey> type: " + (that == null ? null : that.getClass()));
 
-        PartialKeyRoute that = (PartialKeyRoute) with;
+        return with((PartialKeyRoute) that);
+    }
+
+    public PartialKeyRoute with(PartialKeyRoute that)
+    {
         Invariants.checkState(homeKey.equals(that.homeKey));
         RoutingKey[] keys = SortedArrays.linearUnion(this.keys, that.keys, RoutingKey[]::new);
         if (keys == this.keys || keys == that.keys)
@@ -119,6 +149,13 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
             if (keys != this.keys) return that;
             return this;
         }
+        return new PartialKeyRoute(homeKey, keys);
+    }
+
+    public PartialKeyRoute with(RoutingKeys that)
+    {
+        RoutingKey[] keys = SortedArrays.linearUnion(this.keys, that.keys, RoutingKey[]::new);
+        if (keys == this.keys) return this;
         return new PartialKeyRoute(homeKey, keys);
     }
 }

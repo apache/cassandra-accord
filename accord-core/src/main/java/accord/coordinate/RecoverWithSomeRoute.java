@@ -92,7 +92,7 @@ public class RecoverWithSomeRoute extends CheckShards<Route<?>> implements BiCon
                 case Quorum:
                     if (merged != null && merged.isTruncatedResponse())
                     {
-                        callback.accept(ProgressToken.TRUNCATED, null);
+                        callback.accept(ProgressToken.TRUNCATED_DURABLE_OR_INVALIDATED, null);
                     }
                     else
                     {

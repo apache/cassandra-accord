@@ -37,7 +37,6 @@ import accord.api.MessageSink;
 import accord.api.Query;
 import accord.api.Read;
 import accord.api.Result;
-import accord.api.RoutingKey;
 import accord.api.Update;
 import accord.api.Write;
 import accord.impl.IntKey;
@@ -54,11 +53,11 @@ import accord.primitives.Ballot;
 import accord.primitives.FullRoute;
 import accord.primitives.Keys;
 import accord.primitives.PartialDeps;
-import accord.primitives.PartialRoute;
 import accord.primitives.PartialTxn;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.Routable;
+import accord.primitives.Route;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
@@ -147,8 +146,8 @@ class ReadDataTest
         // status=Commit, will listen waiting for ReadyToExecute; obsolete marked by status listener
         test(state -> {
             state.forEach(store -> check(store.execute(PreLoadContext.contextFor(state.txnId, state.keys), safe -> {
-                CheckedCommands.preaccept(safe, state.txnId, state.partialTxn, state.route, state.progressKey);
-                CheckedCommands.accept(safe, state.txnId, Ballot.ZERO, state.partialRoute, state.partialTxn.keys(), state.progressKey, state.executeAt, state.deps);
+                CheckedCommands.preaccept(safe, state.txnId, state.partialTxn, state.route);
+                CheckedCommands.accept(safe, state.txnId, Ballot.ZERO, state.partialRoute, state.partialTxn.keys(), state.executeAt, state.deps);
 
                 SafeCommand safeCommand = safe.ifInitialised(state.txnId);
                 safeCommand.stable(safe, safeCommand.current(), Ballot.ZERO, state.executeAt, Command.WaitingOn.empty(state.txnId.domain()));
@@ -245,8 +244,7 @@ class ReadDataTest
         private final Keys keys;
         private final Key key;
         private final FullRoute<?> route;
-        private final PartialRoute<?> partialRoute;
-        private final RoutingKey progressKey;
+        private final Route<?> partialRoute;
         private final Timestamp executeAt;
         private final PartialDeps deps;
         private final AsyncResults.SettableResult<Data> readResult;
@@ -261,7 +259,6 @@ class ReadDataTest
             this.key = keys.get(0);
             this.route = keys.toRoute(key.toUnseekable());
             this.partialRoute = route.slice(RANGES);
-            this.progressKey = key.toUnseekable();
             this.executeAt = txnId;
             this.deps = PartialDeps.builder(partialRoute).build();
             this.readResult = readResult;
@@ -270,9 +267,9 @@ class ReadDataTest
         void readyToExecute(CommandStore store)
         {
             check(store.execute(PreLoadContext.contextFor(txnId, keys), safe -> {
-                CheckedCommands.preaccept(safe, txnId, partialTxn, route, progressKey);
-                CheckedCommands.accept(safe, txnId, Ballot.ZERO, partialRoute, partialTxn.keys(), progressKey, executeAt, deps);
-                CheckedCommands.commit(safe, SaveStatus.Stable, Ballot.ZERO, txnId, route, progressKey, partialTxn, executeAt, deps);
+                CheckedCommands.preaccept(safe, txnId, partialTxn, route);
+                CheckedCommands.accept(safe, txnId, Ballot.ZERO, partialRoute, partialTxn.keys(), executeAt, deps);
+                CheckedCommands.commit(safe, SaveStatus.Stable, Ballot.ZERO, txnId, route, partialTxn, executeAt, deps);
             }));
         }
 
@@ -294,7 +291,7 @@ class ReadDataTest
             Writes writes = new Writes(txnId, executeAt, keys, write);
 
             forEach(store -> check(store.execute(PreLoadContext.contextFor(txnId, keys), safe -> {
-                CheckedCommands.apply(safe, txnId, route, progressKey, executeAt, deps, partialTxn, writes, Mockito.mock(Result.class));
+                CheckedCommands.apply(safe, txnId, route, executeAt, deps, partialTxn, writes, Mockito.mock(Result.class));
             })));
             return writeResult;
         }

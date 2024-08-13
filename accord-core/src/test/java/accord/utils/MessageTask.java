@@ -95,12 +95,6 @@ public class MessageTask extends AsyncResults.SettableResult<Void> implements Ru
         }
 
         @Override
-        public void preProcess(Node on, Node.Id from, ReplyContext replyContext)
-        {
-            // no-op
-        }
-
-        @Override
         public void process(Node on, Node.Id from, ReplyContext replyContext)
         {
             process.process(on, from, success -> on.reply(from, replyContext, success ? SUCCESS : FAILURE, null));

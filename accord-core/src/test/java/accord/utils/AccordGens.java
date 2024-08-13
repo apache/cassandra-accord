@@ -599,7 +599,6 @@ public class AccordGens
         return rs -> {
             Deps deps = depsGen.next(rs);
             if (deps.isEmpty()) return Command.WaitingOn.empty(Routable.Domain.Key);
-            if (emptyGen.next(rs)) return Command.WaitingOn.none(Routable.Domain.Key, deps);
             int size = deps.rangeDeps.txnIdCount() + deps.directKeyDeps.txnIdCount() + deps.keyDeps.keys().size();
             SimpleBitSet set = new SimpleBitSet(size);
             int directKeyOffset = deps.rangeDeps.txnIdCount();

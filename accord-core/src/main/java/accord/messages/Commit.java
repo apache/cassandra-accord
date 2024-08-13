@@ -34,7 +34,6 @@ import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
 import accord.primitives.PartialDeps;
-import accord.primitives.PartialRoute;
 import accord.primitives.PartialTxn;
 import accord.primitives.Participants;
 import accord.primitives.Ranges;
@@ -62,7 +61,7 @@ public class Commit extends TxnRequest<CommitOrReadNack>
 {
     public static class SerializerSupport
     {
-        public static Commit create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Kind kind, Ballot ballot, Timestamp executeAt, Seekables<?, ?> keys, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadData readData)
+        public static Commit create(TxnId txnId, Route<?> scope, long waitForEpoch, Kind kind, Ballot ballot, Timestamp executeAt, Seekables<?, ?> keys, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadData readData)
         {
             return new Commit(kind, txnId, scope, waitForEpoch, ballot, executeAt, keys, partialTxn, partialDeps, fullRoute, readData);
         }
@@ -115,7 +114,7 @@ public class Commit extends TxnRequest<CommitOrReadNack>
         this(kind, to, coordinateTopology, topologies, txnId, txn, route, ballot, executeAt, deps, readScope != null ? new ReadTxnData(to, topologies, txnId, readScope, executeAt.epoch()) : null);
     }
 
-    public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, Ballot ballot, Timestamp executeAt, Deps deps, TriFunction<Txn, PartialRoute<?>, PartialDeps, ReadData> toExecuteFactory)
+    public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, Ballot ballot, Timestamp executeAt, Deps deps, TriFunction<Txn, Route<?>, PartialDeps, ReadData> toExecuteFactory)
     {
         super(to, topologies, route, txnId);
         this.ballot = ballot;
@@ -132,9 +131,9 @@ public class Commit extends TxnRequest<CommitOrReadNack>
         {
             Ranges coordinateRanges = coordinateTopology.rangesForNode(to);
             Ranges executeRanges = topologies.computeRangesForNode(to);
-            Ranges extraRanges = executeRanges.subtract(coordinateRanges);
+            Ranges extraRanges = executeRanges.without(coordinateRanges);
             if (!extraRanges.isEmpty())
-                partialTxn = txn.intersecting(scope.subtract(coordinateRanges), coordinateRanges.contains(route.homeKey()));
+                partialTxn = txn.intersecting(scope.without(coordinateRanges), coordinateRanges.contains(route.homeKey()));
         }
 
         this.kind = kind;
@@ -146,7 +145,7 @@ public class Commit extends TxnRequest<CommitOrReadNack>
         this.readData = toExecuteFactory == null ? null : toExecuteFactory.apply(partialTxn != null ? partialTxn : txn, scope, partialDeps);
     }
 
-    protected Commit(Kind kind, TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Ballot ballot, Timestamp executeAt, Seekables<?, ?> keys, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadData readData)
+    protected Commit(Kind kind, TxnId txnId, Route<?> scope, long waitForEpoch, Ballot ballot, Timestamp executeAt, Seekables<?, ?> keys, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadData readData)
     {
         super(txnId, scope, waitForEpoch);
         this.kind = kind;
@@ -254,7 +253,7 @@ public class Commit extends TxnRequest<CommitOrReadNack>
         Route<?> route = this.route != null ? this.route : scope;
         SafeCommand safeCommand = safeStore.get(txnId, executeAt, route);
 
-        switch (Commands.commit(safeStore, safeCommand, kind.saveStatus, ballot, txnId, route, progressKey, partialTxn, executeAt, partialDeps))
+        switch (Commands.commit(safeStore, safeCommand, kind.saveStatus, ballot, txnId, route, partialTxn, executeAt, partialDeps))
         {
             default:
             case Success:
@@ -378,15 +377,8 @@ public class Commit extends TxnRequest<CommitOrReadNack>
         }
 
         @Override
-        public void preProcess(Node on, Id from, ReplyContext replyContext)
-        {
-            // no-op
-        }
-
-        @Override
         public void process(Node node, Id from, ReplyContext replyContext)
         {
-
             node.forEachLocal(this, scope, txnId.epoch(), invalidateUntilEpoch, safeStore -> {
                 // it's fine for this to operate on a non-participating home key, since invalidation is a terminal state,
                 // so it doesn't matter if we resurrect a redundant entry

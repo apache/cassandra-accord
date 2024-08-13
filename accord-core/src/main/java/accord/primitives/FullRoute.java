@@ -20,5 +20,5 @@ package accord.primitives;
 
 public interface FullRoute<T extends Unseekable> extends Route<T>, Unseekables<T>
 {
-    @Override default FullRoute<T> union(Route<T> route) { return this; }
+    @Override default FullRoute<T> with(Participants<T> route) { return this; }
 }

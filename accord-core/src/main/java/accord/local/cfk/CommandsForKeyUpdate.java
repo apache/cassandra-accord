@@ -38,12 +38,12 @@ public abstract class CommandsForKeyUpdate
     abstract PostProcess postProcess();
     abstract void postProcess(SafeCommandStore safeStore, @Nullable CommandsForKey prevCfk, @Nullable Command command, NotifySink notifySink);
 
-    static class CommandsForKeyUpdateWithNotifier extends CommandsForKeyUpdate
+    static class CommandsForKeyUpdateWithPostProcess extends CommandsForKeyUpdate
     {
         final CommandsForKey cfk;
         final PostProcess postProcess;
 
-        CommandsForKeyUpdateWithNotifier(CommandsForKey cfk, PostProcess postProcess)
+        CommandsForKeyUpdateWithPostProcess(CommandsForKey cfk, PostProcess postProcess)
         {
             this.cfk = cfk;
             this.postProcess = postProcess;

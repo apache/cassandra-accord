@@ -18,6 +18,7 @@
 
 package accord.primitives;
 
+import java.util.Arrays;
 import java.util.Collection;
 
 import accord.api.RoutingKey;
@@ -77,6 +78,14 @@ public class RoutingKeys extends AbstractUnseekableKeys implements Unseekables<R
     public RoutingKeys with(Participants<RoutingKey> with)
     {
         return with((AbstractKeys<RoutingKey>) with);
+    }
+
+    @Override
+    public Participants<RoutingKey> slice(int from, int to)
+    {
+        if (from == 0 && to == size())
+            return this;
+        return new RoutingKeys(Arrays.copyOfRange(keys, from, to));
     }
 
     private RoutingKeys with(AbstractKeys<RoutingKey> with)

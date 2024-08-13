@@ -67,12 +67,6 @@ public class BurnTestConfigurationService extends AbstractConfigurationService.M
         }
 
         @Override
-        public void preProcess(Node on, Node.Id from, ReplyContext replyContext)
-        {
-            // no-op
-        }
-
-        @Override
         public void process(Node on, Node.Id from, ReplyContext replyContext)
         {
             Topology topology = on.configService().getTopologyForEpoch(epoch);

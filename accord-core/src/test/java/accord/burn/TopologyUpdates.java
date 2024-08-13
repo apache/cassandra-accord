@@ -47,7 +47,7 @@ public class TopologyUpdates
         Map<Node.Id, Ranges> nodeToNewRanges = new HashMap<>();
         for (Node.Id node : nodes)
         {
-            Ranges newRanges = update.rangesForNode(node).subtract(prev.rangesForNode(node));
+            Ranges newRanges = update.rangesForNode(node).without(prev.rangesForNode(node));
             nodeToNewRanges.put(node, newRanges);
         }
         pendingTopologies.put(update.epoch(), nodeToNewRanges);

@@ -38,7 +38,7 @@ import accord.api.ConfigurationService.EpochReady;
 import accord.api.RoutingKey;
 import accord.api.Scheduler;
 import accord.api.TopologySorter;
-import accord.config.LocalConfig;
+import accord.api.LocalConfig;
 import accord.coordinate.EpochTimeout;
 import accord.coordinate.TopologyMismatch;
 import accord.coordinate.tracking.QuorumTracker;
@@ -109,15 +109,15 @@ public class TopologyManager
             else
                 this.syncTracker = null;
 
-            this.addedRanges = global.ranges.subtract(prevRanges).mergeTouching();
-            this.removedRanges = prevRanges.mergeTouching().subtract(global.ranges);
-            this.prevSyncComplete = addedRanges.union(MERGE_ADJACENT, prevSyncComplete.subtract(removedRanges));
+            this.addedRanges = global.ranges.without(prevRanges).mergeTouching();
+            this.removedRanges = prevRanges.mergeTouching().without(global.ranges);
+            this.prevSyncComplete = addedRanges.union(MERGE_ADJACENT, prevSyncComplete.without(removedRanges));
             this.curSyncComplete = this.syncComplete = addedRanges;
         }
 
         boolean markPrevSynced(Ranges newPrevSyncComplete)
         {
-            newPrevSyncComplete = newPrevSyncComplete.union(MERGE_ADJACENT, addedRanges).subtract(removedRanges);
+            newPrevSyncComplete = newPrevSyncComplete.union(MERGE_ADJACENT, addedRanges).without(removedRanges);
             if (prevSyncComplete.containsAll(newPrevSyncComplete))
                 return false;
             checkState(newPrevSyncComplete.containsAll(prevSyncComplete), "Expected %s to contain all ranges in %s; but did not", newPrevSyncComplete, prevSyncComplete);
@@ -669,7 +669,7 @@ public class TopologyManager
         {
             EpochState epochState = snapshot.epochs[i++];
             topologies.add(epochState.global.forSelection(select));
-            select = select.subtract(epochState.addedRanges);
+            select = select.without(epochState.addedRanges);
         }
 
         if (select.isEmpty())
@@ -689,11 +689,11 @@ public class TopologyManager
         EpochState prev = snapshot.epochs[maxi - 1];
         do
         {
-            remaining = remaining.subtract(isSufficientFor.apply(prev));
+            remaining = remaining.without(isSufficientFor.apply(prev));
             Unseekables<?> prevSelect = select;
-            select = select.subtract(prev.addedRanges);
+            select = select.without(prev.addedRanges);
             if (prevSelect != select) // perf optimization; if select wasn't changed (it does not intersect addedRanges), then remaining won't
-                remaining = remaining.subtract(prev.addedRanges);
+                remaining = remaining.without(prev.addedRanges);
             if (remaining.isEmpty())
                 return topologies.build(sorter);
 
@@ -702,8 +702,8 @@ public class TopologyManager
             prev = next;
         } while (i < snapshot.epochs.length);
         // needd to remove sufficent / added else remaining may not be empty when the final matches are the last epoch
-        remaining = remaining.subtract(isSufficientFor.apply(prev));
-        remaining = remaining.subtract(prev.addedRanges);
+        remaining = remaining.without(isSufficientFor.apply(prev));
+        remaining = remaining.without(prev.addedRanges);
 
         if (!remaining.isEmpty()) throw new IllegalArgumentException("Ranges " + remaining + " could not be found");
 
@@ -729,7 +729,7 @@ public class TopologyManager
         {
             EpochState epochState = snapshot.get(minEpoch + i);
             topologies.add(epochState.global.forSelection(select));
-            select = select.subtract(epochState.addedRanges);
+            select = select.without(epochState.addedRanges);
         }
         checkState(!topologies.isEmpty(), "Unable to find an epoch that contained %s", select);
 

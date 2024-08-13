@@ -38,8 +38,8 @@ public interface Seekables<K extends Seekable, U extends Seekables<K, ?>> extend
     U slice(Ranges ranges, Slice slice);
     U intersecting(Unseekables<?> intersecting, Slice slice);
 
-    Seekables<K, U> subtract(Ranges ranges);
-    Seekables<K, U> subtract(U without);
+    Seekables<K, U> without(Ranges ranges);
+    Seekables<K, U> without(U without);
     Seekables<K, U> with(U with);
 
     Participants<?> toParticipants();

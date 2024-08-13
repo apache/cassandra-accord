@@ -217,7 +217,7 @@ public class ExtendedAssertions
             for (int i = 0; i < actual.size(); i++)
             {
                 Topology topology = actual.get(i);
-                select = select.subtract(topology.ranges());
+                select = select.without(topology.ranges());
                 if (select.isEmpty()) return myself;
             }
             throwAssertionError(new BasicErrorMessageFactory("%nMissing ranges detected: %s", select));

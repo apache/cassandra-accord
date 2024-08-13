@@ -33,14 +33,14 @@ import org.slf4j.LoggerFactory;
 import accord.Utils;
 import accord.api.Agent;
 import accord.api.BarrierType;
+import accord.api.LocalListeners;
 import accord.api.Result;
 import accord.api.RoutingKey;
-import accord.impl.SimpleProgressLog;
+import accord.impl.progresslog.DefaultProgressLogs;
 import accord.impl.TestAgent;
 import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockStore;
 import accord.local.Command;
-import accord.local.Command.TransientListener;
 import accord.local.Commands;
 import accord.local.Commands.AcceptOutcome;
 import accord.local.Commands.ApplyOutcome;
@@ -95,7 +95,7 @@ public class CoordinateTransactionTest
     @AfterEach
     public void tearDown()
     {
-        SimpleProgressLog.PAUSE_FOR_TEST = false;
+        DefaultProgressLogs.unsafePauseForTesting(false);
     }
 
     @Test
@@ -190,8 +190,7 @@ public class CoordinateTransactionTest
             TxnId initiatingBarrierSyncTxnId = AsyncChains.getBlocking(localInitiatingBarrier.coordinateSyncPoint).syncId;
             Semaphore barrierAppliedLocally = new Semaphore(0);
             node.ifLocal(PreLoadContext.contextFor(initiatingBarrierSyncTxnId), key(3).toUnseekable(), epoch, (safeStore) ->
-                safeStore.get(initiatingBarrierSyncTxnId, key(3).toUnseekable()).addAndInvokeListener(
-                    safeStore,
+                safeStore.registerAndInvoke(initiatingBarrierSyncTxnId, key(3).toUnseekable(),
                     commandListener((safeStore2, command) -> {
                         if (command.current().is(Applied))
                             barrierAppliedLocally.release();
@@ -248,20 +247,20 @@ public class CoordinateTransactionTest
             TxnId txnId = node.nextTxnId(Write, Key);
 
             // Create a txn to block the one we are about to create after this
-            SimpleProgressLog.PAUSE_FOR_TEST = true;
+            DefaultProgressLogs.unsafePauseForTesting(true);
             TxnId blockingTxnId = new TxnId(txnId.epoch(), 1, Read, Key, new Id(1));
             Txn blockingTxn = agent.emptySystemTxn(Read, keys);
             PreLoadContext blockingTxnContext = PreLoadContext.contextFor(blockingTxnId, keys);
             for (Node n : cluster)
                 assertEquals(AcceptOutcome.Success, getUninterruptibly(n.unsafeForKey(key).submit(blockingTxnContext, store ->
-                        Commands.preaccept(store, store.get(blockingTxnId, homeKey), blockingTxnId, blockingTxnId.epoch(), blockingTxn.slice(store.ranges().allAt(blockingTxnId), true), route, null))));
+                        Commands.preaccept(store, store.get(blockingTxnId, homeKey), blockingTxnId, blockingTxnId.epoch(), blockingTxn.slice(store.ranges().allAt(blockingTxnId), true), route))));
 
             // Now create the transaction that should be blocked by the previous one
             Txn txn = agent.emptySystemTxn(Write, keys);
             PreLoadContext context = PreLoadContext.contextFor(txnId, keys);
             for (Node n : cluster)
                 assertEquals(AcceptOutcome.Success, getUninterruptibly(n.unsafeForKey(key).submit(context, store ->
-                    Commands.preaccept(store, store.get(txnId, homeKey), txnId, txnId.epoch(), txn.slice(store.ranges().allAt(txnId.epoch()), true), route, null))));
+                    Commands.preaccept(store, store.get(txnId, homeKey), txnId, txnId.epoch(), txn.slice(store.ranges().allAt(txnId.epoch()), true), route))));
 
 
             AsyncResult<SyncPoint<Ranges>> syncInclusiveSyncFuture = CoordinateSyncPoint.inclusiveAndAwaitQuorum(node, ranges);
@@ -274,8 +273,7 @@ public class CoordinateTransactionTest
             SyncPoint<Ranges> localSyncPoint = getUninterruptibly(asyncInclusiveSyncFuture);
             Semaphore localSyncOccurred = new Semaphore(0);
             node.commandStores().ifLocal(PreLoadContext.contextFor(localSyncPoint.syncId), homeKey, epoch, epoch, safeStore ->
-                safeStore.get(localSyncPoint.syncId, homeKey.toUnseekable()).addAndInvokeListener(
-                    safeStore,
+                safeStore.registerAndInvoke(localSyncPoint.syncId, homeKey.toUnseekable(),
                     commandListener((safeStore2, command) -> {
                         if (command.current().hasBeen(Applied))
                             localSyncOccurred.release();
@@ -291,8 +289,8 @@ public class CoordinateTransactionTest
                     PartialDeps.Builder depsBuilder = PartialDeps.builder(store.ranges().currentRanges());
                     depsBuilder.add(key, blockingTxnId);
                     PartialDeps partialDeps = depsBuilder.build();
-                    Commands.commit(store, safeCommand, SaveStatus.Stable, Ballot.ZERO, txnId, route, null, command.partialTxn(), txnId, partialDeps);
-                    Commands.apply(store, safeCommand, txnId, route, null, txnId, partialDeps, command.partialTxn(), txn.execute(txnId, txnId, null), txn.query().compute(txnId, txnId, keys, null, null, null));
+                    Commands.commit(store, safeCommand, SaveStatus.Stable, Ballot.ZERO, txnId, route, command.partialTxn(), txnId, partialDeps);
+                    Commands.apply(store, safeCommand, txnId, route, txnId, partialDeps, command.partialTxn(), txn.execute(txnId, txnId, null), txn.query().compute(txnId, txnId, keys, null, null, null));
                 }));
 
             Barrier<Keys> listeningLocalBarrier = Barrier.barrier(node, Keys.of(key), node.epoch(), BarrierType.local);
@@ -306,7 +304,7 @@ public class CoordinateTransactionTest
             // Apply the blockingTxn to unblock the rest
             for (Node n : cluster)
                 assertEquals(ApplyOutcome.Success, getUninterruptibly(n.unsafeForKey(key).submit(blockingTxnContext, store -> {
-                    return Commands.apply(store, store.get(blockingTxnId, homeKey), blockingTxnId, route, null, blockingTxnId, PartialDeps.builder(route).build(), blockingTxn.slice(store.ranges().allAt(blockingTxnId.epoch()), true), blockingTxn.execute(blockingTxnId, blockingTxnId, null), blockingTxn.query().compute(blockingTxnId, blockingTxnId, keys, null, null, null));
+                    return Commands.apply(store, store.get(blockingTxnId, homeKey), blockingTxnId, route, blockingTxnId, PartialDeps.builder(route).build(), blockingTxn.slice(store.ranges().allAt(blockingTxnId.epoch()), true), blockingTxn.execute(blockingTxnId, blockingTxnId, null), blockingTxn.query().compute(blockingTxnId, blockingTxnId, keys, null, null, null));
                 })));
             // Global sync should be unblocked
             syncPoint = getUninterruptibly(syncInclusiveSyncFuture);
@@ -319,7 +317,7 @@ public class CoordinateTransactionTest
         }
         finally
         {
-            SimpleProgressLog.PAUSE_FOR_TEST = false;
+            DefaultProgressLogs.unsafePauseForTesting(false);
         }
     }
 
@@ -418,21 +416,11 @@ public class CoordinateTransactionTest
         }
     }
 
-    private static Command.TransientListener commandListener(BiConsumer<SafeCommandStore, SafeCommand> listener)
+    private static LocalListeners.ComplexListener commandListener(BiConsumer<SafeCommandStore, SafeCommand> listener)
     {
-        return new TransientListener()
-        {
-            @Override
-            public void onChange(SafeCommandStore safeStore, SafeCommand command)
-            {
-                listener.accept(safeStore, command);
-            }
-
-            @Override
-            public PreLoadContext listenerPreLoadContext(TxnId caller)
-            {
-                return PreLoadContext.contextFor(caller);
-            }
+        return (safeStore, command) -> {
+            listener.accept(safeStore, command);
+            return true;
         };
     }
 }

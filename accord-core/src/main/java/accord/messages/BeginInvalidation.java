@@ -68,7 +68,7 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
         Command command = safeCommand.current();
         boolean acceptedFastPath = command.executeAt() != null && command.executeAt().equals(command.txnId());
         Ballot supersededBy = preaccepted ? null : safeCommand.current().promised();
-        return new InvalidateReply(supersededBy, command.acceptedOrCommitted(), command.status(), acceptedFastPath, command.route(), command.homeKey());
+        return new InvalidateReply(supersededBy, command.acceptedOrCommitted(), command.saveStatus(), acceptedFastPath, command.route(), command.homeKey());
     }
 
     @Override
@@ -83,8 +83,9 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
         boolean acceptedFastPath = o1.acceptedFastPath && o2.acceptedFastPath;
         Route<?> route =  Route.merge((Route)o1.route, o2.route);
         RoutingKey homeKey = o1.homeKey != null ? o1.homeKey : o2.homeKey != null ? o2.homeKey : null;
-        InvalidateReply maxStatus = Status.max(o1, o1.status, o1.accepted, o2, o2.status, o2.accepted);
-        return new InvalidateReply(supersededBy, maxStatus.accepted, maxStatus.status, acceptedFastPath, route, homeKey);
+        InvalidateReply maxStatus = SaveStatus.max(o1, o1.maxStatus, o1.accepted, o2, o2.maxStatus, o2.accepted, false);
+        InvalidateReply maxKnowledgeStatus = SaveStatus.max(o1, o1.maxKnowledgeStatus, o1.accepted, o2, o2.maxKnowledgeStatus, o2.accepted, true);
+        return new InvalidateReply(supersededBy, maxStatus.accepted, maxStatus.maxStatus, maxKnowledgeStatus.maxKnowledgeStatus, acceptedFastPath, route, homeKey);
     }
 
     @Override
@@ -118,16 +119,22 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
     {
         public final @Nullable Ballot supersededBy;
         public final Ballot accepted;
-        public final Status status;
+        public final SaveStatus maxStatus, maxKnowledgeStatus;
         public final boolean acceptedFastPath;
         public final @Nullable Route<?> route;
         public final @Nullable RoutingKey homeKey;
 
-        public InvalidateReply(@Nullable Ballot supersededBy, Ballot accepted, Status status, boolean acceptedFastPath, @Nullable Route<?> route, @Nullable RoutingKey homeKey)
+        public InvalidateReply(@Nullable Ballot supersededBy, Ballot accepted, SaveStatus status, boolean acceptedFastPath, @Nullable Route<?> route, @Nullable RoutingKey homeKey)
+        {
+            this(supersededBy, accepted, status, status, acceptedFastPath, route, homeKey);
+        }
+
+        public InvalidateReply(@Nullable Ballot supersededBy, Ballot accepted, SaveStatus maxStatus, SaveStatus maxKnowledgeStatus, boolean acceptedFastPath, @Nullable Route<?> route, @Nullable RoutingKey homeKey)
         {
             this.supersededBy = supersededBy;
             this.accepted = accepted;
-            this.status = status;
+            this.maxStatus = maxStatus;
+            this.maxKnowledgeStatus = maxKnowledgeStatus;
             this.acceptedFastPath = acceptedFastPath;
             this.route = route;
             this.homeKey = homeKey;
@@ -135,7 +142,7 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
 
         public boolean hasDecision()
         {
-            return status.hasBeen(Status.PreCommitted);
+            return maxKnowledgeStatus.known.executeAt.hasDecision();
         }
 
         public boolean isPromised()
@@ -149,19 +156,19 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
             InvalidateReply that = (InvalidateReply) o;
-            return acceptedFastPath == that.acceptedFastPath && Objects.equals(supersededBy, that.supersededBy) && Objects.equals(accepted, that.accepted) && status == that.status && Objects.equals(route, that.route) && Objects.equals(homeKey, that.homeKey);
+            return acceptedFastPath == that.acceptedFastPath && Objects.equals(supersededBy, that.supersededBy) && Objects.equals(accepted, that.accepted) && maxStatus == that.maxStatus && maxKnowledgeStatus == that.maxKnowledgeStatus && Objects.equals(route, that.route) && Objects.equals(homeKey, that.homeKey);
         }
 
         @Override
         public int hashCode()
         {
-            return Objects.hash(supersededBy, accepted, status, acceptedFastPath, route, homeKey);
+            return Objects.hash(supersededBy, accepted, maxStatus, acceptedFastPath, route, homeKey);
         }
 
         @Override
         public String toString()
         {
-            return "Invalidate" + (isPromised() ? "Promised{" : "NotPromised{" + supersededBy + ",") + status + ',' + (route != null ? route: homeKey) + '}';
+            return "Invalidate" + (isPromised() ? "Promised{" : "NotPromised{" + supersededBy + ",") + maxStatus + ',' + maxKnowledgeStatus + ',' + (route != null ? route: homeKey) + '}';
         }
 
         @Override
@@ -182,22 +189,22 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
 
         public static Route<?> mergeRoutes(InvalidateReply[] invalidateOks)
         {
-            return mapReduceNonNull(ok -> (Route)ok.route, Route::union, invalidateOks);
+            return mapReduceNonNull(ok -> (Route)ok.route, Route::with, invalidateOks);
         }
 
         public static InvalidateReply max(InvalidateReply[] invalidateReplies, Shard shard, SortedList<Id> nodeIds)
         {
-            return Status.max(nodeIds.select(invalidateReplies, shard.nodes), r -> r.status, r -> r.accepted, Objects::nonNull);
+            return SaveStatus.max(nodeIds.select(invalidateReplies, shard.nodes), r -> r.maxStatus, r -> r.accepted, Objects::nonNull, false);
         }
 
         public static InvalidateReply max(InvalidateReply[] invalidateReplies)
         {
-            return Status.max(Arrays.asList(invalidateReplies),r -> r.status, r -> r.accepted, Objects::nonNull);
+            return SaveStatus.max(Arrays.asList(invalidateReplies),r -> r.maxStatus, r -> r.accepted, Objects::nonNull, false);
         }
 
         public static InvalidateReply maxNotTruncated(InvalidateReply[] invalidateReplies)
         {
-            return Status.max(Arrays.asList(invalidateReplies),r -> r.status, r -> r.accepted, r -> r != null && r.status != Status.Truncated);
+            return SaveStatus.max(Arrays.asList(invalidateReplies),r -> r.maxKnowledgeStatus, r -> r.accepted, r -> r != null && !r.maxKnowledgeStatus.is(Status.Truncated), true);
         }
 
         public static RoutingKey findHomeKey(List<InvalidateReply> invalidateOks)

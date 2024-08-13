@@ -34,6 +34,7 @@ import accord.impl.mock.Network;
 import accord.impl.mock.RecordingMessageSink;
 import accord.local.Command;
 import accord.local.CommandStore;
+import accord.local.SaveStatus;
 import accord.local.cfk.CommandsForKey;
 import accord.local.Node;
 import accord.local.Node.Id;
@@ -79,7 +80,7 @@ public class PreAcceptTest
     private static PreAccept preAccept(TxnId txnId, Txn txn, RoutingKey homeKey)
     {
         FullRoute<?> route = txn.keys().toRoute(homeKey);
-        return PreAccept.SerializerSupport.create(txnId, route.slice(FULL_RANGE), txnId.epoch(), txnId.epoch(), false, txnId.epoch(), txn.slice(FULL_RANGE, true), route);
+        return PreAccept.SerializerSupport.create(txnId, route.slice(FULL_RANGE), txnId.epoch(), txnId.epoch(), txnId.epoch(), txn.slice(FULL_RANGE, true), route);
     }
 
     @Test
@@ -164,7 +165,7 @@ public class PreAcceptTest
             invalidate.process(node, ID2, REPLY_CONTEXT);
 
             messageSink.assertHistorySizes(0, 1);
-            assertThat(messageSink.responses.get(0).payload).isEqualTo(new BeginInvalidation.InvalidateReply(null, Ballot.ZERO, Status.NotDefined, false, null, null));
+            assertThat(messageSink.responses.get(0).payload).isEqualTo(new BeginInvalidation.InvalidateReply(null, Ballot.ZERO, SaveStatus.NotDefined, false, null, null));
             messageSink.clearHistory();
 
             PreAccept preAccept = preAccept(txnId, txn, key.toUnseekable());

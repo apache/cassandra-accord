@@ -45,20 +45,19 @@ public abstract class KeyRoute extends AbstractUnseekableKeys implements Route<R
 
     @SuppressWarnings("unchecked")
     @Override
-    public Unseekables<RoutingKey> with(Unseekables<RoutingKey> with)
+    public KeyRoute with(Unseekables<RoutingKey> with)
     {
         AbstractKeys<RoutingKey> that = (AbstractKeys<RoutingKey>) with;
-        return wrap(SortedArrays.linearUnion(keys, that.keys, cachedRoutingKeys()), that);
+        RoutingKey[] mergedKeys = SortedArrays.linearUnion(this.keys, that.keys, cachedRoutingKeys());
+        if (mergedKeys == this.keys)
+            return this;
+        Invariants.checkState(getClass() == PartialKeyRoute.class);
+        if (mergedKeys == that.keys && that instanceof KeyRoute)
+            return (KeyRoute) that;
+        return new PartialKeyRoute(homeKey, mergedKeys);
     }
 
     @SuppressWarnings("unchecked")
-    @Override
-    public Participants<RoutingKey> with(Participants<RoutingKey> with)
-    {
-        AbstractKeys<RoutingKey> that = (AbstractKeys<RoutingKey>) with;
-        return wrap(SortedArrays.linearUnion(keys, that.keys, cachedRoutingKeys()), that);
-    }
-
     @Override
     public Participants<RoutingKey> participants()
     {
@@ -84,6 +83,19 @@ public abstract class KeyRoute extends AbstractUnseekableKeys implements Route<R
         return homeKey;
     }
 
+    @Override
+    public Route<RoutingKey> homeKeyOnlyRoute()
+    {
+        if (keys.length == 1 && keys[0].equals(homeKey))
+            return this;
+        return new PartialKeyRoute(homeKey, new RoutingKey[] { homeKey });
+    }
+
+    @Override
+    public boolean isHomeKeyOnlyRoute()
+    {
+        return keys.length == 1 && keys[0].equals(homeKey);
+    }
 
     @Override
     public PartialKeyRoute slice(Ranges select)

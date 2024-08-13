@@ -43,11 +43,6 @@ public class Picker
         final RandomSource random;
         final float[] weights;
 
-        public Weighted(RandomSource random, int length)
-        {
-            this(random, Picker.randomWeights(random, length));
-        }
-
         public Weighted(RandomSource random, float[] weights)
         {
             this.random = random;
@@ -93,7 +88,7 @@ public class Picker
 
         private WeightedObjectPicker(RandomSource random, T[] values, float[] weights)
         {
-            super(random, values.length);
+            super(random, weights);
             this.values = values;
         }
 

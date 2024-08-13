@@ -40,7 +40,6 @@ import accord.local.Status;
 import accord.primitives.Ballot;
 import accord.primitives.EpochSupplier;
 import accord.primitives.PartialDeps;
-import accord.primitives.PartialRoute;
 import accord.primitives.PartialTxn;
 import accord.primitives.ProgressToken;
 import accord.primitives.Ranges;
@@ -131,7 +130,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
     public CheckStatus(Id to, Topologies topologies, TxnId txnId, Unseekables<?> query, long sourceEpoch, IncludeInfo includeInfo)
     {
         super(txnId);
-        if (isRoute(query)) this.query = computeScope(to, topologies, castToRoute(query), 0, Route::slice, PartialRoute::union);
+        if (isRoute(query)) this.query = computeScope(to, topologies, castToRoute(query), 0, Route::slice, Route::with);
         else this.query = computeScope(to, topologies, (Unseekables) query, 0, Unseekables::slice, Unseekables::with);
         this.sourceEpoch = sourceEpoch;
         this.includeInfo = includeInfo;
@@ -155,9 +154,8 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
     {
         SafeCommand safeCommand = safeStore.get(txnId, this, query);
         Command command = safeCommand.current();
-        // TODO (expected): do we want to force ourselves to serialise these?
-        if (!command.has(Known.DefinitionOnly) && Route.isRoute(query) && safeStore.ranges().allAt(txnId.epoch()).contains(Route.castToRoute(query).homeKey()))
-            Commands.informHome(safeStore, safeCommand, Route.castToRoute(query));
+
+        Commands.updateRouteOrParticipants(safeStore, safeCommand, query);
 
         boolean isCoordinating = isCoordinating(node, command);
         Durability durability = command.durability();
@@ -473,7 +471,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             return prev.reduce(foundKnown);
         }
 
-        public Ranges knownFor(Known required, Ranges expect)
+        public Ranges knownForRanges(Known required, Ranges expect)
         {
             // TODO (desired): implement and use foldlWithDefaultAndBounds so can subtract rather than add
             return foldlWithBounds(expect, (known, prev, start, end) -> {
@@ -647,14 +645,6 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             Invariants.checkState(!(maxSaveStatus.known.outcome.isInvalidated() || maxKnowledgeSaveStatus.known.outcome.isInvalidated()) || !known.isDecidedToExecute());
             // TODO (desired): make sure these match identically, rather than only ensuring Route.isFullRoute (either by coercing it here or by ensuring it at callers)
             return known;
-        }
-
-        // it is assumed that we are invoking this for a transaction that will execute;
-        // the result may be erroneous if the transaction is invalidated, as logically this can apply to all ranges
-        public Ranges knownFor(Known required, Ranges expect)
-        {
-            Invariants.checkState(maxSaveStatus != SaveStatus.Invalidated);
-            return map.knownFor(required, expect);
         }
 
         @Override

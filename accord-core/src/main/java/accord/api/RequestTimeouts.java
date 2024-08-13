@@ -16,25 +16,21 @@
  * limitations under the License.
  */
 
-package accord.config;
+package accord.api;
 
-import java.time.Duration;
+import java.util.concurrent.TimeUnit;
 
-import com.google.common.annotations.VisibleForTesting;
-
-@VisibleForTesting
-public class MutableLocalConfig implements LocalConfig
+public interface RequestTimeouts
 {
-    private volatile Duration progressLogScheduleDelay = LocalConfig.super.getProgressLogScheduleDelay();
-
-    public void setProgressLogScheduleDelay(Duration progressLogScheduleDelay)
+    interface RegisteredTimeout
     {
-        this.progressLogScheduleDelay = progressLogScheduleDelay;
+        void cancel();
     }
 
-    @Override
-    public Duration getProgressLogScheduleDelay()
+    interface Timeout
     {
-        return progressLogScheduleDelay;
+        void timeout();
     }
+
+    RegisteredTimeout register(Timeout timeout, long delay, TimeUnit units);
 }

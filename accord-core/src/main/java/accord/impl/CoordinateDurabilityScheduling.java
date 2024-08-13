@@ -314,7 +314,7 @@ public class CoordinateDurabilityScheduling
 
         localIndexes.clear();
         for (Shard shard : latestLocal.shards())
-            localIndexes.put(shard, shard.sortedNodes.indexOf(node.id()));
+            localIndexes.put(shard, shard.nodes.find(node.id()));
     }
 
     /**

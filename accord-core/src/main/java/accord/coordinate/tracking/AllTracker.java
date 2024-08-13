@@ -26,13 +26,13 @@ import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Fail;
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.NoChange;
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Success;
 
-public class AppliedTracker extends AbstractSimpleTracker<AppliedTracker.AppliedShardTracker> implements ResponseTracker
+public class AllTracker extends AbstractSimpleTracker<AllTracker.AllShardTracker> implements ResponseTracker
 {
-    public static class AppliedShardTracker extends ShardTracker
+    public static class AllShardTracker extends ShardTracker
     {
         protected int waitingOn;
 
-        public AppliedShardTracker(Shard shard)
+        public AllShardTracker(Shard shard)
         {
             super(shard);
             waitingOn = shard.rf();
@@ -52,7 +52,7 @@ public class AppliedTracker extends AbstractSimpleTracker<AppliedTracker.Applied
             return Fail;
         }
 
-        public boolean hasReachedQuorum()
+        public boolean hasSucceeded()
         {
             return waitingOn == 0;
         }
@@ -68,34 +68,34 @@ public class AppliedTracker extends AbstractSimpleTracker<AppliedTracker.Applied
         }
     }
 
-    public AppliedTracker(Topologies topologies)
+    public AllTracker(Topologies topologies)
     {
-        super(topologies, AppliedShardTracker[]::new, shard -> new AppliedShardTracker(shard));
+        super(topologies, AllShardTracker[]::new, shard -> new AllShardTracker(shard));
     }
 
     public RequestStatus recordSuccess(Node.Id node)
     {
-        return recordResponse(this, node, AppliedShardTracker::onSuccess, null);
+        return recordResponse(this, node, AllShardTracker::onSuccess, null);
     }
 
     // return true iff hasFailed()
     public RequestStatus recordFailure(Node.Id node)
     {
-        return recordResponse(this, node, AppliedShardTracker::onFailure, null);
+        return recordResponse(this, node, AllShardTracker::onFailure, null);
     }
 
     public boolean hasFailed()
     {
-        return any(AppliedShardTracker::hasFailed);
+        return any(AllShardTracker::hasFailed);
     }
 
     public boolean hasInFlight()
     {
-        return any(AppliedShardTracker::hasInFlight);
+        return any(AllShardTracker::hasInFlight);
     }
 
-    public boolean hasReachedQuorum()
+    public boolean hasSucceeded()
     {
-        return all(AppliedShardTracker::hasReachedQuorum);
+        return all(AllShardTracker::hasSucceeded);
     }
 }

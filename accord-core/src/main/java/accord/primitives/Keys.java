@@ -93,6 +93,14 @@ public class Keys extends AbstractKeys<Key> implements Seekables<Key, Keys>
         return SortedArrays.isSubset((rk, k) -> -k.compareAsRoutingKey(rk), that.keys, 0, that.keys.length, this.keys, 0, this.keys.length);
     }
 
+    @Override
+    public Routables<?> slice(int from, int to)
+    {
+        if (from == 0 && to == size())
+            return this;
+        return Keys.ofSortedUnique(Arrays.copyOfRange(keys, from, to));
+    }
+
     public final Keys intersecting(Unseekables<?> intersecting)
     {
         switch (intersecting.domain())
@@ -133,19 +141,19 @@ public class Keys extends AbstractKeys<Key> implements Seekables<Key, Keys>
         return new Keys(trg);
     }
 
-    public Keys subtract(Range range)
+    public Keys without(Range range)
     {
         return wrap(subtract(range, keys));
     }
 
     @Override
-    public Keys subtract(Ranges ranges)
+    public Keys without(Ranges ranges)
     {
         return wrap(subtract(ranges, keys, Key[]::new));
     }
 
     @Override
-    public Keys subtract(Keys subtract)
+    public Keys without(Keys subtract)
     {
         return wrap(SortedArrays.linearSubtract(keys, subtract.keys, Key[]::new));
     }

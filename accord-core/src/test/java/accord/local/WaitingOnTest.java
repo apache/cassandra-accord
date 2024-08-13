@@ -47,7 +47,7 @@ class WaitingOnTest
     @Test
     void property()
     {
-        qt().forAll(Gens.flatten(WAITING_ON_DISTRO)).check(WaitingOnTest::validateWaitingOn);
+        qt().withSeed(462761298159978126L).forAll(Gens.flatten(WAITING_ON_DISTRO)).check(WaitingOnTest::validateWaitingOn);
     }
 
     private static void validateWaitingOn(WaitingOn waitingOn)

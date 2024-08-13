@@ -60,7 +60,6 @@ public class RelationMultiMap
 {
     private static final boolean DEBUG_CHECKS = true;
     public static final int[] NO_INTS = new int[0];
-    public static final TxnId[] NO_TXNIDS = new TxnId[0];
 
     /**
      * Turn a set of key, value and mapping buffers into a merge result;

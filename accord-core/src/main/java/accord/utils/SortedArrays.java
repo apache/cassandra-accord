@@ -29,6 +29,7 @@ import accord.utils.ArrayBuffers.ObjectBuffers;
 import accord.utils.ArrayBuffers.IntBufferAllocator;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import static accord.utils.ArrayBuffers.uncached;
@@ -52,6 +53,17 @@ public class SortedArrays
             this.array = checkArgument(array, SortedArrays::isSortedUnique);
         }
 
+        public static <T extends Comparable<? super T>> SortedArrayList<T> ofSorted(T ... items)
+        {
+            return new SortedArrayList<>(items);
+        }
+
+        public static <T extends Comparable<? super T>> SortedArrayList<T> ofUnsorted(T ... items)
+        {
+            Arrays.sort(items);
+            return new SortedArrayList<>(items);
+        }
+
         public static <T extends Comparable<? super T>> SortedArrayList<T> copySorted(Collection<T> copy, IntFunction<T[]> allocator)
         {
             T[] array = copy.toArray(allocator);
@@ -66,7 +78,7 @@ public class SortedArrays
         }
 
         @Override
-        public T get(int index)
+        public @Nonnull T get(int index)
         {
             return array[index];
         }
@@ -78,15 +90,25 @@ public class SortedArrays
         }
 
         @Override
-        public int findNext(int i, Comparable<? super T> find)
+        public int findNext(int i, @Nonnull Comparable<? super T> find)
         {
             return exponentialSearch(array, i, array.length, find);
         }
 
         @Override
-        public int find(Comparable<? super T> find)
+        public int find(@Nonnull Comparable<? super T> find)
         {
             return Arrays.binarySearch(array, 0, array.length, find);
+        }
+
+        public boolean contains(Comparable<? super T> find)
+        {
+            return find != null && find(find) >= 0;
+        }
+
+        public int indexOf(Comparable<? super T> find)
+        {
+            return find == null ? -1 : Math.max(-1, find(find));
         }
 
         public boolean containsAll(SortedArrayList<T> test)
@@ -109,7 +131,7 @@ public class SortedArrays
                 this.array = array;
             }
 
-            public void add(T value)
+            public void add(@Nonnull T value)
             {
                 array[count++] = value;
             }
@@ -1376,6 +1398,46 @@ public class SortedArrays
             throw new IllegalArgumentException(Arrays.toString(array) + " is not sorted");
     }
 
+    public static boolean isSorted(int[] array, int from, int to)
+    {
+        return isSorted(array, from, to, 1);
+    }
+
+    public static boolean isSortedUnique(int[] array, int from, int to)
+    {
+        return isSorted(array, from, to, 0);
+    }
+
+    private static boolean isSorted(int[] array, int from, int to, int compareTo)
+    {
+        for (int i = from + 1 ; i < to ; ++i)
+        {
+            if (Integer.compare(array[i - 1], array[i]) >= compareTo)
+                return false;
+        }
+        return true;
+    }
+
+    public static boolean isSorted(long[] array, int from, int to)
+    {
+        return isSorted(array, from, to, 1);
+    }
+
+    public static boolean isSortedUnique(long[] array, int from, int to)
+    {
+        return isSorted(array, from, to, 0);
+    }
+
+    private static boolean isSorted(long[] array, int from, int to, int compareTo)
+    {
+        for (int i = from + 1 ; i < to ; ++i)
+        {
+            if (Long.compare(array[i - 1], array[i]) >= compareTo)
+                return false;
+        }
+        return true;
+    }
+
     public static <T extends Comparable<T>> boolean isSorted(T[] array)
     {
         return isSorted(array, Comparable::compareTo);
@@ -1386,6 +1448,10 @@ public class SortedArrays
         return isSorted(array, comparator, 1);
     }
 
+    public static <T> boolean isSorted(T[] array, int from, int to, Comparator<T> comparator)
+    {
+        return isSorted(array, from, to, comparator, 1);
+    }
 
     public static <T extends Comparable<? super T>> boolean isSortedUnique(T[] array)
     {
@@ -1399,7 +1465,12 @@ public class SortedArrays
 
     private static <T> boolean isSorted(T[] array, Comparator<T> comparator, int compareTo)
     {
-        for (int i = 1 ; i < array.length ; ++i)
+        return isSorted(array, 0, array.length, comparator, compareTo);
+    }
+
+    private static <T> boolean isSorted(T[] array, int from, int to, Comparator<T> comparator, int compareTo)
+    {
+        for (int i = from + 1 ; i < to ; ++i)
         {
             if (comparator.compare(array[i - 1], array[i]) >= compareTo)
                 return false;

@@ -28,28 +28,27 @@ import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.Callback;
-import accord.messages.GetDeps;
-import accord.messages.GetDeps.GetDepsOk;
+import accord.messages.CalculateDeps;
+import accord.messages.CalculateDeps.CalculateDepsOk;
 import accord.primitives.*;
 import accord.topology.Topologies;
 
 import static accord.coordinate.tracking.RequestStatus.Failed;
 import static accord.coordinate.tracking.RequestStatus.Success;
 
-public class CollectDeps implements Callback<GetDepsOk>
+public class CollectCalculatedDeps implements Callback<CalculateDepsOk>
 {
     final Node node;
     final TxnId txnId;
     final RoutingKey homeKey;
-
     final Timestamp executeAt;
 
-    private final List<GetDepsOk> oks;
+    private final List<CalculateDepsOk> oks;
     private final QuorumTracker tracker;
     private final BiConsumer<Deps, Throwable> callback;
     private boolean isDone;
 
-    CollectDeps(Node node, Topologies topologies, TxnId txnId, RoutingKey homeKey, Timestamp executeAt, BiConsumer<Deps, Throwable> callback)
+    CollectCalculatedDeps(Node node, Topologies topologies, TxnId txnId, RoutingKey homeKey, Timestamp executeAt, BiConsumer<Deps, Throwable> callback)
     {
         this.node = node;
         this.txnId = txnId;
@@ -60,19 +59,19 @@ public class CollectDeps implements Callback<GetDepsOk>
         this.tracker = new QuorumTracker(topologies);
     }
 
-    public static void withDeps(Node node, TxnId txnId, FullRoute<?> fullRoute, Unseekables<?> sendTo, Seekables<?, ?> keysOrRanges, Timestamp executeAt, BiConsumer<Deps, Throwable> callback)
+    public static void withCalculatedDeps(Node node, TxnId txnId, FullRoute<?> fullRoute, Unseekables<?> sendTo, Seekables<?, ?> keysOrRanges, Timestamp executeAt, BiConsumer<Deps, Throwable> callback)
     {
         Topologies topologies = node.topology().withUnsyncedEpochs(sendTo, txnId, executeAt);
-        CollectDeps collect = new CollectDeps(node, topologies, txnId, fullRoute.homeKey(), executeAt, callback);
+        CollectCalculatedDeps collect = new CollectCalculatedDeps(node, topologies, txnId, fullRoute.homeKey(), executeAt, callback);
         CommandStore store = CommandStore.maybeCurrent();
         if (store == null)
             store = node.commandStores().select(fullRoute);
-        node.send(collect.tracker.nodes(), to -> new GetDeps(to, topologies, fullRoute, txnId, keysOrRanges, executeAt),
+        node.send(collect.tracker.nodes(), to -> new CalculateDeps(to, topologies, fullRoute, txnId, keysOrRanges, executeAt),
                   store, collect);
     }
 
     @Override
-    public void onSuccess(Id from, GetDepsOk ok)
+    public void onSuccess(Id from, CalculateDepsOk ok)
     {
         if (isDone)
             return;

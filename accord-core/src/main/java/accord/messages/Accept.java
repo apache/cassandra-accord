@@ -33,8 +33,8 @@ import accord.primitives.Deps;
 import accord.primitives.EpochSupplier;
 import accord.primitives.FullRoute;
 import accord.primitives.PartialDeps;
-import accord.primitives.PartialRoute;
 import accord.primitives.Ranges;
+import accord.primitives.Route;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -51,9 +51,9 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
 {
     public static class SerializerSupport
     {
-        public static Accept create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, Ballot ballot, Timestamp executeAt, Seekables<?, ?> keys, PartialDeps partialDeps)
+        public static Accept create(TxnId txnId, Route<?> scope, long waitForEpoch, long minEpoch, Ballot ballot, Timestamp executeAt, Seekables<?, ?> keys, PartialDeps partialDeps)
         {
-            return new Accept(txnId, scope, waitForEpoch, minEpoch, doNotComputeProgressKey, ballot, executeAt, keys, partialDeps);
+            return new Accept(txnId, scope, waitForEpoch, minEpoch, ballot, executeAt, keys, partialDeps);
         }
     }
 
@@ -71,9 +71,9 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
         this.partialDeps = deps.intersecting(scope);
     }
 
-    private Accept(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, Ballot ballot, Timestamp executeAt, Seekables<?, ?> keys, PartialDeps partialDeps)
+    private Accept(TxnId txnId, Route<?> scope, long waitForEpoch, long minEpoch, Ballot ballot, Timestamp executeAt, Seekables<?, ?> keys, PartialDeps partialDeps)
     {
-        super(txnId, scope, waitForEpoch, minEpoch, doNotComputeProgressKey);
+        super(txnId, scope, waitForEpoch, minEpoch);
         this.ballot = ballot;
         this.executeAt = executeAt;
         this.keys = keys;
@@ -84,7 +84,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     public AcceptReply apply(SafeCommandStore safeStore)
     {
         // TODO (now): we previously checked isAffectedByBootstrap(txnId) here and took this branch also, try to remember why
-        if (minUnsyncedEpoch < txnId.epoch())
+        if (minEpoch < txnId.epoch())
         {
             // if we include unsync'd epochs, check if we intersect the ranges for coordination or execution;
             // if not, we're just providing dependencies, and we can do that without updating our state
@@ -94,7 +94,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
         }
 
         // only accept if we actually participate in the ranges - otherwise we're just looking
-        switch (Commands.accept(safeStore, txnId, ballot, scope, keys, progressKey, executeAt, partialDeps))
+        switch (Commands.accept(safeStore, txnId, ballot, scope, keys, executeAt, partialDeps))
         {
             default: throw new IllegalStateException();
             case Truncated:
@@ -112,8 +112,8 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
 
     private PartialDeps calculatePartialDeps(SafeCommandStore safeStore)
     {
-        Ranges ranges = safeStore.ranges().allBetween(minUnsyncedEpoch, executeAt);
-        return PreAccept.calculatePartialDeps(safeStore, txnId, keys, scope, EpochSupplier.constant(minUnsyncedEpoch), executeAt, ranges);
+        Ranges ranges = safeStore.ranges().allBetween(minEpoch, executeAt);
+        return PreAccept.calculatePartialDeps(safeStore, txnId, keys, scope, EpochSupplier.constant(minEpoch), executeAt, ranges);
     }
 
     @Override
@@ -137,7 +137,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     @Override
     public void process()
     {
-        node.mapReduceConsumeLocal(this, minUnsyncedEpoch, executeAt.epoch(), this);
+        node.mapReduceConsumeLocal(this, minEpoch, executeAt.epoch(), this);
     }
 
     @Override

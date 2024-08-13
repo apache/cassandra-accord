@@ -26,18 +26,14 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.concurrent.TimeUnit;
-import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 import accord.api.Result;
-import accord.impl.MessageListener;
 import accord.local.Command;
 import accord.local.CommonAttributes;
-import accord.local.Listeners;
 import accord.local.Node;
 import accord.local.SaveStatus;
 import accord.local.Status;
-import accord.messages.LocalRequest;
 import accord.messages.Message;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
@@ -56,19 +52,17 @@ import org.agrona.collections.LongArrayList;
 import static accord.utils.Invariants.illegalState;
 
 
-public class Journal implements LocalRequest.Handler, Runnable
+public class Journal implements Runnable
 {
     private final Queue<RequestContext> unframedRequests = new ArrayDeque<>();
     private final LongArrayList waitForEpochs = new LongArrayList();
     private final Long2ObjectHashMap<ArrayList<RequestContext>> delayedRequests = new Long2ObjectHashMap<>();
-    private final MessageListener messageListener;
     private final Map<Key, List<Diff>> diffs = new HashMap<>();
     private Node node;
     boolean isScheduled;
 
-    public Journal(MessageListener messageListener)
+    public Journal()
     {
-        this.messageListener = messageListener;
     }
 
     public void start(Node node)
@@ -86,20 +80,6 @@ public class Journal implements LocalRequest.Handler, Runnable
     public void shutdown()
     {
         this.node = null;
-    }
-
-    @Override
-    public <R> void handle(LocalRequest<R> message, BiConsumer<? super R, Throwable> callback, Node node)
-    {
-        ensureScheduled();
-        messageListener.onMessage(NodeSink.Action.DELIVER, node.id(), node.id(), -1, message);
-        if (message.type().hasSideEffects())
-        {
-            // enqueue
-            unframedRequests.add(new RequestContext(message, message.waitForEpoch(), () -> node.scheduler().now(() -> message.process(node, callback))));
-            return;
-        }
-        message.process(node, callback);
     }
 
     public void handle(Request request, Node.Id from, ReplyContext replyContext)
@@ -193,7 +173,6 @@ public class Journal implements LocalRequest.Handler, Runnable
 
         Command.WaitingOn waitingOn = null;
         Writes writes = null;
-        Listeners.Immutable<Command.DurableAndIdempotentListener> listeners = null;
 
         for (Diff diff : diffs)
         {
@@ -226,8 +205,6 @@ public class Journal implements LocalRequest.Handler, Runnable
                 waitingOn = diff.waitingOn;
             if (diff.writes != null)
                 writes = diff.writes;
-            if (diff.listeners != null)
-                listeners = diff.listeners;
         }
 
         if (!txnId.kind().awaitsOnlyDeps())
@@ -258,8 +235,6 @@ public class Journal implements LocalRequest.Handler, Runnable
             attrs.partialDeps(partialDeps);
         if (additionalKeysOrRanges != null)
             attrs.additionalKeysOrRanges(additionalKeysOrRanges);
-        if (listeners != null)
-            attrs.setListeners(listeners);
         Invariants.checkState(saveStatus != null,
                               "Save status is null after applying %s", diffs);
 
@@ -303,7 +278,7 @@ public class Journal implements LocalRequest.Handler, Runnable
             case Erased:
                 return Command.Truncated.erased(attrs.txnId(), attrs.durability(), attrs.route());
             case Invalidated:
-                return Command.Truncated.invalidated(attrs.txnId(), attrs.durableListeners());
+                return Command.Truncated.invalidated(attrs.txnId());
         }
     }
 
@@ -361,7 +336,6 @@ public class Journal implements LocalRequest.Handler, Runnable
         public final Writes writes;
         public final Command.WaitingOn waitingOn;
         public final Seekables<?, ?> additionalKeysOrRanges;
-        public final Listeners.Immutable<Command.DurableAndIdempotentListener> listeners;
 
         public Diff(TxnId txnId,
                     Timestamp executeAt,
@@ -378,8 +352,7 @@ public class Journal implements LocalRequest.Handler, Runnable
                     Command.WaitingOn waitingOn,
 
                     Writes writes,
-                    Seekables<?, ?> additionalKeysOrRanges,
-                    Listeners.Immutable<Command.DurableAndIdempotentListener> listeners)
+                    Seekables<?, ?> additionalKeysOrRanges)
         {
             this.txnId = txnId;
             this.executeAt = executeAt;
@@ -397,13 +370,12 @@ public class Journal implements LocalRequest.Handler, Runnable
             this.writes = writes;
             this.waitingOn = waitingOn;
             this.additionalKeysOrRanges = additionalKeysOrRanges;
-            this.listeners = listeners;
         }
 
         // We allow only save status, waitingOn, and listeners to be updated by non-primary transactions
         public Diff asNonprimary()
         {
-            return new Diff(null, null, null, saveStatus, null, null, null, null, null, null, waitingOn, null, null, listeners);
+            return new Diff(null, null, null, saveStatus, null, null, null, null, null, null, waitingOn, null, null);
         }
 
         public boolean allNulls()
@@ -421,7 +393,6 @@ public class Journal implements LocalRequest.Handler, Runnable
             if (writes != null) return false;
             if (waitingOn != null) return false;
             if (additionalKeysOrRanges != null) return false;
-            if (listeners != null) return false;
             return true;
         }
 
@@ -455,8 +426,6 @@ public class Journal implements LocalRequest.Handler, Runnable
                 builder.append("waitingOn = ").append(waitingOn).append(" ");
             if (additionalKeysOrRanges != null)
                 builder.append("additionalKeysOrRanges = ").append(additionalKeysOrRanges).append(" ");
-            if (listeners != null)
-                builder.append("listeners = ").append(listeners).append(" ");
             builder.append("}");
             return builder.toString();
         }
@@ -481,8 +450,7 @@ public class Journal implements LocalRequest.Handler, Runnable
                              ifNotEqual(before, after, Command::partialDeps, false),
                              ifNotEqual(before, after, Journal::getWaitingOn, true),
                              ifNotEqual(before, after, Command::writes, false),
-                             ifNotEqual(before, after, Command::additionalKeysOrRanges, false),
-                             ifNotEqual(before, after, Command::durableListeners, false));
+                             ifNotEqual(before, after, Command::additionalKeysOrRanges, false));
         if (diff.allNulls())
             return null;
 

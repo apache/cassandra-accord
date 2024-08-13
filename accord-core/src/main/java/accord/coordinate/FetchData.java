@@ -28,13 +28,14 @@ import accord.messages.CheckStatus.CheckStatusOkFull;
 import accord.messages.Propagate;
 import accord.primitives.EpochSupplier;
 import accord.primitives.FullRoute;
-import accord.primitives.PartialRoute;
 import accord.primitives.Ranges;
 import accord.primitives.Route;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 import accord.utils.Invariants;
+
+import javax.annotation.Nonnull;
 
 import static accord.coordinate.Infer.InvalidateAndCallback.locallyInvalidateAndCallback;
 import static accord.primitives.Route.castToRoute;
@@ -48,25 +49,32 @@ import static accord.primitives.Route.isRoute;
  */
 public class FetchData extends CheckShards<Route<?>>
 {
-    public static void fetch(Known fetch, Node node, TxnId txnId, Unseekables<?> someUnseekables, @Nullable EpochSupplier forLocalEpoch, @Nullable Timestamp executeAt, BiConsumer<? super Known, Throwable> callback)
+    public static class FetchResult
+    {
+        public final @Nonnull Known achieved;
+        public final Unseekables<?> achievedTarget;
+        public final @Nullable Unseekables<?> didNotAchieveTarget;
+
+        public FetchResult(Known achieved, Unseekables<?> achievedTarget, @Nullable Unseekables<?> didNotAchieveTarget)
+        {
+            this.achieved = Invariants.nonNull(achieved);
+            this.achievedTarget = achievedTarget;
+            this.didNotAchieveTarget = didNotAchieveTarget == null || didNotAchieveTarget.isEmpty() ? null : didNotAchieveTarget;
+        }
+    }
+
+    public static void fetch(Known fetch, Node node, TxnId txnId, Unseekables<?> someUnseekables, @Nullable EpochSupplier forLocalEpoch, @Nullable Timestamp executeAt, BiConsumer<? super FetchResult, Throwable> callback)
     {
         if (someUnseekables.kind().isRoute()) fetch(fetch, node, txnId, castToRoute(someUnseekables), forLocalEpoch, executeAt, callback);
         else fetchViaSomeRoute(fetch, node, txnId, someUnseekables, forLocalEpoch, executeAt, callback);
     }
 
-    public static void fetch(Known fetch, Node node, TxnId txnId, Route<?> route, @Nullable EpochSupplier forLocalEpoch, @Nullable Timestamp executeAt, BiConsumer<? super Known, Throwable> callback)
+    public static void fetch(Known fetch, Node node, TxnId txnId, Route<?> route, @Nullable EpochSupplier forLocalEpoch, @Nullable Timestamp executeAt, BiConsumer<? super FetchResult, Throwable> callback)
     {
         long srcEpoch = fetch.fetchEpoch(txnId, executeAt);
         if (!node.topology().hasEpoch(srcEpoch))
         {
-            node.withEpoch(srcEpoch, (ignore, withEpochFailure) -> {
-                if (withEpochFailure != null)
-                {
-                    callback.accept(null, CoordinationFailed.wrap(withEpochFailure));
-                    return;
-                }
-                fetch(fetch, node, txnId, route, forLocalEpoch, executeAt, callback);
-            });
+            node.withEpoch(srcEpoch, callback, () -> fetch(fetch, node, txnId, route, forLocalEpoch, executeAt, callback));
             return;
         }
 
@@ -79,12 +87,30 @@ public class FetchData extends CheckShards<Route<?>>
         }
         else
         {
-            fetchInternal(ranges, fetch, node, txnId, route.slice(ranges), executeAt, toEpoch, callback);
+            Route<?> slicedRoute = route.slice(ranges);
+            fetchInternal(ranges, fetch, node, txnId, slicedRoute, slicedRoute, executeAt, toEpoch, callback);
         }
     }
 
+    /**
+     * Do not make an attempt to discern what keys need to be contacted; fetch from only the specific remote keys that were requested.
+     */
+    public static void fetchSpecific(Known fetch, Node node, TxnId txnId, Route<?> query, Unseekables<?> propagateTo, @Nullable EpochSupplier forLocalEpoch, @Nullable Timestamp executeAt, BiConsumer<? super FetchResult, Throwable> callback)
+    {
+        long srcEpoch = fetch.fetchEpoch(txnId, executeAt);
+        if (!node.topology().hasEpoch(srcEpoch))
+        {
+            node.withEpoch(srcEpoch, callback, () -> fetchSpecific(fetch, node, txnId, query, propagateTo, forLocalEpoch, executeAt, callback));
+            return;
+        }
+
+        Invariants.checkArgument(node.topology().hasEpoch(srcEpoch), "Unknown epoch %d, latest known is %d", srcEpoch, node.epoch());
+        long toEpoch = Math.max(srcEpoch, forLocalEpoch == null ? 0 : forLocalEpoch.epoch());
+        fetchData(fetch, node, txnId, query, propagateTo, srcEpoch, toEpoch, callback);
+    }
+
     @SuppressWarnings({"unchecked", "rawtypes"})
-    private static void fetchViaSomeRoute(Known fetch, Node node, TxnId txnId, Unseekables<?> someUnseekables, @Nullable EpochSupplier forLocalEpoch, @Nullable Timestamp executeAt, BiConsumer<? super Known, Throwable> callback)
+    private static void fetchViaSomeRoute(Known fetch, Node node, TxnId txnId, Unseekables<?> someUnseekables, @Nullable EpochSupplier forLocalEpoch, @Nullable Timestamp executeAt, BiConsumer<? super FetchResult, Throwable> callback)
     {
         FindSomeRoute.findSomeRoute(node, txnId, someUnseekables, (foundRoute, fail) -> {
             if (fail != null) callback.accept(null, fail);
@@ -112,7 +138,7 @@ public class FetchData extends CheckShards<Route<?>>
         });
     }
 
-    private static void reportRouteNotFound(Node node, TxnId txnId, @Nullable Timestamp executeAt, @Nullable EpochSupplier forLocalEpoch, Unseekables<?> someUnseekables, Known found, BiConsumer<? super Known, Throwable> callback)
+    private static void reportRouteNotFound(Node node, TxnId txnId, @Nullable Timestamp executeAt, @Nullable EpochSupplier forLocalEpoch, Unseekables<?> fetchKeys, Known found, BiConsumer<? super FetchResult, Throwable> callback)
     {
         Invariants.checkState(executeAt == null);
         switch (found.outcome)
@@ -120,15 +146,27 @@ public class FetchData extends CheckShards<Route<?>>
             default: throw new AssertionError("Unknown outcome: " + found.outcome);
             case Invalidated:
                 if (forLocalEpoch == null) forLocalEpoch = txnId;
-                locallyInvalidateAndCallback(node, txnId, forLocalEpoch, someUnseekables, found, callback);
+                locallyInvalidateAndCallback(node, txnId, forLocalEpoch, fetchKeys, new FetchResult(found, fetchKeys, null), callback);
                 break;
 
             case Unknown:
                 if (found.canProposeInvalidation())
                 {
-                    Invalidate.invalidate(node, txnId, someUnseekables, (outcome, throwable) -> {
-                        Known known = throwable != null ? null : outcome.asProgressToken().status == Status.Invalidated ? Known.Invalidated : Known.Nothing;
-                        callback.accept(known, throwable);
+                    Invalidate.invalidate(node, txnId, fetchKeys, (outcome, throwable) -> {
+                        FetchResult result = null;
+                        if (throwable == null)
+                        {
+                            Known achieved = Known.Invalidated;
+                            Unseekables<?> achievedTarget = fetchKeys, didNotAchieveTarget = null;
+                            if (outcome.asProgressToken().status != Status.Invalidated)
+                            {
+                                achievedTarget = fetchKeys.slice(0, 0);
+                                didNotAchieveTarget = fetchKeys;
+                                achieved = Known.Nothing;
+                            }
+                            result = new FetchResult(achieved, achievedTarget, didNotAchieveTarget);
+                        }
+                        callback.accept(result, throwable);
                     });
                     break;
                 }
@@ -136,11 +174,11 @@ public class FetchData extends CheckShards<Route<?>>
             case WasApply:
             case Apply:
                 // TODO (expected): we may be stale
-                callback.accept(found, null);
+                callback.accept(new FetchResult(found, fetchKeys.slice(0, 0), fetchKeys), null);
         }
     }
 
-    private static void fetchWithIncompleteRoute(Known fetch, Node node, TxnId txnId, Route<?> someRoute, @Nullable EpochSupplier forLocalEpoch, @Nullable Timestamp executeAt, BiConsumer<? super Known, Throwable> callback)
+    private static void fetchWithIncompleteRoute(Known fetch, Node node, TxnId txnId, Route<?> someRoute, @Nullable EpochSupplier forLocalEpoch, @Nullable Timestamp executeAt, BiConsumer<? super FetchResult, Throwable> callback)
     {
         long srcEpoch = fetch.fetchEpoch(txnId, executeAt);
         Invariants.checkArgument(node.topology().hasEpoch(srcEpoch), "Unknown epoch %d, latest known is %d", srcEpoch, node.epoch());
@@ -151,7 +189,7 @@ public class FetchData extends CheckShards<Route<?>>
         });
     }
 
-    public static void fetch(Known fetch, Node node, TxnId txnId, FullRoute<?> route, @Nullable EpochSupplier forLocalEpoch, @Nullable Timestamp executeAt, BiConsumer<? super Known, Throwable> callback)
+    public static void fetch(Known fetch, Node node, TxnId txnId, FullRoute<?> route, @Nullable EpochSupplier forLocalEpoch, @Nullable Timestamp executeAt, BiConsumer<? super FetchResult, Throwable> callback)
     {
         node.withEpoch(executeAt, (ignore, withEpochFailure) -> {
             if (withEpochFailure != null)
@@ -161,22 +199,24 @@ public class FetchData extends CheckShards<Route<?>>
             }
             long toEpoch = Math.max(fetch.fetchEpoch(txnId, executeAt), forLocalEpoch == null ? 0 : forLocalEpoch.epoch());
             Ranges ranges = node.topology().localRangesForEpochs(txnId.epoch(), toEpoch);
-            fetchInternal(ranges, fetch, node, txnId, route.slice(ranges), executeAt, toEpoch, callback);
+
+            Route<?> slicedRoute = route.slice(ranges);
+            fetchInternal(ranges, fetch, node, txnId, slicedRoute, slicedRoute, executeAt, toEpoch, callback);
         });
     }
 
-    private static void fetchInternal(Ranges ranges, Known target, Node node, TxnId txnId, PartialRoute<?> route, @Nullable Timestamp executeAt, long forLocalEpoch, BiConsumer<? super Known, Throwable> callback)
+    private static Object fetchInternal(Ranges ranges, Known target, Node node, TxnId txnId, Route<?> route, Unseekables<?> propagateTo, @Nullable Timestamp executeAt, long forLocalEpoch, BiConsumer<? super FetchResult, Throwable> callback)
     {
         long srcEpoch = target.fetchEpoch(txnId, executeAt);
         Invariants.checkArgument(node.topology().hasEpoch(srcEpoch), "Unknown epoch %d, latest known is %d", srcEpoch, node.epoch());
-        PartialRoute<?> fetch = route.slice(ranges);
-        fetchData(target, node, txnId, fetch, srcEpoch, forLocalEpoch, (sufficientFor, fail) -> {
+        Route<?> fetch = route.slice(ranges);
+        return fetchData(target, node, txnId, fetch, propagateTo, srcEpoch, forLocalEpoch, (result, fail) -> {
             if (fail != null) callback.accept(null, fail);
-            else callback.accept(sufficientFor, null);
+            else callback.accept(result, null);
         });
     }
 
-    final BiConsumer<Known, Throwable> callback;
+    final BiConsumer<? super FetchResult, Throwable> callback;
     /**
      * The epoch until which we want to persist any response for locally
      */
@@ -186,29 +226,33 @@ public class FetchData extends CheckShards<Route<?>>
     // (i.e. if preaccept/accept contact a later epoch than execution is decided for)
     final long toEpoch;
 
-    private FetchData(Node node, Known target, TxnId txnId, Route<?> route, long sourceEpoch, long toEpoch, BiConsumer<Known, Throwable> callback)
+    final Unseekables<?> propagateTo;
+
+    private FetchData(Node node, Known target, TxnId txnId, Route<?> route, Unseekables<?> propagateTo, long sourceEpoch, long toEpoch, BiConsumer<? super FetchResult, Throwable> callback)
     {
-        this(node, target, txnId, route, route.withHomeKey(), sourceEpoch, toEpoch, callback);
+        this(node, target, txnId, route, route.withHomeKey(), propagateTo, sourceEpoch, toEpoch, callback);
     }
 
-    private FetchData(Node node, Known target, TxnId txnId, Route<?> route, Route<?> routeWithHomeKey, long sourceEpoch, long toEpoch, BiConsumer<Known, Throwable> callback)
+    private FetchData(Node node, Known target, TxnId txnId, Route<?> route, Route<?> routeWithHomeKey, Unseekables<?> propagateTo, long sourceEpoch, long toEpoch, BiConsumer<? super FetchResult, Throwable> callback)
     {
         // TODO (desired, efficiency): restore behaviour of only collecting info if e.g. Committed or Executed
         super(node, txnId, routeWithHomeKey, sourceEpoch, CheckStatus.IncludeInfo.All);
+        this.propagateTo = propagateTo;
         Invariants.checkArgument(routeWithHomeKey.contains(route.homeKey()), "route %s does not contain %s", routeWithHomeKey, route.homeKey());
         this.target = target;
         this.toEpoch = toEpoch;
         this.callback = callback;
     }
 
-    private static FetchData fetchData(Known sufficientStatus, Node node, TxnId txnId, Route<?> route, long sourceEpoch, long toEpoch, BiConsumer<Known, Throwable> callback)
+    private static FetchData fetchData(Known sufficientStatus, Node node, TxnId txnId, Route<?> route, Unseekables<?> propagateTo, long sourceEpoch, long toEpoch, BiConsumer<? super FetchResult, Throwable> callback)
     {
-        FetchData fetch = new FetchData(node, sufficientStatus, txnId, route, sourceEpoch, toEpoch, callback);
+        Invariants.checkState(!propagateTo.isEmpty());
+        FetchData fetch = new FetchData(node, sufficientStatus, txnId, route, propagateTo, sourceEpoch, toEpoch, callback);
         fetch.start();
         return fetch;
     }
 
-    protected Route<?> route()
+    protected Route<?> query()
     {
         return route;
     }
@@ -217,7 +261,7 @@ public class FetchData extends CheckShards<Route<?>>
     protected boolean isSufficient(Node.Id from, CheckStatus.CheckStatusOk ok)
     {
         Ranges rangesForNode = topologies().computeRangesForNode(from);
-        PartialRoute<?> scope = this.route.slice(rangesForNode);
+        Route<?> scope = this.route.slice(rangesForNode);
         return isSufficient(scope, ok);
     }
 
@@ -249,7 +293,7 @@ public class FetchData extends CheckShards<Route<?>>
             }
 
             // TODO (expected): should we automatically trigger a new fetch if we find executeAt but did not request enough information? would be more rob ust
-            Propagate.propagate(node, txnId, sourceEpoch, toEpoch, success.withQuorum, route(), target, (CheckStatusOkFull) merged, callback);
+            Propagate.propagate(node, txnId, sourceEpoch, toEpoch, success.withQuorum, query(), propagateTo, target, (CheckStatusOkFull) merged, callback);
         }
     }
 }

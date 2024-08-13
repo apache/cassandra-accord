@@ -18,6 +18,8 @@
 
 package accord.primitives;
 
+import java.util.Arrays;
+
 import accord.api.Key;
 import accord.impl.IntKey;
 import accord.utils.AccordGens;
@@ -92,6 +94,12 @@ class AbstractRangesTest
         Ranges(@Nonnull Range... ranges)
         {
             super(ranges);
+        }
+
+        @Override
+        public Routables<?> slice(int from, int to)
+        {
+            return new Ranges(Arrays.copyOfRange(ranges, from, to));
         }
 
         @Override

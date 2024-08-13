@@ -22,6 +22,7 @@ import java.util.function.Predicate;
 import javax.annotation.Nullable;
 
 import accord.api.RoutingKey;
+import accord.primitives.Ranges;
 import accord.primitives.TxnId;
 
 public class FailureAccumulator
@@ -59,11 +60,11 @@ public class FailureAccumulator
         return createFailure(current, txnId, homeKey, null);
     }
 
-    public static CoordinationFailed createFailure(@Nullable Throwable current, TxnId txnId, @Nullable RoutingKey homeKey, @Nullable String exhaustedMsg)
+    public static CoordinationFailed createFailure(@Nullable Throwable current, TxnId txnId, @Nullable RoutingKey homeKey, @Nullable Ranges unavailable)
     {
-        if (current == null) return new Exhausted(txnId, homeKey, exhaustedMsg);
+        if (current == null) return new Exhausted(txnId, homeKey, unavailable);
         if (isTimeout(current)) return new Timeout(txnId, homeKey);
-        Exhausted e = new Exhausted(txnId, homeKey, exhaustedMsg);
+        Exhausted e = new Exhausted(txnId, homeKey, unavailable);
         e.initCause(current);
         return e;
     }

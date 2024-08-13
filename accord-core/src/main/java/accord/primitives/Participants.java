@@ -27,24 +27,28 @@ package accord.primitives;
 // TODO (desired): so we need this abstraction anymore, now that we have removed the concept of non-participating home keys?
 public interface Participants<K extends Unseekable> extends Unseekables<K>
 {
-    Participants<K> with(Participants<K> with);
-
     @Override
     Participants<K> intersecting(Unseekables<?> intersecting);
     @Override
     Participants<K> intersecting(Unseekables<?> intersecting, Slice slice);
+
+    @Override
+    Participants<K> slice(int from, int to);
     @Override
     Participants<K> slice(Ranges ranges);
     @Override
     Participants<K> slice(Ranges ranges, Slice slice);
+
+    Participants<K> with(Participants<K> with);
     @Override
-    Participants<K> subtract(Ranges ranges);
-    Participants<K> subtract(Unseekables<?> without);
+    Participants<K> without(Ranges ranges);
+    @Override
+    Participants<K> without(Unseekables<?> without);
 
     Ranges toRanges();
 
     /**
-     * If both left and right are a Route, invoke {@link Route#union} on them. Otherwise invoke {@link #with}.
+     * If both left and right are a Route, invoke {@link Route#with} on them. Otherwise invoke {@link #with}.
      */
     static <K extends Unseekable> Participants<K> merge(Participants<K> left, Participants<K> right)
     {

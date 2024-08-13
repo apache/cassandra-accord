@@ -21,6 +21,11 @@ package accord.utils.btree;
 import java.util.Arrays;
 import java.util.Comparator;
 
+import accord.utils.AsymmetricComparator;
+import accord.utils.SortedArrays;
+
+import static accord.utils.SortedArrays.Search.FAST;
+
 public class BTreeRemoval
 {
     /**
@@ -38,6 +43,51 @@ public class BTreeRemoval
         {
             int keyEnd = BTree.getKeyEnd(node);
             int i = Arrays.binarySearch((V[]) node, 0, keyEnd, elem, comparator);
+
+            if (i >= 0)
+            {
+                if (BTree.isLeaf(node))
+                    index = lb + i;
+                else
+                {
+                    final int indexInNode = BTree.getSizeMap(node)[i];
+                    index = lb + indexInNode - 1;
+                    elemToSwap = BTree.findByIndex(node, indexInNode - 1);
+                }
+                break;
+            }
+            if (BTree.isLeaf(node))
+                return btree;
+
+            i = -1 - i;
+            if (i > 0)
+                lb += BTree.getSizeMap(node)[i - 1] + 1;
+
+            node = (Object[]) node[keyEnd + i];
+        }
+        if (BTree.size(btree) == 1)
+            return BTree.empty();
+        Object[] result = removeFromLeaf(btree, index);
+        if (elemToSwap != null)
+            BTree.replaceInSitu(result, index, elemToSwap);
+        return result;
+    }
+
+    /**
+     * Remove |elem| from |btree|. If it's not present then return |btree| itself.
+     */
+    public static <F, V> Object[] remove(final Object[] btree, final AsymmetricComparator<? super F, ? super V> comparator, final F elem)
+    {
+        if (BTree.isEmpty(btree))
+            return btree;
+        int index = -1;
+        V elemToSwap = null;
+        int lb = 0;
+        Object[] node = btree;
+        while (true)
+        {
+            int keyEnd = BTree.getKeyEnd(node);
+            int i = SortedArrays.binarySearch((V[]) node, 0, keyEnd, elem, comparator, FAST);
 
             if (i >= 0)
             {

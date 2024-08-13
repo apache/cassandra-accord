@@ -33,6 +33,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
@@ -42,6 +43,8 @@ import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import accord.api.LocalListeners;
+import accord.impl.progresslog.DefaultProgressLog;
 import accord.local.*;
 
 import org.slf4j.Logger;
@@ -53,7 +56,6 @@ import accord.api.Key;
 import accord.api.ProgressLog;
 import accord.local.CommandStores.RangesForEpoch;
 import accord.local.cfk.CommandsForKey;
-import accord.local.cfk.SafeCommandsForKey;
 import accord.primitives.AbstractKeys;
 import accord.primitives.Deps;
 import accord.primitives.PartialDeps;
@@ -64,6 +66,7 @@ import accord.primitives.Routable;
 import accord.primitives.Routable.Domain;
 import accord.primitives.RoutableKey;
 import accord.primitives.Routables;
+import accord.primitives.Route;
 import accord.primitives.Seekable;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
@@ -82,6 +85,7 @@ import static accord.local.SaveStatus.Erased;
 import static accord.local.SaveStatus.ErasedOrInvalidOrVestigial;
 import static accord.local.SaveStatus.ReadyToExecute;
 import static accord.local.Status.Applied;
+import static accord.local.Status.PreCommitted;
 import static accord.local.Status.Stable;
 import static accord.local.Status.Truncated;
 import static accord.local.Status.NotDefined;
@@ -106,9 +110,9 @@ public abstract class InMemoryCommandStore extends CommandStore
 
     private InMemorySafeStore current;
 
-    public InMemoryCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, EpochUpdateHolder epochUpdateHolder)
+    public InMemoryCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
     {
-        super(id, time, agent, store, progressLogFactory, epochUpdateHolder);
+        super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder);
     }
 
     protected boolean canExposeUnloaded()
@@ -164,10 +168,10 @@ public abstract class InMemoryCommandStore extends CommandStore
     {
         if (CHECK_DEPENDENCY_INVARIANTS)
         {
-            newGlobalCommand.addListener(new Command.TransientListener()
+            listeners.register(newGlobalCommand.txnId, new LocalListeners.ComplexListener()
             {
                 @Override
-                public void onChange(SafeCommandStore safeStore, SafeCommand safeCommand)
+                public boolean notify(SafeCommandStore safeStore, SafeCommand safeCommand)
                 {
                     Command cur = safeCommand.current();
                     if (cur.saveStatus() == ReadyToExecute || cur.saveStatus() == Applying) // TODO (desired): only run the check once
@@ -211,15 +215,10 @@ public abstract class InMemoryCommandStore extends CommandStore
                                 Invariants.illegalState(cur.txnId() + " does not maintain dependency invariants with immediately preceding transaction " + prev.txnId() + "; intersecting participants: " + intersectingParticipants + "; dependency participants: " + depParticipants);
 
                             if (prev.txnId().isWrite())
-                                participants = participants.subtract(intersectingParticipants);
+                                participants = participants.without(intersectingParticipants);
                         }
                     }
-                }
-
-                @Override
-                public PreLoadContext listenerPreLoadContext(TxnId caller)
-                {
-                    return PreLoadContext.contextFor(caller);
+                    return !cur.hasBeen(Status.Applied);
                 }
             });
         }
@@ -346,11 +345,13 @@ public abstract class InMemoryCommandStore extends CommandStore
     @Override
     protected void updatedRedundantBefore(SafeCommandStore safeStore, TxnId syncId, Ranges ranges)
     {
+        InMemorySafeStore inMemorySafeStore = (InMemorySafeStore) safeStore;
         ranges.forEach(r -> {
             commandsForKey.subMap(r.start(), r.startInclusive(), r.end(), r.endInclusive()).forEach((forKey, forValue) -> {
                 if (!forValue.isEmpty())
                 {
-                    SafeCommandsForKey safeCfk = forValue.createSafeReference();
+                    InMemorySafeCommandsForKey safeCfk = forValue.createSafeReference();
+                    inMemorySafeStore.commandsForKey.put(forKey, safeCfk);
                     safeCfk.refresh(safeStore);
                 }
             });
@@ -370,7 +371,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         rangeCommands.entrySet().removeIf(tx -> {
             if (tx.getKey().compareTo(syncId) >= 0)
                 return false;
-            Ranges newRanges = tx.getValue().ranges.subtract(ranges);
+            Ranges newRanges = tx.getValue().ranges.without(ranges);
             if (!newRanges.isEmpty())
             {
                 tx.getValue().ranges = newRanges;
@@ -382,6 +383,29 @@ public abstract class InMemoryCommandStore extends CommandStore
                 return true;
             }
         });
+
+        // verify we're clearing the progress log
+        ((Node)time).scheduler().once(() -> {
+            DefaultProgressLog progressLog = (DefaultProgressLog) this.progressLog;
+            commands.headMap(syncId, false).forEach((id, cmd) -> {
+                Command command = cmd.value();
+                if (!command.hasBeen(PreCommitted)) return;
+                if (!command.txnId().kind().isGloballyVisible()) return;
+
+                Ranges allRanges = unsafeRangesForEpoch().allBetween(id.epoch(), command.executeAtOrTxnId().epoch());
+                boolean done = command.hasBeen(Truncated);
+                if (!done)
+                {
+                    if (redundantBefore().status(cmd.txnId, command.executeAtOrTxnId(), command.route()) == RedundantStatus.PRE_BOOTSTRAP_OR_STALE)
+                        return;
+
+                    Route<?> route = cmd.value().route().slice(allRanges);
+                    done = !route.isEmpty() && ranges.containsAll(route);
+                }
+
+                if (done) Invariants.checkState(progressLog.get(id) == null);
+            });
+        }, 5L, TimeUnit.SECONDS);
     }
 
 
@@ -580,7 +604,6 @@ public abstract class InMemoryCommandStore extends CommandStore
     public static class GlobalCommand extends GlobalState<Command>
     {
         private final TxnId txnId;
-        private Listeners<Command.TransientListener> transientListeners = null;
 
         public GlobalCommand(TxnId txnId)
         {
@@ -592,32 +615,10 @@ public abstract class InMemoryCommandStore extends CommandStore
             return new InMemorySafeCommand(txnId, this);
         }
 
-        public void addListener(Command.TransientListener listener)
-        {
-            if (transientListeners == null) transientListeners = new Listeners<>();
-            transientListeners.add(listener);
-        }
-
-        public boolean removeListener(Command.TransientListener listener)
-        {
-            if (transientListeners == null || !transientListeners.remove(listener))
-                return false;
-
-            if (transientListeners.isEmpty())
-                transientListeners = null;
-
-            return true;
-        }
-
         @Override
         public GlobalState<Command> value(Command value)
         {
             return super.value(value);
-        }
-
-        public Listeners<Command.TransientListener> transientListeners()
-        {
-            return transientListeners == null ? Listeners.EMPTY : transientListeners;
         }
     }
 
@@ -756,7 +757,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                 return;
 
             Ranges slice = ranges().allBetween(txnId, updated.executeAtOrTxnId());
-            slice = commandStore.redundantBefore().removeShardRedundant(txnId, updated.executeAt(), slice);
+            slice = commandStore.redundantBefore().removeShardRedundant(txnId, updated.executeAtOrTxnId(), slice);
             commandStore.rangeCommands.computeIfAbsent(txnId, ignore -> new RangeCommand(commandStore.commands.get(txnId)))
                          .update(((Ranges)keysOrRanges).slice(slice, Minimal));
 
@@ -1054,9 +1055,9 @@ public abstract class InMemoryCommandStore extends CommandStore
         Runnable active = null;
         final Queue<Runnable> queue = new ConcurrentLinkedQueue<>();
 
-        public Synchronized(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, EpochUpdateHolder epochUpdateHolder)
+        public Synchronized(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
         {
-            super(id, time, agent, store, progressLogFactory, epochUpdateHolder);
+            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder);
         }
 
         private synchronized void maybeRun()
@@ -1146,9 +1147,9 @@ public abstract class InMemoryCommandStore extends CommandStore
         private Thread thread; // when run in the executor this will be non-null, null implies not running in this store
         private final ExecutorService executor;
 
-        public SingleThread(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, EpochUpdateHolder epochUpdateHolder)
+        public SingleThread(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
         {
-            super(id, time, agent, store, progressLogFactory, epochUpdateHolder);
+            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder);
             this.executor = Executors.newSingleThreadExecutor(r -> {
                 Thread thread = new Thread(r);
                 thread.setName(CommandStore.class.getSimpleName() + '[' + time.id() + ']');
@@ -1230,9 +1231,9 @@ public abstract class InMemoryCommandStore extends CommandStore
             }
         }
 
-        public Debug(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, EpochUpdateHolder epochUpdateHolder)
+        public Debug(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
         {
-            super(id, time, agent, store, progressLogFactory, epochUpdateHolder);
+            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder);
         }
 
         @Override

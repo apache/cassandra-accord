@@ -25,7 +25,6 @@ import org.slf4j.LoggerFactory;
 
 import accord.api.Data;
 import accord.api.Result;
-import accord.api.RoutingKey;
 import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.PreLoadContext;
@@ -109,8 +108,7 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     @Override
     public CommitOrReadNack apply(SafeCommandStore safeStore)
     {
-        RoutingKey progressKey = TxnRequest.progressKey(node, txnId.epoch(), txnId, route);
-        ApplyReply applyReply = Apply.apply(safeStore, txn, txnId, executeAt, deps, route, writes, result, progressKey);
+        ApplyReply applyReply = Apply.apply(safeStore, txn, txnId, executeAt, deps, route, writes, result);
         switch (applyReply)
         {
             default:

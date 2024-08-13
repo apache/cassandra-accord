@@ -237,7 +237,7 @@ public class TopologyRandomizer
         Shard shardLeft = shards[idxLeft];
 
         // bail out if all shards have the same membership
-        if (Arrays.stream(shards).allMatch(shard -> shard.sortedNodes.containsAll(shardLeft.sortedNodes) || shardLeft.containsAll(shard.sortedNodes)))
+        if (Arrays.stream(shards).allMatch(shard -> shard.nodes.containsAll(shardLeft.nodes) || shardLeft.containsAll(shard.nodes)))
             return shards;
 
         Set<Id> joining = new HashSet<>(shardLeft.joining);
@@ -248,7 +248,7 @@ public class TopologyRandomizer
             idxRight = random.nextInt(shards.length);
             shardRight = shards[idxRight];
             joining.addAll(shardRight.joining);
-        } while (idxRight == idxLeft || shardLeft.sortedNodes.containsAll(shardRight.sortedNodes) || shardRight.sortedNodes.containsAll(shardLeft.sortedNodes));
+        } while (idxRight == idxLeft || shardLeft.nodes.containsAll(shardRight.nodes) || shardRight.nodes.containsAll(shardLeft.nodes));
 
         List<Id> nodesLeft;
         Id toRight;
@@ -405,7 +405,7 @@ public class TopologyRandomizer
             Ranges prev = current.rangesForNode(node);
             if (prev == null) prev = Ranges.EMPTY;
 
-            Ranges added = next.rangesForNode(node).subtract(prev);
+            Ranges added = next.rangesForNode(node).without(prev);
             if (added.isEmpty())
                 continue;
 

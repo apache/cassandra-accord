@@ -19,6 +19,7 @@ package accord.messages;
 
 import accord.api.Result;
 import accord.api.RoutingKey;
+import accord.coordinate.FetchData.FetchResult;
 import accord.coordinate.Infer;
 import accord.local.Command;
 import accord.local.Commands;
@@ -29,6 +30,8 @@ import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.SaveStatus;
 import accord.local.Status;
+import accord.local.Status.Known;
+import accord.messages.CheckStatus.CheckStatusOkFull;
 import accord.messages.CheckStatus.FoundKnownMap;
 import accord.messages.CheckStatus.WithQuorum;
 import accord.primitives.Ballot;
@@ -42,11 +45,13 @@ import accord.primitives.Route;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
 import accord.primitives.Writes;
 import accord.utils.Invariants;
 import accord.utils.MapReduceConsume;
 
 import javax.annotation.Nullable;
+import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.BiConsumer;
 
 import static accord.coordinate.Infer.InvalidIfNot.NotKnownToBeInvalid;
@@ -56,158 +61,99 @@ import static accord.local.SaveStatus.Uninitialised;
 import static accord.local.Status.NotDefined;
 import static accord.local.Status.Phase.Cleanup;
 import static accord.local.Status.PreApplied;
-import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.utils.Invariants.illegalState;
 
 // TODO (required): detect propagate loops where we don't manage to update anything but should
-public class Propagate implements EpochSupplier, LocalRequest<Status.Known>, PreLoadContext, MapReduceConsume<SafeCommandStore, Void>
+public class Propagate implements EpochSupplier, PreLoadContext, MapReduceConsume<SafeCommandStore, Void>
 {
-    public static class SerializerSupport
-    {
-        public static Propagate create(TxnId txnId, Route<?> route, SaveStatus maxKnowledgeSaveStatus, SaveStatus maxSaveStatus, Ballot ballot, Status.Durability durability, RoutingKey homeKey, RoutingKey progressKey, Status.Known achieved, FoundKnownMap known, boolean isTruncated, PartialTxn partialTxn, PartialDeps committedDeps, long toEpoch, Timestamp executeAt, Writes writes, Result result)
-        {
-            return new Propagate(txnId, route, maxKnowledgeSaveStatus, maxSaveStatus, ballot, durability, homeKey, progressKey, achieved, known, isTruncated, partialTxn, committedDeps, toEpoch, executeAt, writes, result);
-        }
-    }
+    final Node node;
+    final TxnId txnId;
+    final Route<?> route;
+    final Unseekables<?> propagateTo;
+    final Known target;
 
-    public final TxnId txnId;
-    public final Route<?> route;
-    // TODO (expected): remove dependency on these two SaveStatus
-    public final SaveStatus maxKnowledgeSaveStatus;
-    public final SaveStatus maxSaveStatus;
-    public final Ballot ballot;
-    public final Status.Durability durability;
-    @Nullable public final RoutingKey homeKey;
-    @Nullable public final RoutingKey progressKey;
+    // TODO (desired): remove dependency on these two SaveStatus
+    final SaveStatus maxKnowledgeSaveStatus;
+    final SaveStatus maxSaveStatus;
+    final Ballot ballot;
+    final Status.Durability durability;
+    @Nullable final RoutingKey homeKey;
     // this is a WHOLE NODE measure, so if commit epoch has more ranges we do not count as committed if we can only commit in coordination epoch
-    public final Status.Known achieved;
-    public final FoundKnownMap known;
-    public final boolean isShardTruncated;
-    @Nullable public final PartialTxn partialTxn;
-    @Nullable public final PartialDeps stableDeps;
+    final FoundKnownMap known;
+    @Nullable final PartialTxn partialTxn;
+    @Nullable final PartialDeps stableDeps;
     // TODO (expected): toEpoch may only apply to certain local command stores that have "witnessed the future" - confirm it is fine to use globally or else narrow its scope
-    public final long toEpoch;
-    @Nullable public final Timestamp committedExecuteAt;
-    @Nullable public final Writes writes;
-    @Nullable public final Result result;
-    protected transient BiConsumer<? super Status.Known, Throwable> callback;
+    final long toEpoch;
+    @Nullable final Timestamp committedExecuteAt;
+    @Nullable final Writes writes;
+    @Nullable final Result result;
+    final BiConsumer<? super FetchResult, Throwable> callback;
+
+    private transient volatile FetchResult fetchResult;
+    private static final AtomicReferenceFieldUpdater<Propagate, FetchResult> fetchResultUpdater = AtomicReferenceFieldUpdater.newUpdater(Propagate.class, FetchResult.class, "fetchResult");
 
     Propagate(
-        TxnId txnId,
-        Route<?> route,
-        SaveStatus maxKnowledgeSaveStatus,
-        SaveStatus maxSaveStatus,
-        Ballot ballot,
-        Status.Durability durability,
-        @Nullable RoutingKey homeKey,
-        @Nullable RoutingKey progressKey,
-        Status.Known achieved,
-        FoundKnownMap known,
-        boolean isShardTruncated,
-        @Nullable PartialTxn partialTxn,
-        @Nullable PartialDeps stableDeps,
-        long toEpoch,
-        @Nullable Timestamp committedExecuteAt,
-        @Nullable Writes writes,
-        @Nullable Result result)
+    Node node, TxnId txnId,
+    Route<?> route,
+    Unseekables<?> propagateTo, Known target,
+    SaveStatus maxKnowledgeSaveStatus,
+    SaveStatus maxSaveStatus,
+    Ballot ballot,
+    Status.Durability durability,
+    @Nullable RoutingKey homeKey,
+    FoundKnownMap known,
+    @Nullable PartialTxn partialTxn,
+    @Nullable PartialDeps stableDeps,
+    long toEpoch,
+    @Nullable Timestamp committedExecuteAt,
+    @Nullable Writes writes,
+    @Nullable Result result,
+    BiConsumer<? super FetchResult, Throwable> callback)
     {
+        this.node = node;
         this.txnId = txnId;
         this.route = route;
+        this.propagateTo = propagateTo;
+        this.target = target;
         this.maxKnowledgeSaveStatus = maxKnowledgeSaveStatus;
         this.maxSaveStatus = maxSaveStatus;
         this.ballot = ballot;
         this.durability = durability;
         this.homeKey = homeKey;
-        this.progressKey = progressKey;
-        this.achieved = achieved;
         this.known = known;
-        this.isShardTruncated = isShardTruncated;
         this.partialTxn = partialTxn;
         this.stableDeps = stableDeps;
         this.toEpoch = toEpoch;
         this.committedExecuteAt = committedExecuteAt;
         this.writes = writes;
         this.result = result;
-    }
-
-    @Override
-    public void process(Node on, BiConsumer<? super Status.Known, Throwable> callback)
-    {
         this.callback = callback;
-        on.mapReduceConsumeLocal(this, route, txnId.epoch(), toEpoch, this);
     }
 
-    @SuppressWarnings({"rawtypes"})
-    public static void propagate(Node node, TxnId txnId, long sourceEpoch, WithQuorum withQuorum, Route route, @Nullable Status.Known target, CheckStatus.CheckStatusOkFull full, BiConsumer<Status.Known, Throwable> callback)
+    public static void propagate(Node node, TxnId txnId, long sourceEpoch, WithQuorum withQuorum, Route<?> route, Unseekables<?> propagateTo, @Nullable Known target, CheckStatusOkFull full, BiConsumer<? super FetchResult, Throwable> callback)
     {
-        propagate(node, txnId, sourceEpoch, sourceEpoch, withQuorum, route, target, full, callback);
+        propagate(node, txnId, sourceEpoch, sourceEpoch, withQuorum, route, propagateTo, target, full, callback);
     }
 
-    public static void propagate(Node node, TxnId txnId, long sourceEpoch, long toEpoch, WithQuorum withQuorum, Route route, @Nullable Status.Known target, CheckStatus.CheckStatusOkFull full, BiConsumer<Status.Known, Throwable> callback)
+    public static void propagate(Node node, TxnId txnId, long sourceEpoch, long toEpoch, WithQuorum withQuorum, Route<?> route, Unseekables<?> propagateTo, @Nullable Known target, CheckStatusOkFull full, BiConsumer<? super FetchResult, Throwable> callback)
     {
         if (full.maxKnowledgeSaveStatus.status == NotDefined && full.maxInvalidIfNot() == NotKnownToBeInvalid)
         {
-            callback.accept(Status.Known.Nothing, null);
+            callback.accept(new FetchResult(Known.Nothing, propagateTo.slice(0, 0), propagateTo), null);
             return;
         }
 
         Invariants.checkState(sourceEpoch == txnId.epoch() || (full.executeAt != null && sourceEpoch == full.executeAt.epoch()) || full.maxKnowledgeSaveStatus == SaveStatus.Erased || full.maxKnowledgeSaveStatus == SaveStatus.ErasedOrInvalidOrVestigial);
 
+        route = route.with((Unseekables) propagateTo);
         full = full.finish(route, withQuorum);
         route = Invariants.nonNull(full.route);
 
-        Ranges sliceRanges = node.topology().localRangesForEpochs(txnId.epoch(), toEpoch);
-
-        RoutingKey progressKey = node.trySelectProgressKey(txnId, route);
-
-        Route<?> covering = route.slice(sliceRanges, Minimal);
-        Status.Known achieved = full.knownFor(covering);
-        if (achieved.executeAt.isDecidedAndKnownToExecute() && full.executeAt.epoch() > toEpoch)
-        {
-            Invariants.checkState(Route.isFullRoute(route));
-            Ranges acceptRanges;
-            if (!node.topology().hasEpoch(full.executeAt.epoch()) ||
-                (!covering.containsAll(route.slice(acceptRanges = node.topology().localRangesForEpochs(txnId.epoch(), full.executeAt.epoch())))))
-            {
-                // we don't know what the execution epoch requires, so we cannot be sure we can replicate it locally
-                // we *could* wait until we have the local epoch before running this
-                Status.Outcome outcome = achieved.outcome.propagatesBetweenShards() ? achieved.outcome : Status.Outcome.Unknown;
-                achieved = new Status.Known(achieved.route, achieved.definition, achieved.executeAt, Status.KnownDeps.DepsUnknown, outcome);
-            }
-            else
-            {
-                // TODO (expected): this should only be the two precise epochs, not the full range of epochs
-                sliceRanges = acceptRanges;
-                covering = route.slice(sliceRanges, Minimal);
-                Status.Known knownForExecution = full.knownFor(covering);
-                if ((target != null && target.isSatisfiedBy(knownForExecution)) || achieved.isSatisfiedBy(knownForExecution))
-                {
-                    achieved = knownForExecution;
-                    toEpoch = full.executeAt.epoch();
-                }
-                else
-                {   // TODO (expected): does downgrading this ever block progress?
-                    Invariants.checkState(sourceEpoch == txnId.epoch(), "%d != %d", sourceEpoch, txnId.epoch());
-                    achieved = new Status.Known(achieved.route, achieved.definition, achieved.executeAt, knownForExecution.deps, knownForExecution.outcome);
-                }
-            }
-        }
-
-        boolean isShardTruncated = withQuorum == HasQuorum && full.isTruncatedResponse(covering);
-
-        PartialTxn partialTxn = full.partialTxn;
-        if (achieved.definition.isKnown())
-            partialTxn = full.partialTxn.intersecting(route, true).reconstitutePartial(covering);
-
-        PartialDeps stableDeps = full.stableDeps;
-        if (achieved.deps.hasDecidedDeps())
-            stableDeps = full.stableDeps.intersecting(route).reconstitutePartial(covering);
-
         Propagate propagate =
-            new Propagate(txnId, route, full.maxKnowledgeSaveStatus, full.maxSaveStatus, full.acceptedOrCommitted, full.durability, full.homeKey, progressKey, achieved, full.map, isShardTruncated, partialTxn, stableDeps, toEpoch, full.executeAtIfKnown(), full.writes, full.result);
+            new Propagate(node, txnId, route, propagateTo, target, full.maxKnowledgeSaveStatus, full.maxSaveStatus, full.acceptedOrCommitted, full.durability, full.homeKey, full.map, full.partialTxn, full.stableDeps, toEpoch, full.executeAtIfKnown(), full.writes, full.result, callback);
 
-        node.localRequest(propagate, callback);
+        node.mapReduceConsumeLocal(propagate, route, txnId.epoch(), toEpoch, propagate);
     }
 
     @Override
@@ -241,8 +187,6 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>, Pre
         SafeCommand safeCommand = safeStore.get(txnId, this, route);
         Command command = safeCommand.current();
 
-        PartialTxn partialTxn = achieved.hasDefinition() ? this.partialTxn : null;
-        PartialDeps stableDeps = achieved.hasDecidedDeps() ? this.stableDeps : null;
         switch (command.saveStatus().phase)
         {
             // Already know the outcome, waiting on durability so maybe update with new durability information which can also trigger cleanup
@@ -250,26 +194,75 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>, Pre
             case Cleanup: return null;
         }
 
+        Ranges sliceRanges = safeStore.ranges().allBetween(txnId.epoch(), toEpoch);
+        Route<?> slicedRoute = route.slice(sliceRanges, Minimal);
+
+        Known found = known.knownFor(slicedRoute);
         Timestamp executeAtIfKnown = command.executeAtIfKnown(committedExecuteAt);
-        Status.Known achieved = this.achieved;
+        long toEpoch = this.toEpoch;
+
+        if (found.executeAt.isDecidedAndKnownToExecute() && executeAtIfKnown.epoch() > toEpoch)
+        {
+            Invariants.checkState(Route.isFullRoute(route));
+            Ranges acceptRanges;
+            if (!node.topology().hasEpoch(executeAtIfKnown.epoch()) ||
+                (!slicedRoute.containsAll(route.slice(acceptRanges = node.topology().localRangesForEpochs(txnId.epoch(), executeAtIfKnown.epoch())))))
+            {
+                // TODO (expected): when we support CommandStore rebalancing, if they do not adopt new ranges (but become new CommandStore)
+                //  we do not need to have this branch; we know whether this CommandStore can be satisfied.
+                // we don't know what the execution epoch requires, so we cannot be sure we can replicate it locally
+                // we *could* wait until we have the local epoch before running this
+                Status.Outcome outcome = found.outcome.propagatesBetweenShards() ? found.outcome : Status.Outcome.Unknown;
+                found = new Known(found.route, found.definition, found.executeAt, Status.KnownDeps.DepsUnknown, outcome);
+            }
+            else
+            {
+                sliceRanges = acceptRanges;
+                slicedRoute = route.slice(sliceRanges, Minimal);
+                Known knownForExecution = known.knownFor(slicedRoute);
+                if ((target != null && target.isSatisfiedBy(knownForExecution)) || found.isSatisfiedBy(knownForExecution))
+                {
+                    found = knownForExecution;
+                    toEpoch = executeAtIfKnown.epoch();
+                }
+                else
+                {
+                    found = new Known(found.route, found.definition, found.executeAt, knownForExecution.deps, knownForExecution.outcome);
+                }
+            }
+        }
+
+        PartialTxn partialTxn = null;
+        if (found.hasDefinition())
+            partialTxn = this.partialTxn.intersecting(slicedRoute, true).reconstitutePartial(slicedRoute);
+
+        PartialDeps stableDeps = null;
+        if (found.hasDecidedDeps())
+            stableDeps = this.stableDeps.intersecting(slicedRoute).reconstitutePartial(slicedRoute);
+
+        boolean isShardTruncated = known.hasTruncated(slicedRoute);
         if (isShardTruncated)
         {
+            // TODO (required): applyOrUpgradeTruncated assumes we had a node-level achieved, whereas we now compute at CommandStore level; simplify/merge
             // TODO (required): do not markShardStale for reads; in general optimise handling of case where we cannot recover a known no-op transaction
             // TODO (required): permit staleness to be gated by some configuration state
-            achieved = applyOrUpgradeTruncated(safeStore, safeCommand, command, executeAtIfKnown);
-            if (achieved == null)
+            found = applyOrUpgradeTruncated(safeStore, safeCommand, command, executeAtIfKnown);
+            if (found == null)
+            {
+                updateFetchResult(Known.Nothing, slicedRoute);
                 return null;
+            }
 
             Participants<?> needed = route.slice(safeStore.ranges().allBetween(txnId.epoch(), (executeAtIfKnown == null ? txnId : executeAtIfKnown).epoch()));
-            if (achieved.isDefinitionKnown() && partialTxn == null && this.partialTxn != null)
+            if (found.isDefinitionKnown() && partialTxn == null && this.partialTxn != null)
             {
                 PartialTxn existing = command.partialTxn();
                 Participants<?> neededExtra = needed;
-                if (existing != null) neededExtra = neededExtra.subtract(existing.keys().toParticipants());
+                if (existing != null) neededExtra = neededExtra.without(existing.keys().toParticipants());
                 partialTxn = this.partialTxn.intersecting(neededExtra, true).reconstitutePartial(neededExtra);
             }
 
-            if (achieved.hasDecidedDeps() && stableDeps == null && this.stableDeps != null)
+            if (found.hasDecidedDeps() && stableDeps == null && this.stableDeps != null)
             {
                 Invariants.checkState(executeAtIfKnown != null);
                 // we don't subtract existing partialDeps, as they cannot be committed deps; we only permit committing deps covering all participating ranges
@@ -277,17 +270,17 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>, Pre
             }
         }
 
-        Status propagate = achieved.atLeast(command.known()).propagatesStatus();
-        if (command.hasBeen(propagate))
+        SaveStatus propagate = found.atLeast(command.known()).propagatesSaveStatus();
+        if (propagate.known.isSatisfiedBy(command.known()))
         {
             if (maxSaveStatus.phase == Cleanup && durability.isDurableOrInvalidated() && Infer.safeToCleanup(safeStore, command, route, executeAtIfKnown))
                 Commands.setTruncatedApplyOrErasedVestigial(safeStore, safeCommand);
 
-            // TODO (expected): maybe stale?
+            updateFetchResult(found, slicedRoute);
             return updateDurability(safeStore, safeCommand);
         }
 
-        switch (propagate)
+        switch (propagate.status)
         {
             default: throw illegalState("Unexpected status: " + propagate);
             case Truncated: throw illegalState("Status expected to be handled elsewhere: " + propagate);
@@ -306,12 +299,12 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>, Pre
                 Invariants.checkState(executeAtIfKnown != null);
                 if (toEpoch >= executeAtIfKnown.epoch())
                 {
-                    confirm(Commands.apply(safeStore, safeCommand, txnId, route, progressKey, executeAtIfKnown, stableDeps, partialTxn, writes, result));
+                    confirm(Commands.apply(safeStore, safeCommand, txnId, route, executeAtIfKnown, stableDeps, partialTxn, writes, result));
                     break;
                 }
 
             case Stable:
-                confirm(Commands.commit(safeStore, safeCommand, Stable, ballot, txnId, route, progressKey, partialTxn, executeAtIfKnown, stableDeps));
+                confirm(Commands.commit(safeStore, safeCommand, Stable, ballot, txnId, route, partialTxn, executeAtIfKnown, stableDeps));
                 break;
 
             case Committed:
@@ -319,25 +312,63 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>, Pre
             case PreCommitted:
                 confirm(Commands.precommit(safeStore, safeCommand, txnId, executeAtIfKnown, route));
                 // TODO (desired): would it be clearer to yield a SaveStatus so we can have PreCommittedWithDefinition
-                if (!achieved.definition.isKnown())
+                if (!found.definition.isKnown())
                     break;
 
             case PreAccepted:
                 // only preaccept if we coordinate the transaction
                 if (safeStore.ranges().coordinates(txnId).intersects(route) && Route.isFullRoute(route))
-                    Commands.preaccept(safeStore, safeCommand, txnId, txnId.epoch(), partialTxn, Route.castToFullRoute(route), progressKey);
+                    Commands.preaccept(safeStore, safeCommand, txnId, txnId.epoch(), partialTxn, Route.castToFullRoute(route));
                 break;
 
             case NotDefined:
                 break;
         }
 
+        updateFetchResult(found.propagates(), slicedRoute);
         return updateDurability(safeStore, safeCommand);
+    }
+
+    private void updateFetchResult(Known achieved, Route<?> slicedRoute)
+    {
+        achieved = achieved.propagates();
+        Unseekables<?> achievedTarget = slicedRoute;
+        Unseekables<?> didNotAchieveTarget = null;
+        if (target != null && !target.isSatisfiedBy(achieved))
+        {
+            achievedTarget = slicedRoute.slice(0, 0);
+            didNotAchieveTarget = slicedRoute;
+        }
+
+        FetchResult current = fetchResult;
+        while (true)
+        {
+            FetchResult next = current == null ? new FetchResult(achieved, achievedTarget, didNotAchieveTarget)
+                               : new FetchResult(achieved.reduce(current.achieved),
+                                                 achievedTarget.with((Unseekables)current.achievedTarget),
+                                                 Unseekables.merge(current.didNotAchieveTarget, (Unseekables) didNotAchieveTarget));
+
+            if (fetchResultUpdater.compareAndSet(this, current, next))
+                return;
+        }
+    }
+
+    private FetchResult finaliseFetchResult()
+    {
+        FetchResult current = fetchResult;
+        if (current == null)
+            return new FetchResult(Known.Nothing, propagateTo.slice(0, 0), propagateTo);
+
+        Unseekables<?> missed = propagateTo.without(current.achievedTarget);
+        if (missed.isEmpty())
+            return current;
+
+        return new FetchResult(Known.Nothing, current.achievedTarget, Unseekables.merge(missed, (Unseekables) current.didNotAchieveTarget));
     }
 
     // if can only propagate Truncated, we might be stale; try to upgrade for this command store only, even partially if necessary
     // note: this is invoked if the command is truncated for ANY local command store - we might
-    private Status.Known applyOrUpgradeTruncated(SafeCommandStore safeStore, SafeCommand safeCommand, Command command, Timestamp executeAtIfKnown)
+    private Known applyOrUpgradeTruncated(SafeCommandStore safeStore, SafeCommand safeCommand, Command command, Timestamp executeAtIfKnown)
     {
         Invariants.checkState(!maxKnowledgeSaveStatus.is(Status.Invalidated));
 
@@ -363,15 +394,6 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>, Pre
             // TODO (required): if everyone else has truncated, we might not have enough information on any replicas we contact
             //    in this case we should erase
             return known.knownForAny();
-        }
-
-        boolean isTruncatedForLocalRanges = known.hasTruncated(participants);
-        if (!isTruncatedForLocalRanges)
-        {
-            // we're truncated *somewhere* but not locally; whether we have the executeAt is immaterial to this calculus,
-            // as we're either ready to go or we're waiting on the coordinating shard to complete this transaction, so pick
-            // the maximum we can achieve and return that
-            return known.knownFor(participants);
         }
 
         // if our peers have truncated this command, then either:
@@ -425,12 +447,12 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>, Pre
 
         // if the command has been truncated globally, then we should expect to apply it
         // if we cannot obtain enough information from a majority to do so then we have been left behind
-        Status.Known required = PreApplied.minKnown;
-        Status.Known requireExtra = required.subtract(command.known()); // the extra information we need to reach pre-applied
-        Ranges achieveRanges = known.knownFor(requireExtra, ranges); // the ranges for which we can already successfully achieve this
+        Known required = PreApplied.minKnown;
+        Known requireExtra = required.subtract(command.known()); // the extra information we need to reach pre-applied
+        Ranges achieveRanges = known.knownForRanges(requireExtra, ranges); // the ranges for which we can already successfully achieve this
 
         // any ranges we execute but cannot achieve the pre-applied status for have been left behind and are stale
-        Ranges staleRanges = ranges.subtract(achieveRanges);
+        Ranges staleRanges = ranges.without(achieveRanges);
         Participants<?> staleParticipants = participants.slice(staleRanges, Minimal);
         staleRanges = staleParticipants.toRanges();
 
@@ -472,31 +494,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>, Pre
     public void accept(Void result, Throwable failure)
     {
         if (null != callback)
-            callback.accept(failure == null ? achieved : null, failure);
-    }
-
-    @Override
-    public MessageType type()
-    {
-        // TODO (now): this logic doesn't work now we permit upgrading; need to pick the maximum *possible* status we might propagate
-        //     might be better to
-        switch (achieved.propagatesStatus())
-        {
-            case Applied:
-            case PreApplied:
-                if (toEpoch >= committedExecuteAt.epoch())
-                    return MessageType.PROPAGATE_APPLY_MSG;
-            case Committed:
-            case Stable:
-                return MessageType.PROPAGATE_STABLE_MSG;
-            case PreCommitted:
-                if (!achieved.definition.isKnown())
-                    return MessageType.PROPAGATE_OTHER_MSG;
-            case PreAccepted:
-                return MessageType.PROPAGATE_PRE_ACCEPT_MSG;
-            default:
-                return MessageType.PROPAGATE_OTHER_MSG;
-        }
+            callback.accept(failure != null ? null : finaliseFetchResult(), failure);
     }
 
     @Override
@@ -532,8 +530,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>, Pre
     @Override
     public String toString()
     {
-        return "Propagate{type:" + type() +
-               ", txnId: " + txnId +
+        return "Propagate{txnId: " + txnId +
                ", saveStatus: " + maxKnowledgeSaveStatus +
                ", deps: " + stableDeps +
                ", txn: " + partialTxn +

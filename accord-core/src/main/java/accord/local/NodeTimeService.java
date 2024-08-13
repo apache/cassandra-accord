@@ -37,8 +37,9 @@ public interface NodeTimeService
     long now();
 
     /**
-     * Return the current time since some arbitrary epoch in the specified time unit. May still be simulated time and not
-     * real time. The time returned by this will be monotonic.
+     * Return the current time since some arbitrary epoch in the specified time unit. May be simulated time and not
+     * real time. This clock should not go backwards, nor should it generally correct for clock skew - it should
+     * only track time elapsed between two points.
      */
     long elapsed(TimeUnit unit);
 
@@ -46,7 +47,8 @@ public interface NodeTimeService
 
     static ToLongFunction<TimeUnit> elapsedWrapperFromMonotonicSource(TimeUnit sourceUnit, LongSupplier monotonicNowSupplier)
     {
-        return resultUnit ->  resultUnit.convert(monotonicNowSupplier.getAsLong(), sourceUnit);
+        long epoch = Math.max(0, monotonicNowSupplier.getAsLong() - sourceUnit.convert(1L, TimeUnit.DAYS));
+        return resultUnit ->  resultUnit.convert(monotonicNowSupplier.getAsLong() - epoch, sourceUnit);
     }
 
     /**
@@ -56,7 +58,7 @@ public interface NodeTimeService
     @VisibleForTesting
     static ToLongFunction<TimeUnit> elapsedWrapperFromNonMonotonicSource(TimeUnit sourceUnit, LongSupplier nonMonotonicNowSupplier)
     {
-        return elapsedWrapperFromMonotonicSource(sourceUnit, new MonotonicWrapper(nonMonotonicNowSupplier));
+        return elapsedWrapperFromMonotonicSource(sourceUnit, new MonotonicWrapper(sourceUnit, nonMonotonicNowSupplier));
     }
 
     class MonotonicWrapper implements LongSupplier
@@ -66,11 +68,13 @@ public interface NodeTimeService
        private long delta = 0;
 
        // Use an arbitrary epoch
-       private long epoch = Long.MAX_VALUE / 4;
+       private final long epoch;
 
-       private MonotonicWrapper(LongSupplier nowSupplier)
+       private MonotonicWrapper(TimeUnit nowUnit, LongSupplier nowSupplier)
        {
            this.nowSupplier = nowSupplier;
+           // pick an arbitrary epoch we can safely convert back to any time unit from the source unit
+           this.epoch = nowUnit.convert(Long.MAX_VALUE / 4, TimeUnit.NANOSECONDS);
        }
 
        @Override

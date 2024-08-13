@@ -19,14 +19,11 @@
 package accord.impl;
 
 import accord.local.Command;
-import accord.local.Command.TransientListener;
-import accord.local.Listeners;
 import accord.local.SafeCommand;
 import accord.local.SaveStatus;
 import accord.primitives.TxnId;
 import accord.utils.Invariants;
 
-import static accord.local.Listeners.Immutable.EMPTY;
 import static accord.local.SaveStatus.Erased;
 import static accord.local.SaveStatus.ErasedOrInvalidOrVestigial;
 import static accord.local.Status.Durability.NotDurable;
@@ -40,7 +37,7 @@ public class ErasedSafeCommand extends SafeCommand
     {
         super(txnId);
         Invariants.checkArgument(saveStatus == Erased || saveStatus == ErasedOrInvalidOrVestigial);
-        this.erased = new Command.Truncated(txnId, saveStatus, saveStatus == ErasedOrInvalidOrVestigial ? NotDurable : UniversalOrInvalidated, null, null, EMPTY, null, null);
+        this.erased = new Command.Truncated(txnId, saveStatus, saveStatus == ErasedOrInvalidOrVestigial ? NotDurable : UniversalOrInvalidated, null, null, null, null);
     }
 
     @Override
@@ -59,24 +56,6 @@ public class ErasedSafeCommand extends SafeCommand
     public boolean invalidated()
     {
         return false;
-    }
-
-    @Override
-    public void addListener(Command.TransientListener listener)
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public boolean removeListener(Command.TransientListener listener)
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public Listeners<TransientListener> transientListeners()
-    {
-        return Listeners.EMPTY;
     }
 
     @Override

@@ -25,22 +25,26 @@ import javax.annotation.Nullable;
 public interface Route<K extends Unseekable> extends Participants<K>
 {
     RoutingKey homeKey();
+    Route<?> homeKeyOnlyRoute();
 
+    boolean isHomeKeyOnlyRoute();
     default boolean isRoute() { return true; }
 
     /**
-     * Return an object containing any {@code K} present in either of the original collections,
-     * and covering the union of the ranges.
+     * Return an object containing any {@code K} present in either of the original collections
      *
      * Differs from {@link Unseekables#with} in that the parameter must be a {@link Route}
      * and the result will be a {@link Route}.
      */
-    Route<K> union(Route<K> route);
+    @Override
+    Route<K> with(Participants<K> participants);
 
     @Override
-    PartialRoute<K> slice(Ranges ranges);
+    Route<K> slice(int from, int to);
     @Override
-    PartialRoute<K> slice(Ranges ranges, Slice slice);
+    Route<K> slice(Ranges ranges);
+    @Override
+    Route<K> slice(Ranges ranges, Slice slice);
 
     @Override
     Route<K> intersecting(Unseekables<?> intersecting);
@@ -48,6 +52,7 @@ public interface Route<K extends Unseekable> extends Participants<K>
     Route<K> intersecting(Unseekables<?> intersecting, Slice slice);
 
     Route<K> withHomeKey();
+    Route<K> with(Unseekables<K> with);
 
     /**
      * Do any of the parts of the route that are not exclusively a homeKey intersect with the provided ranges
@@ -166,6 +171,6 @@ public interface Route<K extends Unseekable> extends Participants<K>
     {
         if (defer == null) return prefer;
         if (prefer == null) return defer;
-        return prefer.union(defer);
+        return prefer.with(defer);
     }
 }

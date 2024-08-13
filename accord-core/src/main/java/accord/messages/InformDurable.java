@@ -26,12 +26,10 @@ import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.Status;
 import accord.local.Status.Durability;
-import accord.primitives.PartialRoute;
 import accord.primitives.Route;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
-import accord.utils.Invariants;
 
 import static accord.local.PreLoadContext.contextFor;
 import static accord.messages.SimpleReply.Ok;
@@ -40,7 +38,7 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
 {
     public static class SerializationSupport
     {
-        public static InformDurable create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Timestamp executeAt, Durability durability)
+        public static InformDurable create(TxnId txnId, Route<?> scope, long waitForEpoch, Timestamp executeAt, Durability durability)
         {
             return new InformDurable(txnId, scope, waitForEpoch, executeAt, durability);
         }
@@ -56,7 +54,7 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
         this.durability = durability;
     }
 
-    private InformDurable(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, @Nullable Timestamp executeAt, Durability durability)
+    private InformDurable(TxnId txnId, Route<?> scope, long waitForEpoch, @Nullable Timestamp executeAt, Durability durability)
     {
         super(txnId, scope, waitForEpoch);
         this.executeAt = executeAt;
@@ -66,20 +64,9 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
     @Override
     public void process()
     {
-        if (progressKey == null)
-        {
-            // we need to pick a progress log, but this node might not have participated in the coordination epoch
-            // in this rare circumstance we simply pick a key to select some progress log to coordinate this
-            // TODO (expected, consider): We might not replicate either txnId.epoch OR executeAt.epoch, but some inbetween.
-            //                            Do we need to receive this message in that case? Should make this a bit cleaner either way.
-            for (long epoch = waitForEpoch; progressKey == null && epoch > txnId.epoch() ; --epoch)
-                progressKey = node.trySelectProgressKey(epoch, scope, scope.homeKey());
-            Invariants.checkState(progressKey != null);
-        }
-
         // TODO (expected, efficiency): do not load from disk to perform this update
         // TODO (expected, consider): do we need to send this to all epochs in between, or just execution epoch?
-        node.mapReduceConsumeLocal(contextFor(txnId), progressKey, txnId.epoch(), waitForEpoch, this);
+        node.mapReduceConsumeLocal(contextFor(txnId), scope, txnId.epoch(), executeAt != null ? executeAt.epoch() : txnId.epoch(), this);
     }
 
     @Override
@@ -96,7 +83,7 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
     @Override
     public Reply reduce(Reply o1, Reply o2)
     {
-        throw new IllegalStateException();
+        return Ok;
     }
 
     @Override

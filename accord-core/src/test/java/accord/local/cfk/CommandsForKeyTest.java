@@ -26,6 +26,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import javax.annotation.Nonnull;
@@ -40,18 +41,21 @@ import accord.api.Data;
 import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.ProgressLog;
+import accord.api.ProgressLog.BlockedUntil;
 import accord.api.Query;
 import accord.api.Read;
 import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.api.Update;
 import accord.impl.IntKey;
+import accord.impl.DefaultLocalListeners;
+import accord.impl.DefaultLocalListeners.DefaultNotifySink;
+import accord.impl.DefaultRemoteListeners;
 import accord.local.Command;
 import accord.local.Command.AbstractCommand;
 import accord.local.CommandStore;
 import accord.local.CommandStores;
 import accord.local.CommonAttributes;
-import accord.local.Listeners;
 import accord.local.Node;
 import accord.local.NodeTimeService;
 import accord.local.PreLoadContext;
@@ -60,6 +64,7 @@ import accord.local.SafeCommandStore;
 import accord.local.SaveStatus;
 import accord.local.Status;
 import accord.local.cfk.CommandsForKey.TxnInfo;
+import accord.messages.ReplyContext;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.EpochSupplier;
@@ -228,7 +233,7 @@ public class CommandsForKeyTest
         }
 
         @Override
-        public void waitingOnCommit(SafeCommandStore safeStore, TxnInfo uncommitted, Key key)
+        public void waitingOn(SafeCommandStore safeStore, TxnInfo txn, Key key, SaveStatus waitingOnStatus, BlockedUntil blockedUntil, boolean notifyCfk)
         {
         }
 
@@ -488,8 +493,9 @@ public class CommandsForKeyTest
 
         Command acceptedInvalidated(TxnId txnId, SaveStatus saveStatus)
         {
-            return Command.Accepted.accepted(common(txnId, saveStatus.known.definition.isKnown()),
-                                        saveStatus, txnId, Ballot.ZERO, Ballot.ZERO);
+            return saveStatus == SaveStatus.AcceptedInvalidateWithDefinition
+                   ? Command.Accepted.accepted(common(txnId, true), saveStatus, txnId, Ballot.ZERO, Ballot.ZERO)
+                   : Command.AcceptedInvalidateWithoutDefinition.acceptedInvalidate(common(txnId, false), Ballot.ZERO, Ballot.ZERO);
         }
 
         Command accepted(TxnId txnId, Timestamp executeAt, SaveStatus saveStatus)
@@ -573,8 +579,8 @@ public class CommandsForKeyTest
     @Test
     public void testOne()
     {
-//        test(449555883255211L, 1000);
-        test(System.nanoTime(), 1000);
+        test(1363149044366621L, 1000);
+//        test(System.nanoTime(), 500);
     }
 
     @Test
@@ -633,7 +639,7 @@ public class CommandsForKeyTest
                 if (!CommandsForKey.managesExecution(update.next.txnId()) && update.next.hasBeen(Status.Stable) && !update.next.hasBeen(Status.Truncated))
                 {
                     CommandsForKey prev = safeCfk.current();
-                    result = prev.registerUnmanaged(safeStore, safeCommand, canon);
+                    result = prev.registerUnmanaged(safeCommand);
                     safeCfk.set(result.cfk());
                     result.postProcess(safeStore, prev, null, canon);
                 }
@@ -665,15 +671,6 @@ public class CommandsForKeyTest
 
         @Override
         public boolean invalidated() { return false; }
-
-        @Override
-        public void addListener(Command.TransientListener listener) {}
-
-        @Override
-        public boolean removeListener(Command.TransientListener listener) { return false; }
-
-        @Override
-        public Listeners<Command.TransientListener> transientListeners() { return null; }
 
         @Override
         protected void set(Command command)
@@ -826,7 +823,7 @@ public class CommandsForKeyTest
         @Override
         public ProgressLog progressLog()
         {
-            return new TestProgressLog();
+            return new ProgressLog.NoOpProgressLog();
         }
 
         @Override
@@ -918,7 +915,7 @@ public class CommandsForKeyTest
 
         protected TestCommandStore(int pruneInterval, int pruneHlcDelta)
         {
-            super(0, null, null, null, ignore -> new TestProgressLog(), new EpochUpdateHolder());
+            super(0, null, null, null, ignore -> new ProgressLog.NoOpProgressLog(), ignore -> new DefaultLocalListeners(new DefaultRemoteListeners((a, b, c, d, e)->{}), DefaultNotifySink.INSTANCE), new EpochUpdateHolder());
             this.pruneInterval = pruneInterval;
             this.pruneHlcDelta = pruneHlcDelta;
         }
@@ -1029,75 +1026,29 @@ public class CommandsForKeyTest
         {
             throw new UnsupportedOperationException();
         }
-    }
-
-    private static class TestProgressLog implements ProgressLog
-    {
 
         @Override
-        public void unwitnessed(TxnId txnId, ProgressShard shard)
+        public long replyTimeout(ReplyContext replyContext, TimeUnit units)
         {
-
+            throw new UnsupportedOperationException();
         }
 
         @Override
-        public void preaccepted(Command command, ProgressShard shard)
+        public long attemptCoordinationDelay(Node node, SafeCommandStore safeStore, TxnId txnId, TimeUnit units, int retryCount)
         {
-
+            return 0;
         }
 
         @Override
-        public void accepted(Command command, ProgressShard shard)
+        public long seekProgressDelay(Node node, SafeCommandStore safeStore, TxnId txnId, int retryCount, BlockedUntil blockedUntil, TimeUnit units)
         {
-
+            return 0;
         }
 
         @Override
-        public void precommitted(Command command)
+        public long retryAwaitTimeout(Node node, SafeCommandStore safeStore, TxnId txnId, int retryCount, BlockedUntil retrying, TimeUnit units)
         {
-
-        }
-
-        @Override
-        public void stable(Command command, ProgressShard shard)
-        {
-
-        }
-
-        @Override
-        public void readyToExecute(Command command)
-        {
-
-        }
-
-        @Override
-        public void executed(Command command, ProgressShard shard)
-        {
-
-        }
-
-        @Override
-        public void durable(Command command)
-        {
-
-        }
-
-        @Override
-        public void waiting(SafeCommand blockedBy, SaveStatus.LocalExecution blockedUntil, @Nullable Route<?> blockedOnRoute, @Nullable Participants<?> blockedOnParticipants)
-        {
-
-        }
-
-        @Override
-        public void waiting(TxnId blockedBy, SaveStatus.LocalExecution blockedUntil, @Nullable Route<?> blockedOnRoute, @Nullable Participants<?> blockedOnParticipants)
-        {
-
-        }
-
-        @Override
-        public void clear(TxnId txnId)
-        {
-
+            return 0;
         }
     }
 }

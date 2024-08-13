@@ -76,7 +76,7 @@ public enum Status
      * To solve this problem we simply permit the executeAt we discover for B to be propagated to A* without
      * its dependencies. Though this does complicate the state machine a little.
      */
-    PreCommitted      (Accept,  Maybe, DefinitionUnknown, ExecuteAtKnown,   DepsUnknown,  Unknown),
+    PreCommitted      (Accept,  Full,  DefinitionUnknown, ExecuteAtKnown,   DepsUnknown,  Unknown),
 
     Committed         (Commit,  Full,  DefinitionKnown,   ExecuteAtKnown,   DepsCommitted,Unknown),
     Stable            (Execute, Full,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,    Unknown),
@@ -124,11 +124,7 @@ public enum Status
     public static class Known
     {
         public static final Known Nothing            = new Known(Maybe, DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, Unknown);
-        // TODO (expected): deprecate DefinitionOnly
-        public static final Known DefinitionOnly     = new Known(Maybe, DefinitionKnown,   ExecuteAtUnknown, DepsUnknown, Unknown);
         public static final Known DefinitionAndRoute = new Known(Full,  DefinitionKnown,   ExecuteAtUnknown, DepsUnknown, Unknown);
-        public static final Known ExecuteAtOnly      = new Known(Maybe, DefinitionUnknown, ExecuteAtKnown,   DepsUnknown, Unknown);
-        public static final Known Decision           = new Known(Full,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,   Unknown);
         public static final Known Apply              = new Known(Full,  DefinitionUnknown, ExecuteAtKnown,   DepsKnown,   Outcome.Apply);
         public static final Known Invalidated        = new Known(Maybe, DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, Outcome.Invalidated);
 
@@ -277,23 +273,34 @@ public enum Status
          * Convert this Known to one that represents the knowledge that can be propagated to another replica without
          * further information available to that replica, e.g. we cannot apply without also knowing the definition.
          */
-        // TODO (expected): merge propagates and propagatesStatus
         public Known propagates()
         {
+            return propagatesSaveStatus().known;
+        }
+
+        public SaveStatus propagatesSaveStatus()
+        {
             if (isInvalidated())
-                return Invalidated;
+                return SaveStatus.Invalidated;
+
+            if (route != Full)
+                return SaveStatus.NotDefined;
 
             if (definition == DefinitionUnknown)
-                return executeAt.isDecidedAndKnownToExecute() ? ExecuteAtOnly : Nothing;
+            {
+                if (executeAt.isDecidedAndKnownToExecute())
+                    return SaveStatus.PreCommitted;
+                return SaveStatus.NotDefined;
+            }
 
             KnownExecuteAt executeAt = this.executeAt;
             if (!executeAt.isDecidedAndKnownToExecute())
-                return DefinitionOnly;
+                return SaveStatus.PreAccepted;
 
             // cannot propagate proposed deps; and cannot propagate known deps without executeAt
             KnownDeps deps = this.deps;
             if (!deps.hasDecidedDeps())
-                return SaveStatus.PreCommittedWithDefinition.known;
+                return SaveStatus.PreCommittedWithDefinition;
 
             switch (outcome)
             {
@@ -301,10 +308,10 @@ public enum Status
                 case Unknown:
                 case WasApply:
                 case Erased:
-                    return Stable.minKnown;
+                    return SaveStatus.Stable;
 
                 case Apply:
-                    return PreApplied.minKnown;
+                    return SaveStatus.PreApplied;
             }
         }
 
@@ -326,7 +333,7 @@ public enum Status
                     if (executeAt.isDecidedAndKnownToExecute() && definition.isKnown() && deps.hasDecidedDeps())
                         return Stable;
 
-                    if (executeAt.isDecidedAndKnownToExecute())
+                    if (executeAt.isDecidedAndKnownToExecute() && hasFullRoute())
                         return PreCommitted;
 
                     if (definition.isKnown())
@@ -475,11 +482,6 @@ public enum Status
         Full
         ;
 
-        public boolean hasFull()
-        {
-            return this == Full;
-        }
-
         public KnownRoute reduce(KnownRoute that)
         {
             if (this == that) return this;
@@ -533,6 +535,14 @@ public enum Status
         public boolean isDecided()
         {
             return compareTo(ExecuteAtErased) >= 0;
+        }
+
+        /**
+         * Is known to have agreed to execute or not; but the decision is not known (maybe erased)
+         */
+        public boolean hasDecision()
+        {
+            return compareTo(ExecuteAtKnown) >= 0;
         }
 
         /**
@@ -865,6 +875,8 @@ public enum Status
         MajorityOrInvalidated, Majority,
         UniversalOrInvalidated, Universal;
 
+        private static final Durability[] lookup = values();
+
         public boolean isDurable()
         {
             return this == Majority || this == Universal;
@@ -878,6 +890,13 @@ public enum Status
         public boolean isMaybeInvalidated()
         {
             return this == NotDurable || this == MajorityOrInvalidated || this == UniversalOrInvalidated;
+        }
+
+        public static Durability nonNullOrMerge(@Nullable Durability a, @Nullable Durability b)
+        {
+            if (a == null) return b;
+            if (b == null) return a;
+            return merge(a, b);
         }
 
         public static Durability merge(Durability a, Durability b)
@@ -898,6 +917,18 @@ public enum Status
             if (c < 0) { Durability tmp = a; a = b; b = tmp; }
             if (a == UniversalOrInvalidated && (b == Majority || b == ShardUniversal || b == Local)) a = Universal;
             return a;
+        }
+
+        public static Durability forOrdinal(int ordinal)
+        {
+            if (ordinal < 0 || ordinal > lookup.length)
+                throw new IndexOutOfBoundsException(ordinal);
+            return lookup[ordinal];
+        }
+
+        public static int maxOrdinal()
+        {
+            return lookup.length;
         }
     }
 

@@ -25,10 +25,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.api.Data;
+import accord.api.LocalListeners;
+import accord.api.RequestTimeouts;
+import accord.api.RequestTimeouts.RegisteredTimeout;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.Node;
-import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.SaveStatus;
@@ -41,16 +43,19 @@ import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 import accord.utils.async.AsyncChain;
+import org.agrona.collections.Int2ObjectHashMap;
 
+import static accord.api.ProgressLog.BlockedUntil.CanApply;
+import static accord.api.ProgressLog.BlockedUntil.HasStableDeps;
 import static accord.messages.MessageType.READ_RSP;
 import static accord.messages.ReadData.CommitOrReadNack.Insufficient;
 import static accord.messages.ReadData.CommitOrReadNack.Redundant;
 import static accord.messages.TxnRequest.latestRelevantEpochIndex;
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.utils.Invariants.illegalState;
-import static accord.utils.MapReduceConsume.forEach;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
-public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrReadNack> implements Command.TransientListener, EpochSupplier
+public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrReadNack> implements EpochSupplier, LocalListeners.ComplexListener, RequestTimeouts.Timeout
 {
     private static final Logger logger = LoggerFactory.getLogger(ReadData.class);
 
@@ -100,7 +105,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
         }
     }
 
-    // TODO (expected, cleanup): should this be a Route?
+    // TODO (desired, cleanup): should this be a Route?
     public final Participants<?> readScope;
     public final long executeAtEpoch;
     private transient State state = State.PENDING; // TODO (low priority, semantics): respond with the Executed result we have stored?
@@ -109,6 +114,8 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
     transient BitSet waitingOn, reading;
     transient int waitingOnCount;
     transient Ranges unavailable;
+    Int2ObjectHashMap<LocalListeners.Registered> registrations = new Int2ObjectHashMap<>();
+    RegisteredTimeout timeout;
 
     public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Participants<?> readScope, long executeAtEpoch)
     {
@@ -147,12 +154,6 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
     }
 
     @Override
-    public PreLoadContext listenerPreLoadContext(TxnId caller)
-    {
-        return PreLoadContext.contextFor(txnId, keys());
-    }
-
-    @Override
     protected void process()
     {
         waitingOn = new BitSet();
@@ -183,19 +184,20 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
 
         Command command = safeCommand.current();
         SaveStatus status = command.saveStatus();
+        int storeId = safeStore.commandStore().id();
 
         logger.trace("{}: setting up read with status {} on {}", txnId, status, safeStore);
         switch (actionForStatus(status))
         {
             default: throw new AssertionError();
             case WAIT:
-                waitingOn.set(safeStore.commandStore().id());
+                registrations.put(storeId, safeStore.register(txnId, this));
+                waitingOn.set(storeId);
                 ++waitingOnCount;
-                safeCommand.addListener(this);
-                // TODO (expected): should we invoke waiting directly? We depend on NotifyWaitingOn to make progress, and it will call this.
-                //  Though we might get PreApplied info earlier.
-                safeStore.progressLog().waiting(safeCommand, executeOn().min.execution, null, readScope);
-                beginWaiting(safeStore, false);
+
+                int c = status.compareTo(SaveStatus.Stable);
+                if (c < 0) safeStore.progressLog().waiting(HasStableDeps, safeStore, safeCommand, null, readScope);
+                else if (c > 0 && status.compareTo(executeOn().min) >= 0 && status.compareTo(SaveStatus.PreApplied) < 0) safeStore.progressLog().waiting(CanApply, safeStore, safeCommand, null, readScope);
                 return status.compareTo(SaveStatus.Stable) >= 0 ? null : Insufficient;
 
             case OBSOLETE:
@@ -203,11 +205,10 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
                 return Redundant;
 
             case EXECUTE:
-                waitingOn.set(safeStore.commandStore().id());
-                reading.set(safeStore.commandStore().id());
+                registrations.put(storeId, safeStore.register(txnId, this));
+                waitingOn.set(storeId);
                 ++waitingOnCount;
-                beginWaiting(safeStore, true);
-                safeCommand.addListener(this);
+                reading.set(storeId);
                 read(safeStore, safeCommand.current());
                 return null;
         }
@@ -222,38 +223,46 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
     }
 
     @Override
-    public synchronized void onChange(SafeCommandStore safeStore, SafeCommand safeCommand)
+    public synchronized boolean notify(SafeCommandStore safeStore, SafeCommand safeCommand)
     {
         Command command = safeCommand.current();
         logger.trace("{}: updating as listener in response to change on {} with status {} ({})",
                      this, command.txnId(), command.status(), command);
 
-        int id = safeStore.commandStore().id();
-        if (state != State.PENDING || !waitingOn.get(id))
-        {
-            removeListener(safeStore, safeCommand);
-            return;
-        }
+        int storeId = safeStore.commandStore().id();
+        if (state != State.PENDING)
+            return false;
 
         switch (actionForStatus(command.saveStatus()))
         {
             default: throw new AssertionError("Unhandled Action: " + actionForStatus(command.saveStatus()));
-
             case WAIT:
-                break;
+                return true;
 
             case OBSOLETE:
-                onFailure(safeStore, Redundant, null);
-                break;
+                onFailure(Redundant, null);
+                return false;
 
             case EXECUTE:
-                if (!reading.get(id))
+                if (!reading.get(storeId))
                 {
-                    reading.set(safeStore.commandStore().id());
+                    if (!waitingOn.get(storeId))
+                    {
+                        waitingOn.set(storeId);
+                        ++waitingOnCount;
+                    }
+                    reading.set(storeId);
                     logger.trace("{}: executing read", command.txnId());
                     read(safeStore, command);
                 }
+                return true;
         }
+    }
+
+    Ranges executeRanges(SafeCommandStore safeStore)
+    {
+        // TODO (required): is this correct for all cases incl awaitsOnlyDeps etc
+        return safeStore.ranges().allAt(executeAtEpoch);
     }
 
     @Override
@@ -261,9 +270,19 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
     {
         // Unless failed always ack to indicate setup has completed otherwise the counter never gets to -1
         if ((reply == null || !reply.isFinal()) && failure == null)
-            onOneSuccess(null, null);
+        {
+            onOneSuccess(-1, null);
+            if (state == State.PENDING)
+            {
+                // Time out reads to avoid doing extra work for requests that will have responses ignored
+                long replyTimeout = node.agent().replyTimeout(replyContext, MILLISECONDS);
+                timeout = node.requestTimeouts().register(this, replyTimeout, MILLISECONDS);
+            }
+        }
         else
-            onFailure(null, reply, failure);
+        {
+            onFailure(reply, failure);
+        }
     }
 
     protected AsyncChain<Data> beginRead(SafeCommandStore safeStore, Timestamp executeAt, PartialTxn txn, Ranges unavailable)
@@ -288,7 +307,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
             if (throwable != null)
             {
                 logger.trace("{}: read failed for {}: {}", txnId, unsafeStore, throwable);
-                onFailure(null, null, throwable);
+                onFailure(null, throwable);
             }
             else
             {
@@ -306,24 +325,24 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
         if (result != null)
             data = data == null ? result : data.merge(result);
 
-        // TODO (expected): a cheap unregister listener mechanism via some lazy execution
-        onOneSuccess(commandStore, unavailable);
+        int storeId = commandStore.id();
+        registrations.remove(storeId).cancel();
+        onOneSuccess(storeId, unavailable);
     }
 
-    protected void onOneSuccess(@Nullable CommandStore commandStore, @Nullable Ranges newUnavailable)
+    protected void onOneSuccess(int storeId, @Nullable Ranges newUnavailable)
     {
-        if (commandStore != null)
+        if (storeId >= 0)
         {
-            Invariants.checkState(waitingOn.get(commandStore.id()) && reading.get(commandStore.id()), "Txn %s's reading not contain store %d; waitingOn=%s; reading=%s", txnId, commandStore.id(), waitingOn, reading);
-            reading.clear(commandStore.id());
-            waitingOn.clear(commandStore.id());
+            Invariants.checkState(waitingOn.get(storeId), "Txn %s's reading not contain store %d; waitingOn=%s", txnId, storeId, waitingOn);
+            waitingOn.clear(storeId);
         }
 
         if (newUnavailable != null && !newUnavailable.isEmpty())
         {
             newUnavailable = newUnavailable.intersecting(readScope, Minimal);
-            if (this.unavailable == null) this.unavailable = newUnavailable;
-            else this.unavailable = newUnavailable.with(this.unavailable);
+            if (unavailable == null) unavailable = newUnavailable;
+            else unavailable = newUnavailable.with(unavailable);
         }
 
         // wait for -1 to ensure the setup phase has also completed. Setup calls ack in its callback
@@ -356,37 +375,33 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
         }
     }
 
-    void beginCancel(@Nullable SafeCommandStore safeStore)
+    void cancel()
     {
-        if (safeStore != null)
-        {
-            int id = safeStore.commandStore().id();
-            cancelWaiting(safeStore);
-            waitingOn.clear(id);
-        }
+        if (timeout != null)
+            timeout.cancel();
 
-        // TODO (expected): efficient unsubscribe mechanism
-        node.commandStores().mapReduceConsume(this, waitingOn.stream(), forEach(safeStore0 -> cancelWaiting(safeStore0), node.agent()));
         state = State.OBSOLETE;
+        registrations.forEach((i, r) -> r.cancel());
         waitingOn.clear();
-        reading = null;
+        reading.clear();
         data = null;
         unavailable = null;
     }
 
-    protected void beginWaiting(SafeCommandStore safeStore, boolean isExecuting)
+    synchronized public void timeout()
     {
+        timeout = null;
+        cancel();
     }
 
-    protected void cancelWaiting(SafeCommandStore safeStore)
+    public int hashCode()
     {
-        SafeCommand safeCommand = safeStore.ifInitialised(txnId);
-        if (safeCommand != null) safeCommand.removeListener(this);
+        return txnId.hashCode();
     }
 
-    void onFailure(@Nullable SafeCommandStore safeStore, CommitOrReadNack failReply, Throwable throwable)
+    synchronized void onFailure(CommitOrReadNack failReply, Throwable throwable)
     {
-        beginCancel(safeStore);
+        cancel();
         if (throwable != null)
         {
             node.reply(replyTo, replyContext, null, throwable);
@@ -401,12 +416,6 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
     protected ReadOk constructReadOk(Ranges unavailable, Data data)
     {
         return new ReadOk(unavailable, data);
-    }
-
-    void removeListener(SafeCommandStore safeStore, SafeCommand safeCommand)
-    {
-        if (safeCommand != null) safeCommand.removeListener(this);
-        if (waitingOn != null) waitingOn.clear(safeStore.commandStore().id());
     }
 
     @Override
@@ -492,7 +501,8 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
         @Override
         public String toString()
         {
-            return "ReadOk{" + data + (unavailable == null ? "" : ", unavailable:" + unavailable) + '}';
+            return "ReadOk{" + data
+                   + (unavailable == null ? "" : ", unavailable:" + unavailable) + '}';
         }
 
         @Override

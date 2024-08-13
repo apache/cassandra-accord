@@ -71,7 +71,7 @@ implements Iterable<RoutingKey>, Unseekables<RoutingKey>, Participants<RoutingKe
     }
 
     @Override
-    public final Participants<RoutingKey> subtract(Unseekables<?> keysOrRanges)
+    public Participants<RoutingKey> without(Unseekables<?> keysOrRanges)
     {
         switch (keysOrRanges.domain())
         {
@@ -83,18 +83,18 @@ implements Iterable<RoutingKey>, Unseekables<RoutingKey>, Participants<RoutingKe
             }
             case Range:
             {
-                return subtract((AbstractRanges)keysOrRanges);
+                return without((AbstractRanges)keysOrRanges);
             }
         }
     }
 
     @Override
-    public Participants<RoutingKey> subtract(Ranges ranges)
+    public Participants<RoutingKey> without(Ranges ranges)
     {
-        return subtract((AbstractRanges) ranges);
+        return without((AbstractRanges) ranges);
     }
 
-    private Participants<RoutingKey> subtract(AbstractRanges ranges)
+    private Participants<RoutingKey> without(AbstractRanges ranges)
     {
         RoutingKey[] output = subtract(ranges, keys, RoutingKey[]::new);
         return output == keys ? this : new RoutingKeys(output);

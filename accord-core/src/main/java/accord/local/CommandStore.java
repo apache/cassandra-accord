@@ -18,10 +18,11 @@
 
 package accord.local;
 
+import accord.api.LocalListeners;
 import accord.api.ProgressLog;
 import accord.api.DataStore;
 import accord.api.VisibleForImplementationTesting;
-import accord.coordinate.CollectDeps;
+import accord.coordinate.CollectCalculatedDeps;
 import accord.local.Command.WaitingOn;
 
 import javax.annotation.Nullable;
@@ -135,6 +136,7 @@ public abstract class CommandStore implements AgentExecutor
                             Agent agent,
                             DataStore store,
                             ProgressLog.Factory progressLogFactory,
+                            LocalListeners.Factory listenersFactory,
                             EpochUpdateHolder rangesForEpoch);
     }
 
@@ -145,19 +147,18 @@ public abstract class CommandStore implements AgentExecutor
     protected final Agent agent;
     protected final DataStore store;
     protected final ProgressLog progressLog;
+    protected final LocalListeners listeners;
     protected final EpochUpdateHolder epochUpdateHolder;
 
     // TODO (expected): schedule regular pruning of these collections
     // bootstrapBeganAt and shardDurableAt are both canonical data sets mostly used for debugging / constructing
     private NavigableMap<TxnId, Ranges> bootstrapBeganAt = ImmutableSortedMap.of(TxnId.NONE, Ranges.EMPTY); // additive (i.e. once inserted, rolled-over until invalidated, and the floor entry contains additions)
-    // TODO (required): updates to these variables should be buffered like with Command updates in SafeCommandStore, to be rolled-back in event of a failure processing the command.
     private RedundantBefore redundantBefore = RedundantBefore.EMPTY;
     // TODO (expected): store this only once per node
     private DurableBefore durableBefore = DurableBefore.EMPTY;
     private MaxConflicts maxConflicts = MaxConflicts.EMPTY;
     protected RangesForEpoch rangesForEpoch;
 
-    // TODO (desired): merge with redundantBefore?
     /**
      * safeToRead is related to RedundantBefore, but a distinct concept.
      * While bootstrappedAt defines the txnId bounds we expect to maintain data for locally,
@@ -171,19 +172,21 @@ public abstract class CommandStore implements AgentExecutor
      * We also update safeToRead when we go stale, to remove ranges we may have bootstrapped but that are now known to
      * be incomplete. In this case we permit transactions to execute in any order for the unsafe key ranges.
      * But they may still be ordered for other key ranges they participate in.
+     *
+     * TODO (expected): merge with redundantBefore
      */
     private NavigableMap<Timestamp, Ranges> safeToRead = ImmutableSortedMap.of(Timestamp.NONE, Ranges.EMPTY);
     private final Set<Bootstrap> bootstraps = Collections.synchronizedSet(new DeterministicIdentitySet<>());
-    // TODO (required): we must synchronise this on joining, prior to marking ourselves ready to coordinate
     @Nullable private ReducingRangeMap<Timestamp> rejectBefore;
 
-    protected CommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, EpochUpdateHolder epochUpdateHolder)
+    protected CommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
     {
         this.id = id;
         this.time = time;
         this.agent = agent;
         this.store = store;
         this.progressLog = progressLogFactory.create(this);
+        this.listeners = listenersFactory.create(this);
         this.epochUpdateHolder = epochUpdateHolder;
     }
 
@@ -465,7 +468,7 @@ public abstract class CommandStore implements AgentExecutor
         Timestamp before = Timestamp.minForEpoch(epoch);
         FullRoute<?> route = node.computeRoute(id, ranges);
         // TODO (required): we need to ensure anyone we receive a reply from proposes newer timestamps for anything we don't see
-        CollectDeps.withDeps(node, id, route, route, ranges, before, (deps, fail) -> {
+        CollectCalculatedDeps.withCalculatedDeps(node, id, route, route, ranges, before, (deps, fail) -> {
             if (fail != null)
             {
                 fetchMajorityDeps(coordination, node, epoch, ranges);
@@ -490,7 +493,7 @@ public abstract class CommandStore implements AgentExecutor
             AsyncResult<Void> done = this.<Void>submit(empty(), safeStore -> {
                 for (Bootstrap prev : bootstraps)
                 {
-                    Ranges abort = prev.allValid.subtract(removedRanges);
+                    Ranges abort = prev.allValid.without(removedRanges);
                     if (!abort.isEmpty())
                         prev.invalidate(abort);
                 }
@@ -532,6 +535,8 @@ public abstract class CommandStore implements AgentExecutor
     }
 
     // TODO (expected): we can immediately truncate dependencies locally once an exclusiveSyncPoint applies, we don't need to wait for the whole shard
+    // TODO (required): integrate validation of staleness with implementation (e.g. C* should know it has been marked stale)
+    //      also: we no longer expect epochs that are losing a range to be marked stale, make sure logic reflects this
     public void markShardStale(SafeCommandStore safeStore, Timestamp staleSince, Ranges ranges, boolean isSincePrecise)
     {
         Timestamp staleUntilAtLeast = staleSince;
@@ -617,7 +622,7 @@ public abstract class CommandStore implements AgentExecutor
                 Keys remaining = prev;
                 if (remaining == null) remaining = builder.directKeyDeps.participatingKeys(txnIdx);
                 else Invariants.checkState(!remaining.isEmpty());
-                remaining = remaining.subtract(range);
+                remaining = remaining.without(range);
                 if (prev == null) Invariants.checkState(!remaining.isEmpty());
                 partiallyBootstrapping.put(txnIdx, remaining);
                 return remaining.isEmpty();
@@ -682,7 +687,7 @@ public abstract class CommandStore implements AgentExecutor
                 Ranges remaining = prev;
                 if (remaining == null) remaining = builder.directRangeDeps.ranges(rangeTxnIdx);
                 else Invariants.checkState(!remaining.isEmpty());
-                remaining = remaining.subtract(Ranges.of(range));
+                remaining = remaining.without(Ranges.of(range));
                 if (prev == null) Invariants.checkState(!remaining.isEmpty());
                 partiallyBootstrapping.put(rangeTxnIdx, remaining);
                 return remaining.isEmpty();
@@ -757,7 +762,7 @@ public abstract class CommandStore implements AgentExecutor
     private static <T extends Timestamp> ImmutableSortedMap<T, Ranges> purgeAndInsert(NavigableMap<T, Ranges> in, T insertAt, Ranges insert)
     {
         TreeMap<T, Ranges> build = new TreeMap<>(in);
-        build.headMap(insertAt, false).entrySet().forEach(e -> e.setValue(e.getValue().subtract(insert)));
+        build.headMap(insertAt, false).entrySet().forEach(e -> e.setValue(e.getValue().without(insert)));
         build.tailMap(insertAt, true).entrySet().forEach(e -> e.setValue(e.getValue().union(MERGE_ADJACENT, insert)));
         build.entrySet().removeIf(e -> e.getKey().compareTo(Timestamp.NONE) > 0 && e.getValue().isEmpty());
         Map.Entry<T, Ranges> prev = build.floorEntry(insertAt);
@@ -780,7 +785,7 @@ public abstract class CommandStore implements AgentExecutor
 
     private static <T extends Timestamp> Map.Entry<T, Ranges> without(Map.Entry<T, Ranges> in, Ranges remove)
     {
-        Ranges without = in.getValue().subtract(remove);
+        Ranges without = in.getValue().without(remove);
         if (without == in.getValue())
             return in;
         return new SimpleImmutableEntry<>(in.getKey(), without);

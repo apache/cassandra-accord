@@ -24,8 +24,8 @@ import accord.local.KeyHistory;
 import accord.local.Node;
 import accord.local.SafeCommandStore;
 import accord.primitives.FullRoute;
-import accord.primitives.PartialRoute;
 import accord.primitives.Ranges;
+import accord.primitives.Route;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -36,7 +36,7 @@ public class GetMaxConflict extends TxnRequest.WithUnsynced<GetMaxConflict.GetMa
 {
     public static final class SerializationSupport
     {
-        public static GetMaxConflict create(PartialRoute<?> scope, long waitForEpoch, long minEpoch, Seekables<?, ?> keys, long executionEpoch)
+        public static GetMaxConflict create(Route<?> scope, long waitForEpoch, long minEpoch, Seekables<?, ?> keys, long executionEpoch)
         {
             return new GetMaxConflict(scope, waitForEpoch, minEpoch, keys, executionEpoch);
         }
@@ -47,14 +47,14 @@ public class GetMaxConflict extends TxnRequest.WithUnsynced<GetMaxConflict.GetMa
 
     public GetMaxConflict(Node.Id to, Topologies topologies, FullRoute<?> route, Seekables<?, ?> keys, long executionEpoch)
     {
-        super(to, topologies, executionEpoch, route);
+        super(to, topologies, route);
         this.keys = keys.intersecting(scope);
         this.executionEpoch = executionEpoch;
     }
 
-    protected GetMaxConflict(PartialRoute<?> scope, long waitForEpoch, long minEpoch,  Seekables<?, ?> keys, long executionEpoch)
+    protected GetMaxConflict(Route<?> scope, long waitForEpoch, long minEpoch,  Seekables<?, ?> keys, long executionEpoch)
     {
-        super(TxnId.NONE, scope, waitForEpoch, minEpoch, true);
+        super(TxnId.NONE, scope, waitForEpoch, minEpoch);
         this.keys = keys;
         this.executionEpoch = executionEpoch;
     }
@@ -62,13 +62,13 @@ public class GetMaxConflict extends TxnRequest.WithUnsynced<GetMaxConflict.GetMa
     @Override
     public void process()
     {
-        node.mapReduceConsumeLocal(this, minUnsyncedEpoch, executionEpoch, this);
+        node.mapReduceConsumeLocal(this, minEpoch, executionEpoch, this);
     }
 
     @Override
     public GetMaxConflictOk apply(SafeCommandStore safeStore)
     {
-        Ranges ranges = safeStore.ranges().allBetween(minUnsyncedEpoch, executionEpoch);
+        Ranges ranges = safeStore.ranges().allBetween(minEpoch, executionEpoch);
         Timestamp maxConflict = safeStore.commandStore().maxConflict(keys.slice(ranges));
         return new GetMaxConflictOk(maxConflict, Math.max(safeStore.time().epoch(), node.epoch()));
     }

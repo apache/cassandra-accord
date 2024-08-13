@@ -44,7 +44,7 @@ import static accord.local.PreLoadContext.contextFor;
 import static accord.local.Status.Accepted;
 import static accord.local.Status.PreAccepted;
 import static accord.primitives.ProgressToken.INVALIDATED;
-import static accord.primitives.ProgressToken.TRUNCATED;
+import static accord.primitives.ProgressToken.TRUNCATED_DURABLE_OR_INVALIDATED;
 import static accord.utils.Invariants.illegalState;
 
 public class Invalidate implements Callback<InvalidateReply>
@@ -154,13 +154,13 @@ public class Invalidate implements Callback<InvalidateReply>
         // first look to see if it has already been decided/invalidated
         // check each shard independently - if we find any that can be invalidated, do so
         InvalidateReply max = InvalidateReply.max(replies);
-        InvalidateReply maxNotTruncated = max.status != Status.Truncated ? max : InvalidateReply.maxNotTruncated(replies);
+        InvalidateReply maxNotTruncated = max.maxKnowledgeStatus.is(Status.Truncated) ? max : InvalidateReply.maxNotTruncated(replies);
 
         if (maxNotTruncated != null)
         {
-            switch (maxNotTruncated.status)
+            switch (maxNotTruncated.maxKnowledgeStatus.status)
             {
-                default: throw new AssertionError("Unhandled status: " + maxNotTruncated.status);
+                default: throw new AssertionError("Unhandled status: " + maxNotTruncated.maxKnowledgeStatus.status);
                 case Truncated: throw illegalState();
 
                 case AcceptedInvalidate:
@@ -177,7 +177,7 @@ public class Invalidate implements Callback<InvalidateReply>
                 case Stable:
                 case Committed:
                 case PreCommitted:
-                    Invariants.checkState(maxNotTruncated.status == PreAccepted || !invalidateWith.contains(someRoute.homeKey()) || fullRoute != null);
+                    Invariants.checkState(maxNotTruncated.maxKnowledgeStatus.status == PreAccepted || !invalidateWith.contains(someRoute.homeKey()) || fullRoute != null);
 
                 case Accepted:
                     // TODO (desired, efficiency): if we see Committed or above, go straight to Execute if we have assembled enough information
@@ -194,7 +194,7 @@ public class Invalidate implements Callback<InvalidateReply>
 
                     // Note that there's lots of scope for variations in behaviour here, but lots of care is needed.
 
-                    Status witnessedByInvalidation = maxNotTruncated.status;
+                    Status witnessedByInvalidation = maxNotTruncated.maxKnowledgeStatus.status;
                     if (!witnessedByInvalidation.hasBeen(Accepted))
                     {
                         Invariants.checkState(tracker.all(InvalidationShardTracker::isPromised));
@@ -218,12 +218,12 @@ public class Invalidate implements Callback<InvalidateReply>
             for (Shard shard : topology.shards())
             {
                 InvalidateReply maxReply = InvalidateReply.max(replies, shard, topology.nodes());
-                allShardsTruncated &= maxReply.status == Status.Truncated;
+                allShardsTruncated &= maxReply.maxStatus.is(Status.Truncated);
             }
             if (allShardsTruncated)
             {
                 isDone = true;
-                callback.accept(TRUNCATED, null);
+                callback.accept(TRUNCATED_DURABLE_OR_INVALIDATED, null);
                 return;
             }
         }

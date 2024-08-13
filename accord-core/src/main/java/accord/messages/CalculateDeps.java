@@ -25,8 +25,8 @@ import accord.local.Node.Id;
 import accord.local.SafeCommandStore;
 import accord.primitives.FullRoute;
 import accord.primitives.PartialDeps;
-import accord.primitives.PartialRoute;
 import accord.primitives.Ranges;
+import accord.primitives.Route;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -36,29 +36,29 @@ import accord.utils.Invariants;
 import static accord.messages.PreAccept.calculatePartialDeps;
 import static accord.primitives.EpochSupplier.constant;
 
-public class GetDeps extends TxnRequest.WithUnsynced<PartialDeps>
+public class CalculateDeps extends TxnRequest.WithUnsynced<PartialDeps>
 {
     public static final class SerializationSupport
     {
-        public static GetDeps create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, Seekables<?, ?> keys, Timestamp executeAt)
+        public static CalculateDeps create(TxnId txnId, Route<?> scope, long waitForEpoch, long minEpoch, Seekables<?, ?> keys, Timestamp executeAt)
         {
-            return new GetDeps(txnId, scope, waitForEpoch, minEpoch, doNotComputeProgressKey, keys, executeAt);
+            return new CalculateDeps(txnId, scope, waitForEpoch, minEpoch, keys, executeAt);
         }
     }
 
     public final Seekables<?, ?> keys;
     public final Timestamp executeAt;
 
-    public GetDeps(Id to, Topologies topologies, FullRoute<?> route, TxnId txnId, Seekables<?, ?> keys, Timestamp executeAt)
+    public CalculateDeps(Id to, Topologies topologies, FullRoute<?> route, TxnId txnId, Seekables<?, ?> keys, Timestamp executeAt)
     {
         super(to, topologies, txnId, route);
         this.keys = keys.intersecting(scope);
         this.executeAt = executeAt;
     }
 
-    protected GetDeps(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, Seekables<?, ?> keys, Timestamp executeAt)
+    protected CalculateDeps(TxnId txnId, Route<?> scope, long waitForEpoch, long minEpoch, Seekables<?, ?> keys, Timestamp executeAt)
     {
-        super(txnId, scope, waitForEpoch, minEpoch, doNotComputeProgressKey);
+        super(txnId, scope, waitForEpoch, minEpoch);
         this.keys = keys;
         this.executeAt = executeAt;
     }
@@ -66,14 +66,14 @@ public class GetDeps extends TxnRequest.WithUnsynced<PartialDeps>
     @Override
     public void process()
     {
-        node.mapReduceConsumeLocal(this, minUnsyncedEpoch, executeAt.epoch(), this);
+        node.mapReduceConsumeLocal(this, minEpoch, executeAt.epoch(), this);
     }
 
     @Override
     public PartialDeps apply(SafeCommandStore instance)
     {
-        Ranges ranges = instance.ranges().allBetween(minUnsyncedEpoch, executeAt);
-        return calculatePartialDeps(instance, txnId, keys, scope, constant(minUnsyncedEpoch), executeAt, ranges);
+        Ranges ranges = instance.ranges().allBetween(minEpoch, executeAt);
+        return calculatePartialDeps(instance, txnId, keys, scope, constant(minEpoch), executeAt, ranges);
     }
 
     @Override
@@ -85,19 +85,19 @@ public class GetDeps extends TxnRequest.WithUnsynced<PartialDeps>
     @Override
     public void accept(PartialDeps result, Throwable failure)
     {
-        node.reply(replyTo, replyContext, result != null ? new GetDepsOk(result) : null, failure);
+        node.reply(replyTo, replyContext, result != null ? new CalculateDepsOk(result) : null, failure);
     }
 
     @Override
     public MessageType type()
     {
-        return MessageType.GET_DEPS_REQ;
+        return MessageType.CALCULATE_DEPS_REQ;
     }
 
     @Override
     public String toString()
     {
-        return "GetDeps{" +
+        return "CalculateDeps{" +
                "txnId:" + txnId +
                ", keys:" + keys +
                ", executeAt:" + executeAt +
@@ -122,11 +122,11 @@ public class GetDeps extends TxnRequest.WithUnsynced<PartialDeps>
         return KeyHistory.COMMANDS;
     }
 
-    public static class GetDepsOk implements Reply
+    public static class CalculateDepsOk implements Reply
     {
         public final PartialDeps deps;
 
-        public GetDepsOk(@Nonnull PartialDeps deps)
+        public CalculateDepsOk(@Nonnull PartialDeps deps)
         {
             this.deps = Invariants.nonNull(deps);
         }
@@ -134,18 +134,13 @@ public class GetDeps extends TxnRequest.WithUnsynced<PartialDeps>
         @Override
         public String toString()
         {
-            return toString("GetDepsOk");
-        }
-
-        String toString(String kind)
-        {
-            return kind + "{" + deps + '}';
+            return "GetDepsOk{" + deps + '}' ;
         }
 
         @Override
         public MessageType type()
         {
-            return MessageType.GET_DEPS_RSP;
+            return MessageType.CALCULATE_DEPS_RSP;
         }
     }
 

@@ -26,17 +26,18 @@ import org.slf4j.LoggerFactory;
 
 import accord.api.BarrierType;
 import accord.api.Key;
+import accord.api.LocalListeners;
 import accord.api.RoutingKey;
 import accord.local.Command;
 import accord.local.KeyHistory;
 import accord.local.Node;
-import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.SafeCommandStore.TestDep;
 import accord.local.SafeCommandStore.TestStartedAt;
 import accord.local.Status;
 import accord.primitives.Routable.Domain;
+import accord.primitives.RoutableKey;
 import accord.primitives.Seekables;
 import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
@@ -180,8 +181,7 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
                 TxnId txnId = syncPoint.syncId;
                 long epoch = txnId.epoch();
                 RoutingKey homeKey = syncPoint.homeKey;
-                node.commandStores().ifLocal(contextFor(txnId), homeKey, epoch, epoch,
-                                             safeStore -> safeStore.get(txnId, homeKey).addAndInvokeListener(safeStore, new BarrierCommandListener()))
+                node.commandStores().ifLocal(contextFor(txnId), homeKey, epoch, epoch, safeStore -> register(safeStore, txnId, homeKey))
                     .begin(node.agent());
             }
             else
@@ -191,10 +191,10 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
         });
     }
 
-    private class BarrierCommandListener implements Command.TransientListener
+    private class BarrierCommandListener implements LocalListeners.ComplexListener
     {
         @Override
-        public void onChange(SafeCommandStore safeStore, SafeCommand safeCommand)
+        public boolean notify(SafeCommandStore safeStore, SafeCommand safeCommand)
         {
             Command command = safeCommand.current();
             if (command.is(Status.Applied))
@@ -202,17 +202,15 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
                 // In all the cases where we add a listener (listening to existing command, async completion of CoordinateSyncPoint)
                 // we want to notify the agent
                 doBarrierSuccess(command.txnId());
+                return false;
             }
             else if (command.hasBeen(Status.Truncated))
+            {
                 // Surface the invalidation/truncation and the barrier can be retried by the caller
                 Barrier.this.tryFailure(new Timeout(command.txnId(), command.homeKey()));
-
-        }
-
-        @Override
-        public PreLoadContext listenerPreLoadContext(TxnId caller)
-        {
-            return PreLoadContext.contextFor(caller);
+                return false;
+            }
+            return true;
         }
     }
 
@@ -228,6 +226,12 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
                 Long.MAX_VALUE,
                 check);
         return check;
+    }
+
+    private void register(SafeCommandStore safeStoreWithTxn, TxnId txnId, RoutableKey key)
+    {
+        BarrierCommandListener listener = new BarrierCommandListener();
+        safeStoreWithTxn.registerAndInvoke(txnId, key.toUnseekable(), listener);
     }
 
     // Hold result of looking for a transaction to act as a barrier for an Epoch
@@ -283,10 +287,11 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
             // It's not applied so add a listener to find out when it is applied
             if (found != null)
             {
-                safeStore.commandStore().execute(
-                        contextFor(found.txnId),
-                        safeStoreWithTxn -> safeStoreWithTxn.get(found.txnId, found.key.toUnseekable()).addAndInvokeListener(safeStore, new BarrierCommandListener())
-                ).begin(node.agent());
+                //noinspection SillyAssignment,ConstantConditions
+                safeStore = safeStore; // prevent use in lambda
+                safeStore.commandStore()
+                         .execute(contextFor(found.txnId), safeStoreWithTxn -> register(safeStoreWithTxn, found.txnId, found.key))
+                         .begin(node.agent());
             }
             return found;
         }

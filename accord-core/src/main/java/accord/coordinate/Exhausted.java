@@ -21,6 +21,7 @@ package accord.coordinate;
 import javax.annotation.Nullable;
 
 import accord.api.RoutingKey;
+import accord.primitives.Ranges;
 import accord.primitives.TxnId;
 
 import static accord.utils.Invariants.checkState;
@@ -30,25 +31,32 @@ import static accord.utils.Invariants.checkState;
  */
 public class Exhausted extends CoordinationFailed
 {
-    public Exhausted(TxnId txnId, @Nullable RoutingKey homeKey)
+    final Ranges unavailable;
+    private String message;
+
+    public Exhausted(TxnId txnId, @Nullable RoutingKey homeKey, Ranges unavailable)
     {
         super(txnId, homeKey);
+        this.unavailable = unavailable;
     }
 
-    public Exhausted(TxnId txnId, @Nullable RoutingKey homeKey, String message)
+    public String getMessage()
     {
-        super(txnId, homeKey, message);
+        if (message == null)
+            message = unavailable == null ? "No more nodes to try" : "No more nodes to try for: " + unavailable;
+        return message;
     }
 
-    protected Exhausted(TxnId txnId, @Nullable RoutingKey homeKey, Exhausted cause)
+    Exhausted(TxnId txnId, @Nullable RoutingKey homeKey, Ranges unavailable, Exhausted cause)
     {
         super(txnId, homeKey, cause);
+        this.unavailable = unavailable;
     }
 
     @Override
     public Exhausted wrap()
     {
         checkState(this.getClass() == Exhausted.class);
-        return new Exhausted(txnId(), homeKey(), this);
+        return new Exhausted(txnId(), homeKey(), unavailable, this);
     }
 }

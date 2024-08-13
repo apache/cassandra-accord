@@ -33,7 +33,6 @@ import accord.messages.Propagate;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
-import accord.primitives.PartialRoute;
 import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Route;
@@ -50,7 +49,7 @@ import static accord.local.Status.KnownExecuteAt.ExecuteAtKnown;
 import static accord.local.Status.Outcome.Apply;
 import static accord.primitives.ProgressToken.APPLIED;
 import static accord.primitives.ProgressToken.INVALIDATED;
-import static accord.primitives.ProgressToken.TRUNCATED;
+import static accord.primitives.ProgressToken.TRUNCATED_DURABLE_OR_INVALIDATED;
 import static accord.primitives.Route.castToFullRoute;
 import static accord.utils.Invariants.illegalState;
 
@@ -110,7 +109,7 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
     protected boolean isSufficient(Id from, CheckStatusOk ok)
     {
         Ranges rangesForNode = topologies().forEpoch(txnId.epoch()).rangesForNode(from);
-        PartialRoute<?> route = this.route.slice(rangesForNode);
+        Route<?> route = this.route.slice(rangesForNode);
         return isSufficient(route, ok);
     }
 
@@ -178,7 +177,7 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                     {
                         // we might have only part of the full transaction, and a shard may have truncated;
                         // in this case we want to skip straight to apply, but only for the shards that haven't truncated
-                        Participants<?> sendTo = route.participants().subtract(full.truncatedResponse());
+                        Participants<?> sendTo = route.participants().without(full.truncatedResponse());
                         if (!sendTo.isEmpty())
                         {
                             known = full.knownFor(sendTo);
@@ -203,7 +202,7 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                         propagate = full;
                     }
 
-                    Propagate.propagate(node, txnId, sourceEpoch, success.withQuorum, route, null, propagate, (s, f) -> callback.accept(f == null ? propagate.toProgressToken() : null, f));
+                    Propagate.propagate(node, txnId, sourceEpoch, success.withQuorum, route, route, null, propagate, (s, f) -> callback.accept(f == null ? propagate.toProgressToken() : null, f));
                     break;
                 }
 
@@ -231,11 +230,11 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                 if (witnessedByInvalidation != null && witnessedByInvalidation.hasBeen(Status.PreCommitted))
                     throw illegalState("We previously invalidated, finding a status that should be recoverable");
 
-                Propagate.propagate(node, txnId, sourceEpoch, success.withQuorum, route, null, full, (s, f) -> callback.accept(f == null ? INVALIDATED : null, f));
+                Propagate.propagate(node, txnId, sourceEpoch, success.withQuorum, route, route, null, full, (s, f) -> callback.accept(f == null ? INVALIDATED : null, f));
                 break;
 
             case Erased:
-                Propagate.propagate(node, txnId, sourceEpoch, success.withQuorum, route, null, full, (s, f) -> callback.accept(f == null ? TRUNCATED : null, f));
+                Propagate.propagate(node, txnId, sourceEpoch, success.withQuorum, route, route, null, full, (s, f) -> callback.accept(f == null ? TRUNCATED_DURABLE_OR_INVALIDATED : null, f));
                 break;
         }
     }

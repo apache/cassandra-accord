@@ -168,6 +168,7 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
                 }
 
                 FetchResponse ok = (FetchResponse) reply;
+                // TODO (required): implement support for notReady and retryInFutureEpoch, or else have option of disabling this behaviour on recipient
                 Ranges received;
                 if (ok.unavailable != null)
                 {
@@ -177,7 +178,7 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
                         inflight.remove(key).cancel();
                         return;
                     }
-                    received = ranges.subtract(ok.unavailable);
+                    received = ranges.without(ok.unavailable);
                 }
                 else
                 {
