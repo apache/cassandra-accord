@@ -29,7 +29,6 @@ import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 import accord.api.Result;
-import accord.coordinate.CoordinationAdapter.Invoke;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.coordinate.tracking.RecoveryTracker;
 import accord.local.Node;
@@ -60,9 +59,6 @@ import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
 import static accord.coordinate.CoordinationAdapter.Factory.Step.InitiateRecovery;
-import static accord.coordinate.CoordinationAdapter.Invoke.execute;
-import static accord.coordinate.CoordinationAdapter.Invoke.persist;
-import static accord.coordinate.CoordinationAdapter.Invoke.stabilise;
 import static accord.coordinate.ExecutePath.RECOVER;
 import static accord.coordinate.Infer.InvalidateAndCallback.locallyInvalidateAndCallback;
 import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
@@ -271,7 +267,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 {
                     withCommittedDeps(executeAt, stableDeps -> {
                         // TODO (future development correctness): when writes/result are partially replicated, need to confirm we have quorum of these
-                        persist(adapter, node, tracker.topologies(), route, txnId, txn, executeAt, stableDeps, acceptOrCommitNotTruncated.writes, acceptOrCommitNotTruncated.result, null);
+                        adapter.persist(node, tracker.topologies(), route, txnId, txn, executeAt, stableDeps, acceptOrCommitNotTruncated.writes, acceptOrCommitNotTruncated.result, null);
                     });
                     accept(acceptOrCommitNotTruncated.result, null);
                     return;
@@ -280,7 +276,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 case Stable:
                 {
                     withCommittedDeps(executeAt, stableDeps -> {
-                        execute(adapter, node, tracker.topologies(), route, RECOVER, txnId, txn, executeAt, stableDeps, this);
+                        adapter.execute(node, tracker.topologies(), route, RECOVER, txnId, txn, executeAt, stableDeps, this);
                     });
                     return;
                 }
@@ -289,7 +285,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 case Committed:
                 {
                     withCommittedDeps(executeAt, committedDeps -> {
-                        stabilise(adapter, node, tracker.topologies(), route, ballot, txnId, txn, executeAt, committedDeps, this);
+                        adapter.stabilise(node, tracker.topologies(), route, ballot, txnId, txn, executeAt, committedDeps, this);
                     });
                     return;
                 }
@@ -408,7 +404,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
     private void propose(Timestamp executeAt, Deps deps)
     {
-        node.withEpoch(executeAt.epoch(), () -> Invoke.propose(adapter, node, route, ballot, txnId, txn, executeAt, deps, this));
+        node.withEpoch(executeAt.epoch(), () -> adapter.propose(node, null, route, ballot, txnId, txn, executeAt, deps, this));
     }
 
     private void retry()

@@ -21,6 +21,7 @@ package accord.coordinate;
 import java.util.function.Function;
 
 import accord.api.Result;
+import accord.coordinate.CoordinationAdapter.Adapters;
 import accord.coordinate.tracking.AbstractSimpleTracker;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.coordinate.tracking.RequestStatus;
@@ -30,7 +31,6 @@ import accord.messages.Callback;
 import accord.messages.ReadData;
 import accord.messages.ReadData.ReadReply;
 import accord.messages.WaitUntilApplied;
-import accord.primitives.EpochSupplier;
 import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Seekables;
@@ -43,7 +43,6 @@ import accord.utils.Invariants;
 import accord.utils.async.AsyncResults.SettableResult;
 
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
-import static accord.topology.TopologyManager.EpochSufficiencyMode.AT_MOST;
 
 public abstract class ExecuteSyncPoint<S extends Seekables<?, ?>> extends SettableResult<SyncPoint<S>> implements Callback<ReadReply>
 {
@@ -83,7 +82,7 @@ public abstract class ExecuteSyncPoint<S extends Seekables<?, ?>> extends Settab
         private long retryInFutureEpoch;
         public ExecuteExclusiveSyncPoint(Node node, SyncPoint<Ranges> syncPoint, Function<Topologies, AbstractSimpleTracker<?>> trackerSupplier)
         {
-            super(node, syncPoint, trackerSupplier);
+            super(node, syncPoint, Adapters.exclusiveSyncPoint().forExecution(node, syncPoint.route(), syncPoint.syncId, syncPoint.syncId, syncPoint.waitFor), trackerSupplier);
             Invariants.checkArgument(syncPoint.syncId.kind() == ExclusiveSyncPoint);
         }
 
@@ -142,9 +141,9 @@ public abstract class ExecuteSyncPoint<S extends Seekables<?, ?>> extends Settab
         this.tracker = tracker;
     }
 
-    ExecuteSyncPoint(Node node, SyncPoint<S> syncPoint, Function<Topologies, AbstractSimpleTracker<?>> trackerSupplier)
+    ExecuteSyncPoint(Node node, SyncPoint<S> syncPoint, Topologies topologies, Function<Topologies, AbstractSimpleTracker<?>> trackerSupplier)
     {
-        this(node, syncPoint, trackerSupplier, trackerSupplier.apply(node.topology().withUncompletedEpochs(syncPoint.route(), EpochSupplier.constant(syncPoint.earliestEpoch()), syncPoint.syncId, AT_MOST)));
+        this(node, syncPoint, trackerSupplier, trackerSupplier.apply(topologies));
     }
 
     ExecuteSyncPoint(Node node, SyncPoint<S> syncPoint, Function<Topologies, AbstractSimpleTracker<?>> trackerSupplier, AbstractSimpleTracker<?> tracker)

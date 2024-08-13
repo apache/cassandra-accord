@@ -71,18 +71,6 @@ public class SyncPoint<S extends Seekables<?, ?>>
         return syncId.epoch();
     }
 
-    public long earliestEpoch()
-    {
-        long epoch = syncId.epoch();
-        if (waitFor.keyDeps.txnIdCount() > 0)
-            epoch = Math.min(waitFor.keyDeps.txnId(0).epoch(), epoch);
-        if (waitFor.rangeDeps.txnIdCount() > 0)
-            epoch = Math.min(waitFor.rangeDeps.txnId(0).epoch(), epoch);
-        if (waitFor.directKeyDeps.txnIdCount() > 0)
-            epoch = Math.min(waitFor.directKeyDeps.txnId(0).epoch(), epoch);
-        return epoch;
-    }
-
     public FullRoute route()
     {
         return keysOrRanges.toRoute(homeKey);

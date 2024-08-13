@@ -24,12 +24,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.coordinate.CoordinationAdapter.Adapters;
+import accord.coordinate.CoordinationAdapter.Adapters.SyncPointAdapter;
 import accord.local.Node;
 import accord.messages.Apply;
 import accord.messages.PreAccept.PreAcceptOk;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
-import accord.primitives.EpochSupplier;
 import accord.primitives.FullRoute;
 import accord.primitives.Seekables;
 import accord.primitives.SyncPoint;
@@ -38,16 +38,12 @@ import accord.primitives.Txn;
 import accord.primitives.Txn.Kind;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
-import accord.topology.TopologyManager;
 import accord.utils.async.AsyncResult;
 
-import static accord.coordinate.CoordinationAdapter.Invoke.execute;
-import static accord.coordinate.CoordinationAdapter.Invoke.propose;
 import static accord.coordinate.ExecutePath.FAST;
 import static accord.coordinate.Propose.Invalidate.proposeAndCommitInvalidate;
 import static accord.primitives.Timestamp.mergeMax;
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
-import static accord.topology.TopologyManager.EpochSufficiencyMode.AT_MOST;
 import static accord.utils.Functions.foldl;
 import static accord.utils.Invariants.checkArgument;
 
@@ -64,9 +60,9 @@ public class CoordinateSyncPoint<S extends Seekables<?, ?>> extends CoordinatePr
 
     final CoordinationAdapter<SyncPoint<S>> adapter;
 
-    private CoordinateSyncPoint(Node node, TxnId txnId, EpochSupplier minEpoch, EpochSupplier maxEpoch, Txn txn, FullRoute<?> route, CoordinationAdapter<SyncPoint<S>> adapter)
+    private CoordinateSyncPoint(Node node, TxnId txnId, Topologies topologies, Txn txn, FullRoute<?> route, CoordinationAdapter<SyncPoint<S>> adapter)
     {
-        super(node, txnId, txn, route, node.topology().withOpenEpochs(route, minEpoch, maxEpoch, AT_MOST));
+        super(node, txnId, txn, route, topologies);
         this.adapter = adapter;
     }
 
@@ -75,19 +71,9 @@ public class CoordinateSyncPoint<S extends Seekables<?, ?>> extends CoordinatePr
         return coordinate(node, ExclusiveSyncPoint, keysOrRanges, Adapters.exclusiveSyncPoint());
     }
 
-    public static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> exclusive(Node node, EpochSupplier minEpoch, S keysOrRanges)
-    {
-        return coordinate(node, ExclusiveSyncPoint, minEpoch, keysOrRanges, Adapters.exclusiveSyncPoint());
-    }
-
     public static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> exclusive(Node node, TxnId txnId, S keysOrRanges)
     {
-        return exclusive(node, txnId, txnId, keysOrRanges);
-    }
-
-    public static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> exclusive(Node node, TxnId txnId, EpochSupplier minEpoch, S keysOrRanges)
-    {
-        return coordinate(node, txnId, minEpoch, txnId, keysOrRanges, Adapters.exclusiveSyncPoint());
+        return coordinate(node, txnId, keysOrRanges, Adapters.exclusiveSyncPoint());
     }
 
     public static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> inclusive(Node node, S keysOrRanges)
@@ -100,25 +86,18 @@ public class CoordinateSyncPoint<S extends Seekables<?, ?>> extends CoordinatePr
         return coordinate(node, Kind.SyncPoint, keysOrRanges, Adapters.inclusiveSyncPointBlocking());
     }
 
-    public static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> coordinate(Node node, Kind kind, S keysOrRanges, CoordinationAdapter<SyncPoint<S>> adapter)
+    public static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> coordinate(Node node, Kind kind, S keysOrRanges, SyncPointAdapter<S> adapter)
     {
         checkArgument(kind == Kind.SyncPoint || kind == ExclusiveSyncPoint);
         TxnId txnId = node.nextTxnId(kind, keysOrRanges.domain());
-        return node.withEpoch(txnId.epoch(), () -> coordinate(node, txnId, txnId, txnId, keysOrRanges, adapter)).beginAsResult();
+        return node.withEpoch(txnId.epoch(), () -> coordinate(node, txnId, keysOrRanges, adapter)).beginAsResult();
     }
 
-    public static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> coordinate(Node node, Kind kind, EpochSupplier minEpoch, S keysOrRanges, CoordinationAdapter<SyncPoint<S>> adapter)
-    {
-        checkArgument(kind == Kind.SyncPoint || kind == ExclusiveSyncPoint);
-        TxnId txnId = node.nextTxnId(kind, keysOrRanges.domain());
-        return node.withEpoch(txnId.epoch(), () -> coordinate(node, txnId, minEpoch, txnId, keysOrRanges, adapter)).beginAsResult();
-    }
-
-    private static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> coordinate(Node node, TxnId txnId, EpochSupplier minEpoch, EpochSupplier maxEpoch, S keysOrRanges, CoordinationAdapter<SyncPoint<S>> adapter)
+    private static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> coordinate(Node node, TxnId txnId, S keysOrRanges, SyncPointAdapter<S> adapter)
     {
         checkArgument(txnId.kind() == Kind.SyncPoint || txnId.kind() == ExclusiveSyncPoint);
         FullRoute<?> route = node.computeRoute(txnId, keysOrRanges);
-        CoordinateSyncPoint<S> coordinate = new CoordinateSyncPoint<>(node, txnId, minEpoch, maxEpoch, node.agent().emptyTxn(txnId.kind(), keysOrRanges), route, adapter);
+        CoordinateSyncPoint<S> coordinate = new CoordinateSyncPoint<>(node, txnId, adapter.forDecision(node, route, txnId), node.agent().emptyTxn(txnId.kind(), keysOrRanges), route, adapter);
         coordinate.start();
         return coordinate;
     }
@@ -141,9 +120,9 @@ public class CoordinateSyncPoint<S extends Seekables<?, ?>> extends CoordinatePr
         else
         {
             if (tracker.hasFastPathAccepted() && txnId.kind() == Kind.SyncPoint)
-                execute(adapter, node, topologies, route, FAST, txnId, txn, txnId, deps, this);
+                adapter.execute(node, topologies, route, FAST, txnId, txn, txnId, deps, this);
             else
-                propose(adapter, node, topologies, route, Ballot.ZERO, txnId, txn, executeAt, deps, this);
+                adapter.propose(node, topologies, route, Ballot.ZERO, txnId, txn, executeAt, deps, this);
         }
     }
 

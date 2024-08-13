@@ -38,7 +38,6 @@ import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 
-import static accord.coordinate.CoordinationAdapter.Invoke.execute;
 import static accord.coordinate.ExecutePath.SLOW;
 import static accord.coordinate.tracking.RequestStatus.Failed;
 import static accord.messages.Commit.Kind.CommitWithTxn;
@@ -142,7 +141,7 @@ public abstract class Stabilise<R> implements Callback<ReadReply>
 
     protected void onStabilised()
     {
-        execute(adapter(), node, allTopologies, route, SLOW, txnId, txn, executeAt, stabiliseDeps, callback);
+        adapter().execute(node, allTopologies, route, SLOW, txnId, txn, executeAt, stabiliseDeps, callback);
     }
 
     protected abstract CoordinationAdapter<R> adapter();

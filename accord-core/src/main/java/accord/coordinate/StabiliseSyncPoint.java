@@ -34,9 +34,9 @@ import accord.topology.Topologies;
 public class StabiliseSyncPoint<S extends Seekables<?, ?>> extends Stabilise<SyncPoint<S>>
 {
     final CoordinationAdapter<SyncPoint<S>> adapter;
-    StabiliseSyncPoint(CoordinationAdapter<SyncPoint<S>> adapter, Node node, Topologies coordinates, Topologies allTopologies, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps unstableDeps, BiConsumer<? super SyncPoint<S>, Throwable> callback)
+    StabiliseSyncPoint(CoordinationAdapter<SyncPoint<S>> adapter, Node node, Topologies coordinates, Topologies all, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps unstableDeps, BiConsumer<? super SyncPoint<S>, Throwable> callback)
     {
-        super(node, coordinates, allTopologies, route, txnId, ballot, txn, executeAt, unstableDeps, callback);
+        super(node, coordinates, all, route, txnId, ballot, txn, executeAt, unstableDeps, callback);
         this.adapter = adapter;
     }
 

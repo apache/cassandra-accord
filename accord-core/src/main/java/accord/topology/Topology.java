@@ -201,6 +201,11 @@ public class Topology
         return new Topology(epoch, subset);
     }
 
+    public boolean isEmpty()
+    {
+        return supersetIndexes.length == 0;
+    }
+
     public boolean isSubset()
     {
         return supersetIndexes.length < shards.length;

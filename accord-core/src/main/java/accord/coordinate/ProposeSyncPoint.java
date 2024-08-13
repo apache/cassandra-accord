@@ -35,8 +35,6 @@ import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import accord.utils.Faults;
 
-import static accord.coordinate.CoordinationAdapter.Invoke.stabilise;
-
 public class ProposeSyncPoint<S extends Seekables<?, ?>> extends Propose<SyncPoint<S>>
 {
     @SuppressWarnings("unused")
@@ -53,6 +51,6 @@ public class ProposeSyncPoint<S extends Seekables<?, ?>> extends Propose<SyncPoi
     void onAccepted()
     {
         Deps deps = Faults.SYNCPOINT_UNMERGED_DEPS ? this.deps : this.deps.with(Deps.merge(acceptOks, ok -> ok.deps));
-        stabilise(adapter, node, acceptTracker.topologies(), route, ballot, txnId, txn, executeAt, deps, callback);
+        adapter.stabilise(node, acceptTracker.topologies(), route, ballot, txnId, txn, executeAt, deps, callback);
     }
 }

@@ -36,8 +36,6 @@ import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
 import static accord.coordinate.CoordinationAdapter.Factory.Step.Continue;
-import static accord.coordinate.CoordinationAdapter.Invoke.execute;
-import static accord.coordinate.CoordinationAdapter.Invoke.propose;
 import static accord.coordinate.ExecutePath.FAST;
 import static accord.coordinate.Propose.Invalidate.proposeAndCommitInvalidate;
 
@@ -73,7 +71,7 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
         if (tracker.hasFastPathAccepted())
         {
             Deps deps = Deps.merge(oks, ok -> ok.witnessedAt.equals(txnId) ? ok.deps : null);
-            execute(executeAdapter(), node, topologies, route, FAST, txnId, txn, txnId, deps, settingCallback());
+            executeAdapter().execute(node, topologies, route, FAST, txnId, txn, txnId, deps, settingCallback());
             node.agent().metricsEventsListener().onFastPathTaken(txnId, deps);
         }
         else
@@ -93,7 +91,7 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
                 if (PreAccept.rejectExecuteAt(txnId, topologies))
                     proposeAndCommitInvalidate(node, Ballot.ZERO, txnId, route.homeKey(), route, executeAt, this);
                 else
-                    propose(proposeAdapter(), node, topologies, route, Ballot.ZERO, txnId, txn, executeAt, deps, this);
+                    proposeAdapter().propose(node, topologies, route, Ballot.ZERO, txnId, txn, executeAt, deps, this);
             }
 
             node.agent().metricsEventsListener().onSlowPathTaken(txnId, deps);

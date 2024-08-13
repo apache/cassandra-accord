@@ -32,7 +32,6 @@ import accord.topology.Topologies;
 import accord.utils.Faults;
 
 import static accord.coordinate.CoordinationAdapter.Factory.Step.Continue;
-import static accord.coordinate.CoordinationAdapter.Invoke.stabilise;
 
 class ProposeTxn extends Propose<Result>
 {
@@ -48,7 +47,7 @@ class ProposeTxn extends Propose<Result>
         if (!Faults.TRANSACTION_UNMERGED_DEPS)
             deps = deps.with(Deps.merge(acceptOks, ok -> ok.deps));
 
-        stabilise(adapter(), node, acceptTracker.topologies(), route, ballot, txnId, txn, executeAt, deps, callback);
+        adapter().stabilise(node, acceptTracker.topologies(), route, ballot, txnId, txn, executeAt, deps, callback);
     }
 
     protected CoordinationAdapter<Result> adapter()
