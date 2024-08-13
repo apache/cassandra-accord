@@ -247,7 +247,7 @@ public class RangeDepsTest
         for (int i = 0 ; i < 1000 ; ++i)
         {
             long seed = random.nextLong();
-//            long seed = -5637243003494330136L;
+//            long seed = 1953755836248097851L;
             System.out.println("Seed: " + seed);
             random.setSeed(seed);
             generate(random, new GenerateRanges(1000, 0.01f, 0.3f, 0.1f, 1f), 100, 1000)

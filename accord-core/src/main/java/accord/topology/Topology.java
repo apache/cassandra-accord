@@ -267,6 +267,7 @@ public class Topology
     {
         Ranges rangeSubset = ranges.select(newSubset);
         SimpleBitSet nodes = new SimpleBitSet(nodeIds.size());
+        Int2ObjectHashMap<NodeInfo> nodeLookup = new Int2ObjectHashMap<>(nodes.size(), 0.8f);
         for (int shardIndex : newSubset)
         {
             Shard shard = shards[shardIndex];
@@ -288,15 +289,18 @@ public class Topology
     Topology forSubset(int[] newSubset, Collection<Id> nodes)
     {
         Ranges rangeSubset = ranges.select(newSubset);
-        Id[] nodeIds = nodes.toArray(new Id[nodes.size()]);
-        Arrays.sort(nodeIds);
+        Id[] nodeIds = new Id[nodes.size()];
         Int2ObjectHashMap<NodeInfo> nodeLookup = new Int2ObjectHashMap<>(nodes.size(), 0.8f);
         for (Id id : nodes)
         {
             NodeInfo info = this.nodeLookup.get(id.id).forSubset(newSubset);
             if (info.ranges.isEmpty()) continue;
+            nodeIds[nodeLookup.size()] = id;
             nodeLookup.put(id.id, info);
         }
+        if (nodeLookup.size() != nodeIds.length)
+            nodeIds = Arrays.copyOf(nodeIds, nodeLookup.size());
+        Arrays.sort(nodeIds);
         return new Topology(global(), epoch, shards, ranges, new SortedArrayList<>(nodeIds), nodeLookup, rangeSubset, newSubset);
     }
 
@@ -515,7 +519,7 @@ public class Topology
 
     public List<Shard> shards()
     {
-        return new AbstractList<Shard>()
+        return new AbstractList<>()
         {
             @Override
             public Shard get(int i)

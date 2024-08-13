@@ -86,7 +86,7 @@ public class SearchableRangeList extends CheckpointIntervalArray<Range[], Range,
     }
 
     @Inline
-    public <P1, P2, P3, P4> int forEach(RoutableKey key, IndexedQuadConsumer<P1, P2, P3, P4> forEachScanOrCheckpoint, IndexedRangeQuadConsumer<P1, P2, P3, P4> forEachRange, P1 p1, P2 p2, P3 p3, P4 p4, int minIndex)
+    public <P1, P2, P3, P4> int forEachKey(RoutableKey key, IndexedQuadConsumer<P1, P2, P3, P4> forEachScanOrCheckpoint, IndexedRangeQuadConsumer<P1, P2, P3, P4> forEachRange, P1 p1, P2 p2, P3 p3, P4 p4, int minIndex)
     {
         if (ranges.length == 0 || minIndex == ranges.length)
             return minIndex;

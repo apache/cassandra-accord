@@ -30,6 +30,7 @@ import accord.primitives.Unseekables;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.topology.Topology;
+import accord.utils.SortedArrays.SortedArrayList;
 import org.agrona.collections.LongArrayList;
 import org.assertj.core.api.AbstractAssert;
 import org.assertj.core.api.Assertions;
@@ -122,9 +123,11 @@ public class ExtendedAssertions
             return myself;
         }
 
-        public TopologyAssert isHostsEqualTo(List<Node.Id> nodes)
+        public TopologyAssert isHostsEqualTo(SortedArrayList<Node.Id> nodes)
         {
             isNotNull();
+//            Collection<Node.Id> actualNodes = actual.nodes();
+//            if (!(actualNodes instanceof SortedArrayList)) actualNodes = SortedArrayList.copyUnsorted(nodes, Node.Id[]::new);
             objects.assertEqual(info, actual.nodes(), nodes);
             return myself;
         }
