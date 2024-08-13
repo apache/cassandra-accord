@@ -20,16 +20,24 @@ package accord.api;
 
 import javax.annotation.Nonnull;
 
+import java.util.concurrent.TimeUnit;
+
+import accord.api.ProgressLog.BlockedUntil;
 import accord.local.Command;
 import accord.local.Node;
+import accord.local.SafeCommandStore;
+import accord.messages.ReplyContext;
 import accord.primitives.Ranges;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
+import accord.topology.Topologies;
 
 /**
  * Facility for augmenting node behaviour at specific points
+ *
+ * TODO (expected): rationalise LocalConfig and Agent
  */
 public interface Agent extends UncaughtExceptionListener
 {
@@ -100,4 +108,39 @@ public interface Agent extends UncaughtExceptionListener
     {
         return EventsListener.NOOP;
     }
+
+    /**
+     * For each shard, select a small number of replicas that should be preferred for listening to progress updates
+     * from {@code from}. This should be 1-2 nodes that will be contacted preferentially for progress to minimise
+     * the number of messages we exchange. These nodes should be picked in a fashion so that there is a chain
+     * connecting all replicas of a shard together, e.g. in a ring picking the replicas directly behind you in the ring.
+     */
+    default Topologies selectPreferred(Node.Id from, Topologies to) { return to; }
+
+    long replyTimeout(ReplyContext replyContext, TimeUnit units);
+
+    /**
+     *  This method permits implementations to configure the time at which a local home shard will attempt
+     *  to coordinate a transaction to completion.
+     *
+     *  This should aim to prevent two home replicas from attempting to initiate coordination at the same time.
+     */
+    long attemptCoordinationDelay(Node node, SafeCommandStore safeStore, TxnId txnId, TimeUnit units, int retryCount);
+
+    /**
+     *  This method permits implementations to configure a delay for waiting to attempt to progress the local
+     *  state machine for a transaction by querying its remote peers.
+     *
+     *  This method should only attempt to minimise wasted work that would anyway be achieved by the transaction's
+     *  coordinator, while ensuring prompt when the coordinator considers the transaction to be durable.
+     */
+    long seekProgressDelay(Node node, SafeCommandStore safeStore, TxnId txnId, int retryCount, BlockedUntil blockedUntil, TimeUnit units);
+
+    /**
+     * When a peer is queries for a local state, asynchronous callbacks may be registered.
+     * Any asynchronous reply is not guaranteed to be delivered, and only one attempt is made.
+     * This method configures a retry timeout on the node querying its peer to renew any callback registrations
+     * and re-query the local state.
+     */
+    long retryAwaitTimeout(Node node, SafeCommandStore safeStore, TxnId txnId, int retryCount, BlockedUntil retrying, TimeUnit units);
 }

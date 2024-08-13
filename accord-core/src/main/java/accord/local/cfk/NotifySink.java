@@ -19,21 +19,21 @@
 package accord.local.cfk;
 
 import accord.api.Key;
+import accord.api.ProgressLog.BlockedUntil;
 import accord.local.Command;
 import accord.local.Commands;
 import accord.local.CommonAttributes;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.Status;
+import accord.local.SaveStatus;
 import accord.local.cfk.CommandsForKey.TxnInfo;
 import accord.primitives.Keys;
+import accord.primitives.RoutingKeys;
 import accord.primitives.Seekables;
 import accord.primitives.TxnId;
 
 import static accord.local.KeyHistory.COMMANDS;
-import static accord.local.SaveStatus.LocalExecution.WaitingToExecute;
-import static accord.local.cfk.CommandsForKey.InternalStatus.PREACCEPTED_OR_ACCEPTED_INVALIDATE;
 
 interface NotifySink
 {
@@ -41,7 +41,7 @@ interface NotifySink
 
     void notWaiting(SafeCommandStore safeStore, SafeCommand safeCommand, Key key);
 
-    void waitingOnCommit(SafeCommandStore safeStore, TxnInfo uncommitted, Key key);
+    void waitingOn(SafeCommandStore safeStore, TxnInfo txn, Key key, SaveStatus waitingOnStatus, BlockedUntil blockedUntil, boolean notifyCfk);
 
     class DefaultNotifySink implements NotifySink
     {
@@ -67,24 +67,19 @@ interface NotifySink
         }
 
         @Override
-        public void waitingOnCommit(SafeCommandStore safeStore, TxnInfo uncommitted, Key key)
+        public void waitingOn(SafeCommandStore safeStore, TxnInfo notify, Key key, SaveStatus waitingOnStatus, BlockedUntil blockedUntil, boolean notifyCfk)
         {
-            TxnId txnId = uncommitted.plainTxnId();
-            if (uncommitted.status.compareTo(PREACCEPTED_OR_ACCEPTED_INVALIDATE) < 0)
-            {
-                Keys keys = Keys.of(key);
-                PreLoadContext context = PreLoadContext.contextFor(txnId, keys);
-                if (safeStore.canExecuteWith(context)) doNotifyMaybeInvalidWaitingOnCommit(safeStore, txnId, key, keys);
-                else
-                    safeStore.commandStore().execute(PreLoadContext.contextFor(txnId, keys, COMMANDS), safeStore0 -> doNotifyMaybeInvalidWaitingOnCommit(safeStore0, txnId, key, keys)).begin(safeStore.agent());
-            }
-            else
-            {
-                safeStore.progressLog().waiting(txnId, WaitingToExecute, null, Keys.of(key).toParticipants());
-            }
+            TxnId txnId = notify.plainTxnId();
+            PreLoadContext context = PreLoadContext.contextFor(txnId);
+
+            if (safeStore.canExecuteWith(context)) doNotifyWaitingOn(safeStore, txnId, key, waitingOnStatus, blockedUntil, notifyCfk);
+            else safeStore.commandStore().execute(context, safeStore0 -> {
+                doNotifyWaitingOn(safeStore0, txnId, key, waitingOnStatus, blockedUntil, notifyCfk);
+            }).begin(safeStore.agent());
         }
 
-        private void doNotifyMaybeInvalidWaitingOnCommit(SafeCommandStore safeStore, TxnId txnId, Key key, Keys keys)
+        // TODO (desired): we could complicate our state machine to replicate PreCommitted here, so we can simply wait for waitingOnStatus.execution
+        private void doNotifyWaitingOn(SafeCommandStore safeStore, TxnId txnId, Key key, SaveStatus waitingOnStatus, BlockedUntil blockedUntil, boolean notifyCfk)
         {
             SafeCommand safeCommand = safeStore.unsafeGet(txnId);
             safeCommand.initialise();
@@ -92,22 +87,43 @@ interface NotifySink
             Seekables<?, ?> keysOrRanges = command.keysOrRanges();
             if (keysOrRanges == null || !keysOrRanges.contains(key))
             {
+                // make sure we will notify the CommandsForKey that's waiting
                 CommonAttributes.Mutable attrs = command.mutable();
+                Keys keys = Keys.of(key);
                 if (command.additionalKeysOrRanges() == null) attrs.additionalKeysOrRanges(keys);
                 else attrs.additionalKeysOrRanges(keys.with((Keys) command.additionalKeysOrRanges()));
                 safeCommand.update(safeStore, command.updateAttributes(attrs));
             }
-            if (command.hasBeen(Status.Committed))
+            if (command.saveStatus().compareTo(waitingOnStatus) >= 0)
             {
                 // if we're committed but not invalidated, that means EITHER we have raced with a commit+
-                // OR we adopted as a dependency a
-                safeStore.get(key).update(safeStore, safeCommand.current());
+                // OR we adopted as a dependency a <...?>
+                if (notifyCfk)
+                    doNotifyAlreadyReady(safeStore, txnId, key);
             }
             else
             {
-                // TODO (desired): we could complicate our state machine to replicate PreCommitted here, so we can simply wait for ReadyToExclude
-                safeStore.progressLog().waiting(txnId, WaitingToExecute, null, keys.toParticipants());
+                safeStore.progressLog().waiting(blockedUntil, safeStore, safeCommand, null, RoutingKeys.of(key.toUnseekable()));
             }
         }
+
+        private void doNotifyAlreadyReady(SafeCommandStore safeStore, TxnId txnId, Key key)
+        {
+            SafeCommandsForKey update = safeStore.ifLoadedAndInitialised(key);
+            if (update != null)
+            {
+                update.update(safeStore, safeStore.unsafeGet(txnId).current());
+            }
+            else
+            {
+                Keys keys = Keys.of(key);
+                //noinspection ConstantConditions,SillyAssignment
+                safeStore = safeStore; // prevent use in lambda
+                safeStore.commandStore().execute(PreLoadContext.contextFor(txnId, keys, COMMANDS), safeStore0 -> {
+                    doNotifyAlreadyReady(safeStore0, txnId, key);
+                }).begin(safeStore.agent());
+            }
+        }
+
     }
 }

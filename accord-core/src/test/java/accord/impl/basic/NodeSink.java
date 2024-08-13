@@ -111,7 +111,6 @@ public class NodeSink implements MessageSink
             case DELIVER_WITH_FAILURE:
                 deliver(to, id, message, link);
             case FAILURE:
-
                 if (action == Action.FAILURE)
                     parent.notifyDropped(self, to, id, message);
                 if (callback != null)

@@ -46,17 +46,19 @@ public interface Unseekables<K extends Unseekable> extends Iterable<K>, Routable
     Unseekables<K> intersecting(Unseekables<?> intersecting, Slice slice);
 
     @Override
+    Unseekables<K> slice(int from, int to);
+    @Override
     Unseekables<K> slice(Ranges ranges);
     @Override
     Unseekables<K> slice(Ranges ranges, Slice slice);
 
-    Unseekables<K> subtract(Ranges ranges);
-    Unseekables<K> subtract(Unseekables<?> subtract);
+    Unseekables<K> without(Ranges ranges);
+    Unseekables<K> without(Unseekables<?> subtract);
 
     /**
      * Return an object containing any {@code K} present in either of the original collections.
      *
-     * Differs from {@link Route#union} in that the parameter does not need to be a {@link Route}
+     * Differs from {@link Route#with} in that the parameter does not need to be a {@link Route}
      * and the result may not be a {@link Route}, as the new object would not know the range
      * covered by the additional keys or ranges.
      */
@@ -65,7 +67,7 @@ public interface Unseekables<K extends Unseekable> extends Iterable<K>, Routable
     UnseekablesKind kind();
 
     /**
-     * If both left and right are a Route, invoke {@link Route#union} on them. Otherwise invoke {@link #with}.
+     * If both left and right are a Route, invoke {@link Route#with} on them. Otherwise invoke {@link #with}.
      */
     static <K extends Unseekable> Unseekables<K> merge(Unseekables<K> left, Unseekables<K> right)
     {
@@ -94,7 +96,7 @@ public interface Unseekables<K extends Unseekable> extends Iterable<K>, Routable
             if (rightKind.isFullRoute())
                 return right;
 
-            return ((Route)left).union((Route)right);
+            return ((Route)left).with((Route)right);
         }
 
         return left.with(right);

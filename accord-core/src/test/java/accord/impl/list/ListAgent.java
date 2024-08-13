@@ -18,37 +18,54 @@
 
 package accord.impl.list;
 
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.IntSupplier;
 
 import accord.api.Agent;
+import accord.api.ProgressLog;
 import accord.api.Result;
 import accord.impl.mock.Network;
 import accord.local.Command;
 import accord.local.Node;
+import accord.local.SafeCommandStore;
+import accord.messages.ReplyContext;
 import accord.primitives.Keys;
 import accord.primitives.Ranges;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
+import accord.primitives.TxnId;
+import accord.utils.RandomSource;
 
 import static accord.local.Node.Id.NONE;
 import static accord.utils.Invariants.checkState;
 import static com.google.common.base.Functions.identity;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
 public class ListAgent implements Agent
 {
+    final RandomSource rnd;
     final long timeout;
     final Consumer<Throwable> onFailure;
     final Consumer<Runnable> retryBootstrap;
     final BiConsumer<Timestamp, Ranges> onStale;
+    final IntSupplier coordinationDelays;
+    final IntSupplier progressDelays;
+    final IntSupplier timeoutDelays;
 
-    public ListAgent(long timeout, Consumer<Throwable> onFailure, Consumer<Runnable> retryBootstrap, BiConsumer<Timestamp, Ranges> onStale)
+    public ListAgent(RandomSource rnd, long timeout, Consumer<Throwable> onFailure, Consumer<Runnable> retryBootstrap, BiConsumer<Timestamp, Ranges> onStale, IntSupplier coordinationDelays, IntSupplier progressDelays, IntSupplier timeoutDelays)
     {
+        this.rnd = rnd;
         this.timeout = timeout;
         this.onFailure = onFailure;
         this.retryBootstrap = retryBootstrap;
         this.onStale = onStale;
+        this.coordinationDelays = coordinationDelays;
+        this.progressDelays = progressDelays;
+        this.timeoutDelays = timeoutDelays;
     }
 
     @Override
@@ -118,6 +135,32 @@ public class ListAgent implements Agent
     public Txn emptySystemTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges)
     {
         return new Txn.InMemory(kind, keysOrRanges, new ListRead(identity(), false, Keys.EMPTY, Keys.EMPTY), new ListQuery(NONE, Integer.MIN_VALUE, false), null);
+    }
+
+    @Override
+    public long replyTimeout(ReplyContext replyContext, TimeUnit units)
+    {
+        return units.convert(timeoutDelays.getAsInt(), MILLISECONDS);
+    }
+
+    @Override
+    public long attemptCoordinationDelay(Node node, SafeCommandStore safeStore, TxnId txnId, TimeUnit units, int retryCount)
+    {
+        // TODO (required): meta randomise
+        return units.convert(rnd.nextInt(100, 1000), MILLISECONDS);
+    }
+
+    @Override
+    public long seekProgressDelay(Node node, SafeCommandStore safeStore, TxnId txnId, int retryCount, ProgressLog.BlockedUntil blockedUntil, TimeUnit units)
+    {
+        return units.convert(rnd.nextInt(100, 1000), MILLISECONDS);
+    }
+
+    @Override
+    public long retryAwaitTimeout(Node node, SafeCommandStore safeStore, TxnId txnId, int retryCount, ProgressLog.BlockedUntil retrying, TimeUnit units)
+    {
+        int retryDelay = Math.min(32, 1 << retryCount);
+        return units.convert(retryDelay, SECONDS);
     }
 
     public boolean collectMaxApplied()

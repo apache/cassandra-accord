@@ -51,6 +51,12 @@ public class ThreadPoolScheduler implements Scheduler
         {
             f.cancel(true);
         }
+
+        @Override
+        public boolean isDone()
+        {
+            return f.isDone();
+        }
     }
 
     static Runnable wrap(Runnable runnable)

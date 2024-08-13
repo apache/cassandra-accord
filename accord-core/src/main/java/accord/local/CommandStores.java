@@ -36,6 +36,7 @@ import accord.api.Agent;
 import accord.api.ConfigurationService.EpochReady;
 import accord.api.DataStore;
 import accord.api.Key;
+import accord.api.LocalListeners;
 import accord.api.ProgressLog;
 import accord.api.RoutingKey;
 import accord.local.CommandStore.EpochUpdateHolder;
@@ -48,7 +49,6 @@ import accord.primitives.Route;
 import accord.primitives.RoutingKeys;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
-import accord.primitives.Unseekables;
 import accord.topology.Topology;
 import accord.utils.Invariants;
 import accord.utils.MapReduce;
@@ -57,7 +57,6 @@ import accord.utils.RandomSource;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 
 import org.agrona.collections.Hashing;
 import org.agrona.collections.Int2ObjectHashMap;
@@ -67,7 +66,6 @@ import org.slf4j.LoggerFactory;
 
 import static accord.api.ConfigurationService.EpochReady.done;
 import static accord.local.PreLoadContext.empty;
-import static accord.primitives.EpochSupplier.constant;
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.utils.Invariants.checkArgument;
 import static accord.utils.Invariants.illegalState;
@@ -84,11 +82,12 @@ public abstract class CommandStores
     public interface Factory
     {
         CommandStores create(NodeTimeService time,
-                                Agent agent,
-                                DataStore store,
-                                RandomSource random,
-                                ShardDistributor shardDistributor,
-                                ProgressLog.Factory progressLogFactory);
+                             Agent agent,
+                             DataStore store,
+                             RandomSource random,
+                             ShardDistributor shardDistributor,
+                             ProgressLog.Factory progressLogFactory,
+                             LocalListeners.Factory listenersFactory);
     }
 
     private static class StoreSupplier
@@ -97,22 +96,24 @@ public abstract class CommandStores
         private final Agent agent;
         private final DataStore store;
         private final ProgressLog.Factory progressLogFactory;
+        private final LocalListeners.Factory listenersFactory;
         private final CommandStore.Factory shardFactory;
         private final RandomSource random;
 
-        StoreSupplier(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
+        StoreSupplier(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, CommandStore.Factory shardFactory)
         {
             this.time = time;
             this.agent = agent;
             this.store = store;
             this.random = random;
             this.progressLogFactory = progressLogFactory;
+            this.listenersFactory = listenersFactory;
             this.shardFactory = shardFactory;
         }
 
         CommandStore create(int id, EpochUpdateHolder rangesForEpoch)
         {
-            return shardFactory.create(id, time, agent, this.store, progressLogFactory, rangesForEpoch);
+            return shardFactory.create(id, time, agent, this.store, progressLogFactory, listenersFactory, rangesForEpoch);
         }
     }
 
@@ -179,7 +180,7 @@ public abstract class CommandStores
 
         public @Nonnull Ranges unsafeToReadAt(Timestamp at)
         {
-            return allAt(at).subtract(store.safeToReadAt(at));
+            return allAt(at).without(store.safeToReadAt(at));
         }
 
         public @Nonnull Ranges allAt(Timestamp at)
@@ -307,19 +308,18 @@ public abstract class CommandStores
                             .collect(Collectors.joining(", "));
         }
 
-        public @Nullable EpochSupplier latestEpochWithNewParticipants(long sinceEpoch, Unseekables<?> keysOrRanges)
+        public long latestEpochWithNewParticipants(long sinceEpoch, Routables<?> keysOrRanges)
         {
             int i = floorIndex(sinceEpoch);
-            long latest = -1;
+            long latest = sinceEpoch;
             Ranges existing = i < 0 ? Ranges.EMPTY : ranges[i];
             while (++i < ranges.length)
             {
-                if (ranges[i].subtract(existing).intersects(keysOrRanges))
+                if (ranges[i].without(existing).intersects(keysOrRanges))
                     latest = epochs[i];
                 existing = existing.with(ranges[i]);
             }
-
-            return latest == -1 ? null : constant(latest);
+            return latest;
         }
 
         public Ranges removed(long presentIn, long removedByInclusive)
@@ -329,7 +329,7 @@ public abstract class CommandStores
             Ranges removed = Ranges.EMPTY;
             while (i < maxi)
             {
-                removed = removed.with(ranges[i - 1].subtract(ranges[i]));
+                removed = removed.with(ranges[i - 1].without(ranges[i]));
                 ++i;
             }
             return removed;
@@ -367,9 +367,9 @@ public abstract class CommandStores
     }
 
     public CommandStores(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor,
-                         ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
+                         ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, CommandStore.Factory shardFactory)
     {
-        this(new StoreSupplier(time, agent, store, random, progressLogFactory, shardFactory), shardDistributor);
+        this(new StoreSupplier(time, agent, store, random, progressLogFactory, listenersFactory, shardFactory), shardDistributor);
     }
 
     public Topology local()
@@ -408,7 +408,7 @@ public abstract class CommandStores
             return new TopologyUpdate(prev, () -> done(epoch));
 
         Topology newLocalTopology = newTopology.forNode(supplier.time.id()).trim();
-        Ranges addedGlobal = newTopology.ranges().subtract(prev.global.ranges());
+        Ranges addedGlobal = newTopology.ranges().without(prev.global.ranges());
         if (!addedGlobal.isEmpty())
         {
             for (ShardHolder shard : prev.shards)
@@ -417,8 +417,8 @@ public abstract class CommandStores
             }
         }
 
-        Ranges added = newLocalTopology.ranges().subtract(prev.local.ranges());
-        Ranges subtracted = prev.local.ranges().subtract(newLocalTopology.ranges());
+        Ranges added = newLocalTopology.ranges().without(prev.local.ranges());
+        Ranges subtracted = prev.local.ranges().without(newLocalTopology.ranges());
         if (added.isEmpty() && subtracted.isEmpty())
         {
             Supplier<EpochReady> epochReady = () -> done(epoch);
@@ -438,7 +438,7 @@ public abstract class CommandStores
             if (!removeRanges.isEmpty())
             {
                 // TODO (required): This is updating the a non-volatile field in the previous Snapshot, why modify it at all, even with volatile the guaranteed visibility is weak even with mutual exclusion
-                shard.ranges = shard.ranges().withRanges(newTopology.epoch(), current.subtract(subtracted));
+                shard.ranges = shard.ranges().withRanges(newTopology.epoch(), current.without(subtracted));
                 shard.store.epochUpdateHolder.remove(epoch, shard.ranges, removeRanges);
                 bootstrapUpdates.add(shard.store.unbootstrap(epoch, removeRanges));
             }

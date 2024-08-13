@@ -54,15 +54,14 @@ public class Packet implements ReplyContext
         Read(ReadData.class),
         ReadOk(ReadData.ReadOk.class),
         ReadNack(ReadData.CommitOrReadNack.class),
-        WaitOnCommit(accord.messages.WaitOnCommit.class),
-        WaitOnCommitOk(accord.messages.WaitOnCommit.WaitOnCommitOk.class),
+        WaitOnCommit(Await.class),
+        WaitOnCommitOk(Await.AwaitOk.class),
         Recover(BeginRecovery.class),
         RecoverOk(BeginRecovery.RecoverOk.class),
         RecoverNack(BeginRecovery.RecoverNack.class),
         CheckStatus(CheckStatus.class),
         CheckStatusOk(CheckStatus.CheckStatusOk.class),
         CheckStatusOkFull(CheckStatus.CheckStatusOkFull.class),
-        InformOfTxnId(InformOfTxnId.class, Json.DEFAULT_ADAPTER),
         SimpleReply(accord.messages.SimpleReply.class, Json.DEFAULT_ADAPTER),
         FailureReply(Reply.FailureReply.class)
         ;

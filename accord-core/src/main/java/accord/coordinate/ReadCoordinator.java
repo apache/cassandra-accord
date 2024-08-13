@@ -40,6 +40,7 @@ import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
 import static accord.messages.CheckStatus.WithQuorum.NoQuorum;
 import static accord.utils.Invariants.debug;
 
+// TODO (expected): configure the number of initial requests we send
 public abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends ReadTracker implements Callback<Reply>
 {
     public enum Action
@@ -110,6 +111,8 @@ public abstract class ReadCoordinator<Reply extends accord.messages.Reply> exten
     protected abstract Action process(Id from, Reply reply);
     protected abstract void onDone(Success success, Throwable failure);
     protected abstract void contact(Id to);
+
+    // TODO (desired): this isn't very clean way of integrating these responses
     protected Ranges unavailable(Reply reply) { throw new UnsupportedOperationException(); }
 
     @Override
@@ -216,15 +219,20 @@ public abstract class ReadCoordinator<Reply extends accord.messages.Reply> exten
         if (failure == null)
         {
             Ranges unavailable = Ranges.EMPTY;
-            Ranges exhausted = Ranges.EMPTY;
             for (ReadShardTracker tracker : trackers)
             {
-                if (tracker.hasSucceeded())
+                if (tracker == null || tracker.hasSucceeded())
                     continue;
-                if (tracker.unavailable() != null) unavailable = unavailable.with(tracker.unavailable());
-                else exhausted = exhausted.with(Ranges.of(tracker.shard.range));
+
+                if (tracker.unavailable() != null)
+                {
+                    if (tracker.unavailable() != null)
+                        unavailable = unavailable.with(tracker.unavailable());
+                }
+                else unavailable = unavailable.with(Ranges.of(tracker.shard.range));
             }
-            failure = new Exhausted(txnId, null, (unavailable.isEmpty() ? "" : "unavailable: " + unavailable + (exhausted.isEmpty() ? "" : "; ")) + (exhausted.isEmpty() ? "" : "no response: " + exhausted));
+
+            failure = new Exhausted(txnId, null, unavailable);
         }
         finishOnFailure();
     }

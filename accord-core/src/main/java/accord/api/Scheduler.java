@@ -25,7 +25,20 @@ import java.util.concurrent.TimeUnit;
  */
 public interface Scheduler
 {
-    Scheduled CANCELLED = () -> {};
+    Scheduled CANCELLED = new Scheduled()
+    {
+        @Override
+        public void cancel()
+        {
+        }
+
+        @Override
+        public boolean isDone()
+        {
+            return true;
+        }
+    };
+
     Scheduler NEVER_RUN_SCHEDULED = new Scheduler()
     {
         @Override
@@ -50,6 +63,7 @@ public interface Scheduler
     interface Scheduled
     {
         void cancel();
+        boolean isDone();
     }
 
     default Scheduled recurring(Runnable run) { return recurring(run, 1L, TimeUnit.SECONDS); }

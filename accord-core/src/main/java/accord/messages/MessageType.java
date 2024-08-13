@@ -28,6 +28,8 @@ import static accord.messages.MessageType.Kind.LOCAL;
 
 /**
  * Meant to assist implementations with mapping accord messages to their own messaging systems.
+ *
+ * TODO (expected): no longer need hasSideEffects parameter. Also, why are we not using enums?
  */
 public class MessageType
 {
@@ -38,8 +40,8 @@ public class MessageType
     public static final MessageType ACCEPT_REQ                        = remote("ACCEPT_REQ",                        true );
     public static final MessageType ACCEPT_RSP                        = remote("ACCEPT_RSP",                        false);
     public static final MessageType ACCEPT_INVALIDATE_REQ             = remote("ACCEPT_INVALIDATE_REQ",             true );
-    public static final MessageType GET_DEPS_REQ                      = remote("GET_DEPS_REQ",                      false);
-    public static final MessageType GET_DEPS_RSP                      = remote("GET_DEPS_RSP",                      false);
+    public static final MessageType CALCULATE_DEPS_REQ                = remote("CALCULATE_DEPS_REQ",                false);
+    public static final MessageType CALCULATE_DEPS_RSP                = remote("CALCULATE_DEPS_RSP",                false);
     public static final MessageType GET_EPHEMERAL_READ_DEPS_REQ       = remote("GET_EPHEMERAL_READ_DEPS_REQ",       false);
     public static final MessageType GET_EPHEMERAL_READ_DEPS_RSP       = remote("GET_EPHEMERAL_READ_DEPS_RSP",       false);
     public static final MessageType GET_MAX_CONFLICT_REQ              = remote("GET_MAX_CONFLICT_REQ",              false);
@@ -60,12 +62,11 @@ public class MessageType
     public static final MessageType BEGIN_RECOVER_RSP                 = remote("BEGIN_RECOVER_RSP",                 false);
     public static final MessageType BEGIN_INVALIDATE_REQ              = remote("BEGIN_INVALIDATE_REQ",              true );
     public static final MessageType BEGIN_INVALIDATE_RSP              = remote("BEGIN_INVALIDATE_RSP",              false);
-    public static final MessageType WAIT_ON_COMMIT_REQ                = remote("WAIT_ON_COMMIT_REQ",                false);
-    public static final MessageType WAIT_ON_COMMIT_RSP                = remote("WAIT_ON_COMMIT_RSP",                false);
+    public static final MessageType AWAIT_REQ                         = remote("AWAIT_REQ",                         false);
+    public static final MessageType AWAIT_RSP                         = remote("AWAIT_RSP",                         false);
+    public static final MessageType ASYNC_AWAIT_COMPLETE_REQ          = remote("ASYNC_AWAIT_COMPLETE_RSP",          false);
     public static final MessageType WAIT_UNTIL_APPLIED_REQ            = remote("WAIT_UNTIL_APPLIED_REQ",            false);
-    public static final MessageType INFORM_OF_TXN_REQ                 = remote("INFORM_OF_TXN_REQ",                 true );
     public static final MessageType INFORM_DURABLE_REQ                = remote("INFORM_DURABLE_REQ",                true );
-    public static final MessageType INFORM_HOME_DURABLE_REQ           = remote("INFORM_HOME_DURABLE_REQ",           true );
     public static final MessageType CHECK_STATUS_REQ                  = remote("CHECK_STATUS_REQ",                  false);
     public static final MessageType CHECK_STATUS_RSP                  = remote("CHECK_STATUS_RSP",                  false);
     public static final MessageType FETCH_DATA_REQ                    = remote("FETCH_DATA_REQ",                    false);
@@ -75,12 +76,6 @@ public class MessageType
     public static final MessageType QUERY_DURABLE_BEFORE_REQ          = remote("QUERY_DURABLE_BEFORE_REQ",          false);
     public static final MessageType QUERY_DURABLE_BEFORE_RSP          = remote("QUERY_DURABLE_BEFORE_RSP",          false);
     public static final MessageType APPLY_THEN_WAIT_UNTIL_APPLIED_REQ = remote("APPLY_THEN_WAIT_UNTIL_APPLIED_REQ", true );
-
-    public static final MessageType PROPAGATE_PRE_ACCEPT_MSG          = local("PROPAGATE_PRE_ACCEPT_MSG", true);
-    public static final MessageType PROPAGATE_STABLE_MSG              = local("PROPAGATE_STABLE_MSG",     true);
-    public static final MessageType PROPAGATE_APPLY_MSG               = local("PROPAGATE_APPLY_MSG",      true);
-    public static final MessageType PROPAGATE_OTHER_MSG               = local("PROPAGATE_OTHER_MSG",      true);
-
 
     /**
      * LOCAL messages are not sent to remote nodes.

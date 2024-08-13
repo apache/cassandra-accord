@@ -44,8 +44,8 @@ class RecurringPendingRunnable implements PendingRunnable, Scheduled
         if (run != null)
         {
             run.run();
-            if (requeue != null)
-                requeue.add(this, delay, units);
+            if (requeue != null) requeue.add(this, delay, units);
+            else run = null;
         }
     }
 
@@ -60,6 +60,12 @@ class RecurringPendingRunnable implements PendingRunnable, Scheduled
         }
     }
 
+    @Override
+    public boolean isDone()
+    {
+        return run == null;
+    }
+
     public void onCancellation(Runnable run)
     {
         this.onCancellation = run;
@@ -68,6 +74,9 @@ class RecurringPendingRunnable implements PendingRunnable, Scheduled
     @Override
     public String toString()
     {
+        if (run == null)
+            return "Done/Cancelled";
+
         return run + " with " + delay + " " + units + " delay";
     }
 }

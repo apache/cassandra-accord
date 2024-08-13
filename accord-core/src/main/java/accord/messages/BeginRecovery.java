@@ -29,9 +29,9 @@ import accord.primitives.Deps;
 import accord.primitives.FullRoute;
 import accord.primitives.LatestDeps;
 import accord.primitives.PartialDeps;
-import accord.primitives.PartialRoute;
 import accord.primitives.PartialTxn;
 import accord.primitives.Ranges;
+import accord.primitives.Route;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
@@ -56,7 +56,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
 {
     public static class SerializationSupport
     {
-        public static BeginRecovery create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, PartialTxn partialTxn, Ballot ballot, @Nullable FullRoute<?> route)
+        public static BeginRecovery create(TxnId txnId, Route<?> scope, long waitForEpoch, PartialTxn partialTxn, Ballot ballot, @Nullable FullRoute<?> route)
         {
             return new BeginRecovery(txnId, scope, waitForEpoch, partialTxn, ballot, route);
         }
@@ -75,7 +75,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         this.route = route;
     }
 
-    private BeginRecovery(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, PartialTxn partialTxn, Ballot ballot, @Nullable FullRoute<?> route)
+    private BeginRecovery(TxnId txnId, Route<?> scope, long waitForEpoch, PartialTxn partialTxn, Ballot ballot, @Nullable FullRoute<?> route)
     {
         super(txnId, scope, waitForEpoch);
         this.partialTxn = partialTxn;
@@ -94,7 +94,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
     public RecoverReply apply(SafeCommandStore safeStore)
     {
         SafeCommand safeCommand = safeStore.get(txnId, txnId, route);
-        switch (Commands.recover(safeStore, safeCommand, txnId, partialTxn, route, progressKey, ballot))
+        switch (Commands.recover(safeStore, safeCommand, txnId, partialTxn, route, ballot))
         {
             default:
                 throw illegalState("Unhandled Outcome");

@@ -25,7 +25,6 @@ import java.util.Set;
 import accord.local.Node.Id;
 import accord.primitives.Range;
 import accord.primitives.RoutableKey;
-import accord.utils.SortedArrays.ExtendedSortedArrayList;
 import accord.utils.SortedArrays.SortedArrayList;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -39,7 +38,6 @@ public class Shard
 {
     public final Range range;
     public final SortedArrayList<Id> nodes;
-    public final ExtendedSortedArrayList<Id> sortedNodes;
     public final Set<Id> fastPathElectorate;
     public final Set<Id> joining;
     public final int maxFailures;
@@ -51,7 +49,6 @@ public class Shard
     {
         this.range = range;
         this.nodes = nodes;
-        this.sortedNodes = ExtendedSortedArrayList.sortedCopyOf(nodes, Id[]::new);
         this.maxFailures = maxToleratedFailures(nodes.size());
         this.fastPathElectorate = ImmutableSet.copyOf(fastPathElectorate);
         this.joining = checkArgument(ImmutableSet.copyOf(joining), Iterables.all(joining, nodes::contains),
@@ -126,7 +123,7 @@ public class Shard
 
     public boolean contains(Id id)
     {
-        return Collections.binarySearch(sortedNodes, id) >= 0;
+        return nodes.find(id) >= 0;
     }
 
     public boolean containsAll(List<Id> ids)

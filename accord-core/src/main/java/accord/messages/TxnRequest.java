@@ -20,13 +20,12 @@ package accord.messages;
 
 import java.util.function.BiFunction;
 
-import accord.api.RoutingKey;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommandStore;
 import accord.primitives.FullRoute;
-import accord.primitives.PartialRoute;
+import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Routables;
 import accord.primitives.Route;
@@ -37,78 +36,39 @@ import accord.topology.Topology;
 import accord.utils.Invariants;
 import accord.utils.MapReduceConsume;
 
-import static java.lang.Long.min;
-
 public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduceConsume<SafeCommandStore, R>
 {
     public static abstract class WithUnsynced<R> extends TxnRequest<R>
     {
-        public final long minUnsyncedEpoch; // TODO (low priority, clarity): can this just always be TxnId.epoch?
-        public final boolean doNotComputeProgressKey;
+        public final long minEpoch; // TODO (low priority, clarity): can this just always be TxnId.epoch?
 
         public WithUnsynced(Id to, Topologies topologies, TxnId txnId, FullRoute<?> route)
         {
             this(to, topologies, txnId, route, latestRelevantEpochIndex(to, topologies, route));
         }
 
+        public WithUnsynced(Id to, Topologies topologies, FullRoute<?> route)
+        {
+            this(to, topologies, TxnId.NONE, route, latestRelevantEpochIndex(to, topologies, route));
+        }
+
         protected WithUnsynced(Id to, Topologies topologies, TxnId txnId, FullRoute<?> route, int startIndex)
         {
-            this(to, topologies, txnId, txnId.epoch(), route, startIndex);
-        }
-
-        public WithUnsynced(Id to, Topologies topologies, long epoch, FullRoute<?> route)
-        {
-            this(to, topologies, TxnId.NONE, epoch, route, latestRelevantEpochIndex(to, topologies, route), true);
-        }
-
-        protected WithUnsynced(Id to, Topologies topologies, TxnId txnId, long epoch, FullRoute<?> route, int startIndex)
-        {
-            this(to, topologies, txnId, epoch, route, startIndex, false);
-        }
-
-        protected WithUnsynced(Id to, Topologies topologies, TxnId txnId, long epoch, FullRoute<?> route, int startIndex, boolean doNotComputeProgressKey)
-        {
             super(to, topologies, route, txnId, startIndex);
-            this.minUnsyncedEpoch = topologies.oldestEpoch();
-            this.doNotComputeProgressKey = doNotComputeProgressKey || doNotComputeProgressKey(topologies, startIndex, epoch, waitForEpoch());
-
-            Ranges ranges = topologies.forEpoch(epoch).rangesForNode(to);
-            if (doNotComputeProgressKey)
-            {
-                Invariants.checkState(txnId.equals(TxnId.NONE) || !route.intersects(ranges)); // confirm dest is not a replica on txnId.epoch
-            }
-            else if (Invariants.isParanoid())
-            {
-                long progressEpoch = Math.min(waitForEpoch(), epoch);
-                Ranges computesRangesOn = topologies.forEpoch(progressEpoch).rangesForNode(to);
-                if (computesRangesOn == null)
-                    Invariants.checkState(!route.intersects(ranges));
-                else
-                    Invariants.checkState(route.slice(computesRangesOn).equals(route.slice(ranges)));
-            }
+            this.minEpoch = topologies.oldestEpoch();
         }
 
-        protected WithUnsynced(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minUnsyncedEpoch, boolean doNotComputeProgressKey)
+        protected WithUnsynced(TxnId txnId, Route<?> scope, long waitForEpoch, long minEpoch)
         {
             super(txnId, scope, waitForEpoch);
-            this.minUnsyncedEpoch = minUnsyncedEpoch;
-            this.doNotComputeProgressKey = doNotComputeProgressKey;
-        }
-
-        @Override
-        RoutingKey progressKey()
-        {
-            if (doNotComputeProgressKey)
-                return null;
-            return super.progressKey();
+            this.minEpoch = minEpoch;
         }
     }
 
     public final TxnId txnId;
-    public final PartialRoute<?> scope;
+    public final Route<?> scope;
     public final long waitForEpoch;
     // set on receive only
-    protected transient RoutingKey progressKey;
     protected transient Node node;
     protected transient Id replyTo;
     protected transient ReplyContext replyContext;
@@ -128,7 +88,7 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
         this(txnId, computeScope(to, topologies, route, startIndex), computeWaitForEpoch(to, topologies, startIndex));
     }
 
-    public TxnRequest(TxnId txnId, PartialRoute<?> scope, long waitForEpoch)
+    public TxnRequest(TxnId txnId, Route<?> scope, long waitForEpoch)
     {
         Invariants.checkState(!scope.isEmpty());
         this.txnId = txnId;
@@ -140,7 +100,7 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
      * The portion of the complete Route that this TxnRequest applies to. Should represent the complete
      * range owned by the target node for the involved epochs.
      */
-    public PartialRoute<?> scope()
+    public Route<?> scope()
     {
         return scope;
     }
@@ -157,34 +117,12 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
     }
 
     @Override
-    public void preProcess(Node on, Id replyTo, ReplyContext replyContext)
+    public void process(Node on, Id replyTo, ReplyContext replyContext)
     {
         this.node = on;
         this.replyTo = replyTo;
         this.replyContext = replyContext;
-        this.progressKey = progressKey(); // TODO (low priority, clarity): not every class that extends TxnRequest needs this set
-    }
-
-    @Override
-    public void process(Node on, Id replyTo, ReplyContext replyContext)
-    {
-        preProcess(on, replyTo, replyContext);
         process();
-    }
-
-    RoutingKey progressKey()
-    {
-        return progressKey(node, waitForEpoch, txnId, scope);
-    }
-
-    public static RoutingKey progressKey(Node node, long waitForEpoch, TxnId txnId, Route<?> scope)
-    {
-        if (txnId == null)
-            return null;
-
-        // if waitForEpoch < txnId.epoch, then this replica's ownership is unchanged
-        long progressEpoch = min(waitForEpoch, txnId.epoch());
-        return node.trySelectProgressKey(progressEpoch, scope, scope.homeKey());
     }
 
     protected abstract void process();
@@ -257,14 +195,29 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
         return topologies.get(i - 1).epoch();
     }
 
-    public static PartialRoute<?> computeScope(Node.Id node, Topologies topologies, FullRoute<?> fullRoute)
+    public static Route<?> computeScope(Node.Id node, Topologies topologies, FullRoute<?> fullRoute)
     {
         return computeScope(node, topologies, fullRoute, latestRelevantEpochIndex(node, topologies, fullRoute));
     }
 
-    public static PartialRoute<?> computeScope(Node.Id node, Topologies topologies, Route<?> route, int startIndex)
+    public static Participants<?> computeScope(Node.Id node, Topologies topologies, Participants<?> participants)
     {
-        return computeScope(node, topologies, route, startIndex, Route::slice, PartialRoute::union);
+        return computeScope(node, topologies, participants, latestRelevantEpochIndex(node, topologies, participants));
+    }
+
+    public static Route<?> computeScope(Node.Id node, Topologies topologies, Route<?> route)
+    {
+        return computeScope(node, topologies, route, latestRelevantEpochIndex(node, topologies, route));
+    }
+
+    public static Route<?> computeScope(Node.Id node, Topologies topologies, Route<?> route, int startIndex)
+    {
+        return computeScope(node, topologies, route, startIndex, Route::slice, Route::with);
+    }
+
+    public static Participants<?> computeScope(Node.Id node, Topologies topologies, Participants<?> route, int startIndex)
+    {
+        return computeScope(node, topologies, route, startIndex, Participants::slice, Participants::with);
     }
 
     // TODO (low priority, clarity): move to Topologies

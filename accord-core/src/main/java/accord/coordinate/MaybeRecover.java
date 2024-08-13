@@ -63,7 +63,8 @@ public class MaybeRecover extends CheckShards<Route<?>>
 
     public boolean hasMadeProgress(CheckStatusOk ok)
     {
-        return ok != null && (ok.isCoordinating // TODO (required, liveness): make this coordinatingSince so can be pre-empted by others if stuck
+        // TODO (required, liveness): if Ballot.hlc is stale enough then preempt; also do not query isCoordinating, query directly the node that owns the ballot (or TxnId if Ballot is ZERO)
+        return ok != null && (ok.isCoordinating
                               || ok.toProgressToken().compareTo(prevProgress) > 0);
     }
 

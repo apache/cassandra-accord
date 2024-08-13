@@ -80,7 +80,7 @@ public class CoordinateGloballyDurable extends SettableResult<Void> implements C
     public void onFailure(Node.Id from, Throwable failure)
     {
         if (tracker.recordFailure(from) == RequestStatus.Failed)
-            tryFailure(new Exhausted(null, null));
+            tryFailure(new Exhausted(null, null, null));
     }
 
     @Override

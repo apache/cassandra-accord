@@ -16,28 +16,17 @@
  * limitations under the License.
  */
 
-package accord.config;
+package accord.impl.progresslog;
 
-import java.time.Duration;
-
-public interface LocalConfig
+/**
+ * The kinds of TxnState we support in the DefaultProgressLog. This is used to manage timers and other shared state.
+ */
+public enum TxnStateKind
 {
-    LocalConfig DEFAULT = new LocalConfig() {};
+    Waiting, Home;
 
-    default Duration getProgressLogScheduleDelay()
+    TxnStateKind other()
     {
-        return Duration.ofSeconds(1);
-    }
-
-    // How long before we start notifying waiters on an epoch of timeout,
-    default Duration epochFetchInitialTimeout()
-    {
-        return Duration.ofSeconds(10);
-    }
-
-    // How often to check for timeout, and once an epoch has timed out, how often we timeout new waiters
-    default Duration epochFetchWatchdogInterval()
-    {
-        return Duration.ofSeconds(10);
+        return this == Waiting ? Home : Waiting;
     }
 }

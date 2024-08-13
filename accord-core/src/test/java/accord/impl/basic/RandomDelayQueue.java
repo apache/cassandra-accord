@@ -26,6 +26,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import static accord.utils.Invariants.illegalArgument;
+
 public class RandomDelayQueue implements PendingQueue
 {
     public static class Factory implements Supplier<RandomDelayQueue>
@@ -119,7 +121,7 @@ public class RandomDelayQueue implements PendingQueue
     public void add(Pending item, long delay, TimeUnit units)
     {
         if (delay < 0)
-            throw new IllegalArgumentException("Delay must be positive or 0, but given " + delay);
+            throw illegalArgument("Delay must be positive or 0, but given " + delay);
         queue.add(new Item(now + units.toMillis(delay) + jitterMillis.getAsLong(), seq++, item));
     }
 

@@ -177,11 +177,11 @@ public abstract class AbstractRanges implements Iterable<Range>, Routables<Range
         }
     }
 
-    public Ranges subtract(Unseekables<?> keysOrRanges)
+    public Ranges without(Unseekables<?> keysOrRanges)
     {
         if (keysOrRanges.domain() == Routable.Domain.Key)
             keysOrRanges = ((AbstractUnseekableKeys)keysOrRanges).toRanges();
-        return subtract((AbstractRanges) keysOrRanges);
+        return without((AbstractRanges) keysOrRanges);
     }
 
     // returns ri in low 32 bits, ki in top, or -1 if no match found
@@ -219,15 +219,15 @@ public abstract class AbstractRanges implements Iterable<Range>, Routables<Range
     /**
      * Subtracts the given set of ranges from this
      */
-    public Ranges subtract(Ranges that)
+    public Ranges without(Ranges that)
     {
-        return subtract((AbstractRanges) that);
+        return without((AbstractRanges) that);
     }
 
     /**
      * Subtracts the given set of ranges from this
      */
-    private Ranges subtract(AbstractRanges that)
+    private Ranges without(AbstractRanges that)
     {
         if (that.isEmpty())
             return this instanceof Ranges ? (Ranges)this : ofSortedAndDeoverlappedUnchecked(ranges);

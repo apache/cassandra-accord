@@ -49,6 +49,7 @@ import accord.utils.TriFunction;
 import net.nicoulaj.compilecommand.annotations.DontInline;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
+import static accord.primitives.TxnId.NO_TXNIDS;
 import static accord.utils.ArrayBuffers.ObjectBuffers;
 import static accord.utils.ArrayBuffers.cachedInts;
 import static accord.utils.ArrayBuffers.cachedRanges;
@@ -57,7 +58,6 @@ import static accord.utils.RelationMultiMap.AbstractBuilder;
 import static accord.utils.RelationMultiMap.Adapter;
 import static accord.utils.RelationMultiMap.LinearMerger;
 import static accord.utils.RelationMultiMap.NO_INTS;
-import static accord.utils.RelationMultiMap.NO_TXNIDS;
 import static accord.utils.RelationMultiMap.SortedRelationList;
 import static accord.utils.RelationMultiMap.endOffset;
 import static accord.utils.RelationMultiMap.invert;

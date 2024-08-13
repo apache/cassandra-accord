@@ -37,17 +37,11 @@ public abstract class AbstractEpochRequest<R extends Reply> implements PreLoadCo
     }
 
     @Override
-    public void preProcess(Node on, Node.Id replyTo, ReplyContext replyContext)
+    public void process(Node on, Node.Id replyTo, ReplyContext replyContext)
     {
         this.node = on;
         this.replyTo = replyTo;
         this.replyContext = replyContext;
-    }
-
-    @Override
-    public void process(Node on, Node.Id replyTo, ReplyContext replyContext)
-    {
-        preProcess(on, replyTo, replyContext);
         process();
     }
 

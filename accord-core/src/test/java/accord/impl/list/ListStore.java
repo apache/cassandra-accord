@@ -36,7 +36,7 @@ import accord.coordinate.Invalidated;
 import accord.coordinate.Preempted;
 import accord.coordinate.Timeout;
 import accord.coordinate.TopologyMismatch;
-import accord.coordinate.tracking.AppliedTracker;
+import accord.coordinate.tracking.AllTracker;
 import accord.coordinate.tracking.RequestStatus;
 import accord.impl.basic.SimulatedFault;
 import accord.local.Node;
@@ -308,7 +308,7 @@ public class ListStore implements DataStore
                     success = success.with(fetched);
                     if (pendingFetches.containsKey(storeId))
                     {
-                        Ranges pending = pendingFetches.get(storeId).subtract(fetched);
+                        Ranges pending = pendingFetches.get(storeId).without(fetched);
                         if (pending.isEmpty()) pendingFetches.remove(storeId);
                         else                   pendingFetches.put(storeId, pending);
                     }
@@ -325,7 +325,7 @@ public class ListStore implements DataStore
                 {
                     if (pendingFetches.containsKey(storeId))
                     {
-                        Ranges pending = pendingFetches.get(storeId).subtract(ranges);
+                        Ranges pending = pendingFetches.get(storeId).without(ranges);
                         if (pending.isEmpty()) pendingFetches.remove(storeId);
                         else                   pendingFetches.put(storeId, pending);
                     }
@@ -377,8 +377,8 @@ public class ListStore implements DataStore
 
         Ranges previousRanges = previousTopology.rangesForNode(node.id());
 
-        Ranges added = updatedRanges.subtract(previousRanges);
-        Ranges removed = previousRanges.subtract(updatedRanges);
+        Ranges added = updatedRanges.without(previousRanges);
+        Ranges removed = previousRanges.without(updatedRanges);
         if (!added.isEmpty())
         {
             addedAts.add(new ChangeAt(epoch, added));
@@ -453,7 +453,7 @@ public class ListStore implements DataStore
             return;
         }
         pendingRemoves.remove(epoch);
-        this.allowed = this.allowed.subtract(removed);
+        this.allowed = this.allowed.without(removed);
         purgedAts.add(new PurgeAt(s, epoch, removed));
         // C* encodes keyspace/table within a Range, so Ranges being added/removed to the cluster are expected behaviors and not just local range movements.  To better simulate that
         // this logic attempts to purge the data once we know its "safe" (no read/writes pending).
@@ -497,33 +497,35 @@ public class ListStore implements DataStore
     private static class Await extends AsyncResults.SettableResult<SyncPoint<Ranges>> implements Callback<ReadReply>
     {
         private final Node node;
-        private final AppliedTracker tracker;
+        private final AllTracker tracker;
         private final SyncPoint<Ranges> exclusiveSyncPoint;
 
         private Await(Node node, long minEpoch, SyncPoint<Ranges> exclusiveSyncPoint)
         {
             Topologies topologies = node.topology().forEpoch(exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.sourceEpoch());
             this.node = node;
-            this.tracker = new AppliedTracker(topologies);
+            this.tracker = new AllTracker(topologies);
             this.exclusiveSyncPoint = exclusiveSyncPoint;
         }
 
         public static AsyncChain<SyncPoint<Ranges>> coordinate(Node node, long minEpoch, SyncPoint sp)
         {
-            Await coordinate = new Await(node, minEpoch, sp);
-            coordinate.start();
-            return coordinate.recover(t -> {
-                if (t.getClass() == SyncPointErased.class)
-                    return AsyncChains.success(null);
-                if (t instanceof Timeout ||
-                    // TODO (expected): why are we not simply handling Insufficient properly?
-                    t instanceof RuntimeException && "Insufficient".equals(t.getMessage()) ||
-                    t instanceof SimulatedFault)
-                    return coordinate(node, minEpoch, sp);
-                // cannot loop indefinitely
-                if (t instanceof RuntimeException && "Redundant".equals(t.getMessage()))
-                    return AsyncChains.success(null);
-                return null;
+            return node.withEpoch(sp.sourceEpoch(), () -> {
+                Await coordinate = new Await(node, minEpoch, sp);
+                coordinate.start();
+                return coordinate.recover(t -> {
+                    if (t.getClass() == SyncPointErased.class)
+                        return AsyncChains.success(null);
+                    if (t instanceof Timeout ||
+                        // TODO (expected): why are we not simply handling Insufficient properly?
+                        t instanceof RuntimeException && "Insufficient".equals(t.getMessage()) ||
+                        t instanceof SimulatedFault)
+                        return coordinate(node, minEpoch, sp);
+                    // cannot loop indefinitely
+                    if (t instanceof RuntimeException && "Redundant".equals(t.getMessage()))
+                        return AsyncChains.success(null);
+                    return null;
+                });
             });
         }
 

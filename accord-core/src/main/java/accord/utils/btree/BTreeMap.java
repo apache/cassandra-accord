@@ -57,7 +57,7 @@ public class BTreeMap<K, V> extends AbstractBTreeMap<K, V> implements NavigableM
 
         AbstractBTreeMap.Entry<K, V> entry = new AbstractBTreeMap.Entry<>(key, value);
         AbstractBTreeMap.Entry<K, V> existing;
-        if ((existing = BTree.find(tree, comparator, entry)) != null && !existing.equals(entry))
+        if ((existing = BTree.find(tree, (Comparator<Map.Entry<K,V>>) comparator, entry)) != null && !existing.equals(entry))
             throw new IllegalStateException("Map already contains " + key);
         return new BTreeMap<>(BTree.update(tree, new Object[]{ entry }, comparator, UpdateFunction.noOp()), comparator);
     }
@@ -75,7 +75,7 @@ public class BTreeMap<K, V> extends AbstractBTreeMap<K, V> implements NavigableM
         if (key == null)
             throw new NullPointerException();
 
-        return new BTreeMap<>(BTreeRemoval.remove(tree, comparator, new AbstractBTreeMap.Entry<>(key, null)), comparator);
+        return new BTreeMap<>(BTreeRemoval.<K, Map.Entry<K, V>>remove(tree, comparator.asymmetricKeyComparator, key), comparator);
     }
 
     @Override
@@ -94,7 +94,7 @@ public class BTreeMap<K, V> extends AbstractBTreeMap<K, V> implements NavigableM
     @Override
     public Map.Entry<K, V> floorEntry(K key)
     {
-        return BTree.floor(tree, comparator, new AbstractBTreeMap.Entry<>(key, null));
+        return BTree.floor(tree, comparator.asymmetricKeyComparator, key);
     }
 
     @Override
@@ -107,7 +107,7 @@ public class BTreeMap<K, V> extends AbstractBTreeMap<K, V> implements NavigableM
     @Override
     public Map.Entry<K, V> ceilingEntry(K key)
     {
-        return BTree.ceil(tree, comparator, new AbstractBTreeMap.Entry<>(key, null));
+        return BTree.ceil(tree, comparator.asymmetricKeyComparator, key);
     }
 
     @Override

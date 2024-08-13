@@ -25,6 +25,7 @@ import net.nicoulaj.compilecommand.annotations.Inline;
 
 import javax.annotation.Nonnull;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -90,6 +91,14 @@ public class Ranges extends AbstractRanges implements Iterable<Range>, Seekables
     public final Ranges slice(Ranges ranges)
     {
         return slice(ranges, Overlapping);
+    }
+
+    @Override
+    public final Ranges slice(int from, int to)
+    {
+        if (from == 0 && to == size())
+            return this;
+        return Ranges.ofSortedAndDeoverlapped(Arrays.copyOfRange(ranges, from, to));
     }
 
     @Override

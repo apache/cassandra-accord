@@ -32,12 +32,14 @@ import accord.api.Key;
 import accord.api.MessageSink;
 import accord.api.Scheduler;
 import accord.api.TopologySorter;
-import accord.config.LocalConfig;
-import accord.config.MutableLocalConfig;
+import accord.api.LocalConfig;
 import accord.coordinate.CoordinationAdapter;
+import accord.impl.DefaultRequestTimeouts;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.IntKey;
-import accord.impl.SimpleProgressLog;
+import accord.impl.DefaultLocalListeners;
+import accord.impl.progresslog.DefaultProgressLogs;
+import accord.impl.DefaultRemoteListeners;
 import accord.impl.SizeOfIntersectionSorter;
 import accord.impl.TestAgent;
 import accord.impl.list.ListQuery;
@@ -50,7 +52,6 @@ import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
-import accord.messages.LocalRequest;
 import accord.primitives.Keys;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
@@ -166,10 +167,9 @@ public class Utils
     {
         MockStore store = new MockStore();
         Scheduler scheduler = new ThreadPoolScheduler();
-        LocalConfig localConfig = new MutableLocalConfig();
+        LocalConfig localConfig = LocalConfig.DEFAULT;
         Node node = new Node(nodeId,
                              messageSink,
-                             LocalRequest::simpleHandler,
                              new MockConfigurationService(messageSink, EpochFunction.noop(), topology),
                              clock,
                              NodeTimeService.elapsedWrapperFromNonMonotonicSource(TimeUnit.MICROSECONDS, clock),
@@ -179,8 +179,12 @@ public class Utils
                              new DefaultRandom(),
                              scheduler,
                              SizeOfIntersectionSorter.SUPPLIER,
-                             SimpleProgressLog::new,
-                             InMemoryCommandStores.Synchronized::new, new CoordinationAdapter.DefaultFactory(),
+                             DefaultRemoteListeners::new,
+                             DefaultRequestTimeouts::new,
+                             DefaultProgressLogs::new,
+                             DefaultLocalListeners.Factory::new,
+                             InMemoryCommandStores.Synchronized::new,
+                             new CoordinationAdapter.DefaultFactory(),
                              localConfig);
         awaitUninterruptibly(node.unsafeStart());
         return node;

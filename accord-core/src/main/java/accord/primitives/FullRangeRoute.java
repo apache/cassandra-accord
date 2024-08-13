@@ -18,6 +18,8 @@
 
 package accord.primitives;
 
+import java.util.Arrays;
+
 import accord.api.RoutingKey;
 
 public class FullRangeRoute extends RangeRoute implements FullRoute<Range>
@@ -39,6 +41,14 @@ public class FullRangeRoute extends RangeRoute implements FullRoute<Range>
     public UnseekablesKind kind()
     {
         return UnseekablesKind.FullRangeRoute;
+    }
+
+    @Override
+    public Route<Range> slice(int from, int to)
+    {
+        if (from == 0 && to == size())
+            return this;
+        return new PartialRangeRoute(homeKey, Arrays.copyOfRange(ranges, from, to));
     }
 
     @Override

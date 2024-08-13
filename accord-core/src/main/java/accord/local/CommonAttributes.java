@@ -20,22 +20,24 @@ package accord.local;
 
 import javax.annotation.Nullable;
 
-import accord.api.VisibleForImplementation;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
+import accord.primitives.Participants;
 import accord.primitives.Route;
 import accord.primitives.Seekables;
 import accord.primitives.TxnId;
+import accord.utils.Invariants;
 
 public interface CommonAttributes
 {
     TxnId txnId();
     Status.Durability durability();
     Route<?> route();
+    // if we don't know a route, we may know some participants; if we know a route, this must return the same object as route()
+    Participants<?> participants();
     PartialTxn partialTxn();
     @Nullable Seekables<?, ?> additionalKeysOrRanges();
     PartialDeps partialDeps();
-    Listeners.Immutable durableListeners();
 
     default Mutable mutable()
     {
@@ -47,10 +49,10 @@ public interface CommonAttributes
         private TxnId txnId;
         private Status.Durability durability;
         private Route<?> route;
+        private Participants<?> participants; // if route != null, route == participants
         private PartialTxn partialTxn;
         private PartialDeps partialDeps;
         private Seekables<?, ?> additionalKeysOrRanges;
-        private Listeners listeners;
 
         public Mutable(TxnId txnId)
         {
@@ -62,10 +64,11 @@ public interface CommonAttributes
             this.txnId = attributes.txnId();
             this.durability = attributes.durability();
             this.route = attributes.route();
+            this.participants = attributes.participants();
+            Invariants.checkState(participants == route || route == null);
             this.partialTxn = attributes.partialTxn();
             this.partialDeps = attributes.partialDeps();
             this.additionalKeysOrRanges = attributes.additionalKeysOrRanges();
-            this.listeners = attributes.durableListeners();
         }
 
         @Override
@@ -107,6 +110,20 @@ public interface CommonAttributes
         public Mutable route(Route<?> route)
         {
             this.route = route;
+            this.participants = route;
+            return this;
+        }
+
+        @Override
+        public Participants<?> participants()
+        {
+            return participants;
+        }
+
+        public Mutable participants(Participants<?> participants)
+        {
+            Invariants.checkState(route == null);
+            this.participants = participants;
             return this;
         }
 
@@ -122,15 +139,15 @@ public interface CommonAttributes
             this.partialTxn = partialTxn;
             if (prev != null || additionalKeysOrRanges != null)
             {
-                Seekables<?, ?> removed = prev == null ? null : ((Seekables) prev.keys()).subtract(partialTxn.keys());
+                Seekables<?, ?> removed = prev == null ? null : ((Seekables) prev.keys()).without(partialTxn.keys());
                 if (prev != null && !removed.isEmpty())
                 {
                     if (additionalKeysOrRanges == null) additionalKeysOrRanges = removed;
-                    else additionalKeysOrRanges = ((Seekables)additionalKeysOrRanges).subtract(partialTxn.keys()).with(removed);
+                    else additionalKeysOrRanges = ((Seekables)additionalKeysOrRanges).without(partialTxn.keys()).with(removed);
                 }
                 else if (additionalKeysOrRanges != null)
                 {
-                    additionalKeysOrRanges = ((Seekables)additionalKeysOrRanges).subtract(partialTxn.keys());
+                    additionalKeysOrRanges = ((Seekables)additionalKeysOrRanges).without(partialTxn.keys());
                 }
             }
             return this;
@@ -162,44 +179,6 @@ public interface CommonAttributes
         public Mutable additionalKeysOrRanges(Seekables<?, ?> additionalKeysOrRanges)
         {
             this.additionalKeysOrRanges = additionalKeysOrRanges;
-            return this;
-        }
-
-
-        @Override
-        public Listeners.Immutable durableListeners()
-        {
-            if (listeners == null || listeners.isEmpty())
-                return Listeners.Immutable.EMPTY;
-            if (listeners instanceof Listeners.Immutable)
-                return (Listeners.Immutable) listeners;
-            return new Listeners.Immutable(listeners);
-        }
-
-        public Mutable addListener(Command.DurableAndIdempotentListener listener)
-        {
-            if (listeners == null)
-                listeners = new Listeners();
-            else if (listeners instanceof Listeners.Immutable)
-                listeners = new Listeners(listeners);
-            listeners.add(listener);
-            return this;
-        }
-
-        public Mutable removeListener(Command.Listener listener)
-        {
-            if (listener == null || listeners.isEmpty())
-                return this;
-            if (listeners instanceof Listeners.Immutable)
-                listeners = new Listeners(listeners);
-            listeners.remove(listener);
-            return this;
-        }
-
-        @VisibleForImplementation
-        public Mutable setListeners(Listeners.Immutable listeners)
-        {
-            this.listeners = listeners;
             return this;
         }
     }

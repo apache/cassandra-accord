@@ -171,7 +171,7 @@ class Bootstrap
                 if (!valid.intersects(invalidate))
                     return;
 
-                valid = valid.subtract(invalidate);
+                valid = valid.without(invalidate);
                 abort = fetch;
                 // only cancel the outer future if we have no more ranges to fetch
                 cancel = valid.isEmpty() ? this.cancel : null;
@@ -334,7 +334,7 @@ class Bootstrap
                 if (newFailures.isEmpty())
                     return;
 
-                valid = valid.subtract(newFailures);
+                valid = valid.without(newFailures);
                 hasFailed = valid.isEmpty();
             }
 
@@ -357,7 +357,7 @@ class Bootstrap
             if (state.safeToReadAt == null)
                 return;
 
-            Ranges newDone = fetched.slice(state.ranges.subtract(fetchedAndSafeToRead), Minimal);
+            Ranges newDone = fetched.slice(state.ranges.without(fetchedAndSafeToRead), Minimal);
             if (newDone.isEmpty())
                 return;
 
@@ -367,7 +367,7 @@ class Bootstrap
                 // then we are not a definitive bound for safely starting reads, so remove the range
                 if (overlap.startedAt > state.startedAt)
                 {
-                    newDone = newDone.subtract(overlap.ranges);
+                    newDone = newDone.without(overlap.ranges);
                     if (newDone.isEmpty())
                         return;
                 }
@@ -413,7 +413,7 @@ class Bootstrap
                 // normalise fetched and fetchedAndSafeToRead against remaining valid ranges before completion
                 fetched = fetched.slice(valid, Minimal);
                 fetchedAndSafeToRead = fetchedAndSafeToRead.slice(valid, Minimal);
-                retry = valid.subtract(fetchedAndSafeToRead);
+                retry = valid.without(fetchedAndSafeToRead);
                 completed = true;
             }
 
@@ -472,7 +472,7 @@ class Bootstrap
         Invariants.checkArgument(inProgress.contains(attempt));
         Invariants.checkArgument(attempt.fetched.equals(attempt.fetchedAndSafeToRead));
         inProgress.remove(attempt);
-        remaining = remaining.subtract(attempt.fetched);
+        remaining = remaining.without(attempt.fetched);
         if (inProgress.isEmpty() && remaining.isEmpty())
         {
             // TODO (now): this waits too long?
@@ -486,8 +486,8 @@ class Bootstrap
     // distinct from abort as triggered by ourselves when we no longer own the range
     synchronized void invalidate(Ranges invalidate)
     {
-        allValid = allValid.subtract(invalidate);
-        remaining = remaining.subtract(invalidate);
+        allValid = allValid.without(invalidate);
+        remaining = remaining.without(invalidate);
         for (Attempt attempt : inProgress)
             attempt.invalidate(invalidate);
     }

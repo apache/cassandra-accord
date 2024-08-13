@@ -79,14 +79,14 @@ public class Invariants
         throw illegalState(null);
     }
 
-    public static RuntimeException illegalArgument(String msg)
+    public static IllegalArgumentException illegalArgument(String msg)
     {
         throw new IllegalArgumentException(msg);
     }
 
-    private static void illegalArgument()
+    private static IllegalArgumentException illegalArgument()
     {
-        illegalArgument(null);
+        throw illegalArgument(null);
     }
 
     public static <T1, T2 extends T1> T2 checkType(T1 cast)
@@ -111,67 +111,67 @@ public class Invariants
     public static void paranoid(boolean condition)
     {
         if (isParanoid() && !condition)
-            illegalState();
+            throw illegalState();
     }
 
     public static void checkState(boolean condition)
     {
         if (!condition)
-            illegalState();
+            throw illegalState();
     }
 
     public static void checkState(boolean condition, Supplier<String> msg)
     {
         if (!condition)
-            illegalState(msg.get());
+            throw illegalState(msg.get());
     }
 
     public static void checkState(boolean condition, String msg)
     {
         if (!condition)
-            illegalState(msg);
+            throw illegalState(msg);
     }
 
     public static void checkState(boolean condition, String fmt, int p1)
     {
         if (!condition)
-            illegalState(format(fmt, p1));
+            throw illegalState(format(fmt, p1));
     }
 
     public static void checkState(boolean condition, String fmt, int p1, int p2)
     {
         if (!condition)
-            illegalState(format(fmt, p1, p2));
+            throw illegalState(format(fmt, p1, p2));
     }
 
     public static void checkState(boolean condition, String fmt, long p1)
     {
         if (!condition)
-            illegalState(format(fmt, p1));
+            throw illegalState(format(fmt, p1));
     }
 
     public static void checkState(boolean condition, String fmt, long p1, long p2)
     {
         if (!condition)
-            illegalState(format(fmt, p1, p2));
+            throw illegalState(format(fmt, p1, p2));
     }
 
     public static void checkState(boolean condition, String fmt, @Nullable Object p1)
     {
         if (!condition)
-            illegalState(format(fmt, p1));
+            throw illegalState(format(fmt, p1));
     }
 
     public static void checkState(boolean condition, String fmt, @Nullable Object p1, @Nullable Object p2)
     {
         if (!condition)
-            illegalState(format(fmt, p1, p2));
+            throw illegalState(format(fmt, p1, p2));
     }
 
     public static void checkState(boolean condition, String fmt, Object... args)
     {
         if (!condition)
-            illegalState(format(fmt, args));
+            throw illegalState(format(fmt, args));
     }
 
     public static <T> T nonNull(T param)
@@ -198,27 +198,27 @@ public class Invariants
     public static int isNatural(int input)
     {
         if (input < 0)
-            illegalState();
+            throw illegalState();
         return input;
     }
 
     public static long isNatural(long input)
     {
         if (input < 0)
-            illegalState();
+            throw illegalState();
         return input;
     }
 
     public static void checkArgument(boolean condition)
     {
         if (!condition)
-            illegalArgument();
+            throw illegalArgument();
     }
 
     public static void checkArgument(boolean condition, String msg)
     {
         if (!condition)
-            illegalArgument(msg);
+            throw illegalArgument(msg);
     }
 
     public static void checkArgument(boolean condition, String fmt, int p1)
@@ -348,6 +348,16 @@ public class Invariants
         if (index < 0)
             throw illegalState("Index %d expected to be non-negative", index);
         return index;
+    }
+
+    public static void checkArgumentSorted(int[] array, int start, int end)
+    {
+        Invariants.checkArgument(SortedArrays.isSorted(array, start, end));
+    }
+
+    public static void checkArgumentSorted(long[] array, int start, int end)
+    {
+        Invariants.checkArgument(SortedArrays.isSorted(array, start, end));
     }
 
     public static <O> O cast(Object o, Class<O> klass)

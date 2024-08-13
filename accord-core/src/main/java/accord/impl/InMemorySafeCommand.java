@@ -25,7 +25,6 @@ import javax.annotation.Nullable;
 
 import accord.impl.InMemoryCommandStore.GlobalCommand;
 import accord.local.Command;
-import accord.local.Listeners;
 import accord.local.SafeCommand;
 import accord.primitives.TxnId;
 
@@ -80,24 +79,6 @@ public class InMemorySafeCommand extends SafeCommand implements SafeState<Comman
         if (original == INIT)
             original = global.value();
         global.value(update);
-    }
-
-    @Override
-    public void addListener(Command.TransientListener listener)
-    {
-        global.addListener(listener);
-    }
-
-    @Override
-    public boolean removeListener(Command.TransientListener listener)
-    {
-        return global.removeListener(listener);
-    }
-
-    @Override
-    public Listeners<Command.TransientListener> transientListeners()
-    {
-        return global.transientListeners();
     }
 
     @Override

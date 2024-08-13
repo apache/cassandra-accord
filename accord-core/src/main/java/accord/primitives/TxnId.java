@@ -33,6 +33,8 @@ import static accord.utils.Invariants.illegalArgument;
 
 public class TxnId extends Timestamp
 {
+    public static final TxnId[] NO_TXNIDS = new TxnId[0];
+
     public static final TxnId NONE = new TxnId(0, 0, Id.NONE);
     public static final TxnId MAX = new TxnId(Long.MAX_VALUE, Long.MAX_VALUE, Id.MAX);
 
@@ -103,7 +105,12 @@ public class TxnId extends Timestamp
 
     public TxnId as(Kind kind)
     {
-        return new TxnId(epoch(), hlc(), kind, domain(), node);
+        return as(kind, domain());
+    }
+
+    public TxnId as(Domain domain)
+    {
+        return as(kind(), domain);
     }
 
     @VisibleForTesting

@@ -23,22 +23,23 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import javax.annotation.Nullable;
 
 import com.google.common.collect.Lists;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import accord.api.ProgressLog;
+import accord.api.LocalConfig;
+import accord.api.ProgressLog.NoOpProgressLog;
 import accord.api.RoutingKey;
 import accord.api.Scheduler;
 import accord.api.TestableConfigurationService;
-import accord.config.LocalConfig;
-import accord.config.MutableLocalConfig;
 import accord.coordinate.CoordinationAdapter;
+import accord.impl.DefaultRequestTimeouts;
 import accord.impl.InMemoryCommandStore;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.IntKey;
+import accord.impl.DefaultLocalListeners;
+import accord.impl.DefaultRemoteListeners;
 import accord.impl.SizeOfIntersectionSorter;
 import accord.impl.TestAgent;
 import accord.impl.TestAgent.RethrowAgent;
@@ -47,13 +48,10 @@ import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockConfigurationService;
 import accord.impl.mock.MockStore;
 import accord.local.Node.Id;
-import accord.local.SaveStatus.LocalExecution;
 import accord.primitives.FullKeyRoute;
 import accord.primitives.Keys;
-import accord.primitives.Participants;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
-import accord.primitives.Route;
 import accord.primitives.RoutingKeys;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
@@ -99,29 +97,15 @@ public class ImmutableCommandTest
         return (InMemoryCommandStore) createNode(ID1, storeSupport).unsafeByIndex(0);
     }
 
-    private static class NoOpProgressLog implements ProgressLog
-    {
-        @Override public void unwitnessed(TxnId txnId, ProgressShard shard) {}
-        @Override public void preaccepted(Command command, ProgressShard shard) {}
-        @Override public void accepted(Command command, ProgressShard shard) {}
-        @Override public void precommitted(Command command) {}
-        @Override public void stable(Command command, ProgressShard shard) {}
-        @Override public void readyToExecute(Command command) {}
-        @Override public void executed(Command command, ProgressShard shard) {}
-        @Override public void durable(Command command) {}
-        @Override public void waiting(SafeCommand blockedBy, LocalExecution blockedUntil, Route<?> blockedOnRoute, Participants<?> blockedOnParticipants) {}
-        @Override public void waiting(TxnId blockedBy, LocalExecution blockedUntil, @Nullable Route<?> blockedOnRoute, @Nullable Participants<?> blockedOnParticipants) {}
-        @Override public void clear(TxnId txnId) {}
-    }
-
     private static Node createNode(Id id, CommandStoreSupport storeSupport)
     {
         MockCluster.Clock clock = new MockCluster.Clock(100);
-        LocalConfig localConfig = new MutableLocalConfig();
-        Node node = new Node(id, null, null, new MockConfigurationService(null, (epoch, service) -> { }, storeSupport.local.get()),
+        LocalConfig localConfig = LocalConfig.DEFAULT;
+        Node node = new Node(id, null, new MockConfigurationService(null, (epoch, service) -> { }, storeSupport.local.get()),
                              clock, NodeTimeService.elapsedWrapperFromNonMonotonicSource(TimeUnit.MICROSECONDS, clock),
                              () -> storeSupport.data, new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()), new TestAgent(), new DefaultRandom(), Scheduler.NEVER_RUN_SCHEDULED,
-                             SizeOfIntersectionSorter.SUPPLIER, ignore -> ignore2 -> new NoOpProgressLog(), InMemoryCommandStores.Synchronized::new,
+                             SizeOfIntersectionSorter.SUPPLIER, DefaultRemoteListeners::new, DefaultRequestTimeouts::new, ignore -> ignore2 -> new NoOpProgressLog(), DefaultLocalListeners.Factory::new,
+                             InMemoryCommandStores.Synchronized::new,
                              new CoordinationAdapter.DefaultFactory(),
                              localConfig);
         awaitUninterruptibly(node.unsafeStart());
@@ -147,7 +131,7 @@ public class ImmutableCommandTest
         }
         SafeCommandStore safeStore = commands.beginOperation(PreLoadContext.contextFor(txnId, keys));
         SafeCommand  safeCommand = safeStore.get(txnId, txnId, ROUTE);
-        Commands.preaccept(safeStore, safeCommand, txnId, txnId.epoch(), txn.slice(FULL_RANGES, true), ROUTE, HOME_KEY);
+        Commands.preaccept(safeStore, safeCommand, txnId, txnId.epoch(), txn.slice(FULL_RANGES, true), ROUTE);
         Command command = safeStore.get(txnId).current();
         Assertions.assertEquals(Status.PreAccepted, command.status());
         Assertions.assertEquals(txnId, command.executeAt());
@@ -174,7 +158,7 @@ public class ImmutableCommandTest
         setTopologyEpoch(support.local, 2);
         ((TestableConfigurationService)node.configService()).reportTopology(TopologyUtils.withEpoch(support.local.get(), 2));
         Timestamp expectedTimestamp = Timestamp.fromValues(2, 110, ID1);
-        getUninterruptibly(commands.execute(context, (Consumer<? super SafeCommandStore>) store -> Commands.preaccept(store, store.get(txnId, txnId, ROUTE), txnId, txnId.epoch(), txn.slice(FULL_RANGES, true), ROUTE, HOME_KEY)));
+        getUninterruptibly(commands.execute(context, (Consumer<? super SafeCommandStore>) store -> Commands.preaccept(store, store.get(txnId, txnId, ROUTE), txnId, txnId.epoch(), txn.slice(FULL_RANGES, true), ROUTE)));
         commands.execute(PreLoadContext.contextFor(txnId, txn.keys()), safeStore -> {
             Command command = safeStore.get(txnId).current();
             Assertions.assertEquals(Status.PreAccepted, command.status());

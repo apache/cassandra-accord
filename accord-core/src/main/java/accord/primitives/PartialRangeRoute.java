@@ -18,10 +18,14 @@
 
 package accord.primitives;
 
+import java.util.Arrays;
+
 import accord.api.RoutingKey;
 import accord.utils.Invariants;
 
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_OVERLAPPING;
+import static accord.utils.Invariants.illegalArgument;
+import static accord.utils.Invariants.illegalState;
 
 /**
  * A slice of a Route that covers
@@ -41,12 +45,6 @@ public class PartialRangeRoute extends RangeRoute implements PartialRoute<Range>
         super(homeKey, ranges);
     }
 
-    //
-    private PartialRangeRoute(Object ignore, RoutingKey homeKey, Range[] ranges)
-    {
-        super(homeKey, ranges);
-    }
-
     @Override
     public UnseekablesKind kind()
     {
@@ -54,31 +52,57 @@ public class PartialRangeRoute extends RangeRoute implements PartialRoute<Range>
     }
 
     @Override
-    public PartialRangeRoute withHomeKey()
+    public Route<Range> with(Participants<Range> that)
     {
-        if (contains(homeKey))
-            return this;
+        Unseekables.UnseekablesKind kind = that.kind();
+        switch (kind)
+        {
+            default: throw new AssertionError("Unhandled kind: " + kind);
+            case FullKeyRoute:
+            case PartialKeyRoute:
+            case RoutingKeys:
+                throw illegalState("Incompatible route/participants: %s vs %s", kind(), kind);
 
-        Ranges with = Ranges.of(homeKey.asRange());
-        return new PartialRangeRoute(homeKey, union(MERGE_OVERLAPPING, this, with, null, null, (i1, i2, rs) -> rs));
+            case FullRangeRoute:
+                return (FullRangeRoute) that;
+
+            case PartialRangeRoute:
+                return union((PartialRangeRoute) that);
+
+            case RoutingRanges:
+                return union((AbstractRanges) that);
+        }
     }
 
     @Override
-    public Route<Range> union(Route<Range> that)
+    public Route<Range> slice(int from, int to)
     {
-        if (Route.isFullRoute(that)) return that;
+        if (from == 0 && to == size())
+            return this;
+        return new PartialRangeRoute(homeKey, Arrays.copyOfRange(ranges, from, to));
+    }
+
+    @Override
+    public PartialRangeRoute with(PartialRoute<Range> that)
+    {
+        if (!(that instanceof PartialRangeRoute))
+            throw illegalArgument("Unexpected PartialRoute<Range> type: " + (that == null ? null : that.getClass()));
+
         return union((PartialRangeRoute) that);
     }
 
-    @Override
-    public PartialRangeRoute union(PartialRoute<Range> with)
+    public PartialRangeRoute union(PartialRangeRoute that)
     {
-        if (!(with instanceof PartialRangeRoute))
-            throw new IllegalArgumentException();
-
-        PartialRangeRoute that = (PartialRangeRoute) with;
         Invariants.checkState(homeKey.equals(that.homeKey));
+        return union(MERGE_OVERLAPPING, this, that, this, that, (in1, in2, ranges) -> {
+            if (in1.ranges == ranges) return in1;
+            if (in2.ranges == ranges) return in2;
+            return new PartialRangeRoute(in1.homeKey, ranges);
+        });
+    }
 
-        return union(MERGE_OVERLAPPING, this, that, null, homeKey, (ignore, homeKey, ranges) -> new PartialRangeRoute(homeKey, ranges));
+    public PartialRangeRoute union(AbstractRanges that)
+    {
+        return union(MERGE_OVERLAPPING, this, that, this, homeKey, (in, homeKey, ranges) -> in.ranges == ranges ? in : new PartialRangeRoute(homeKey, ranges));
     }
 }

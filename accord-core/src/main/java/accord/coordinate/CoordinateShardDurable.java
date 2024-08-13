@@ -18,7 +18,7 @@
 
 package accord.coordinate;
 
-import accord.coordinate.tracking.AppliedTracker;
+import accord.coordinate.tracking.AllTracker;
 import accord.local.Node;
 import accord.messages.Callback;
 import accord.messages.ReadData.ReadReply;
@@ -32,7 +32,7 @@ public class CoordinateShardDurable extends ExecuteSyncPoint<Ranges> implements 
 {
     private CoordinateShardDurable(Node node, SyncPoint<Ranges> exclusiveSyncPoint)
     {
-        super(node, new AppliedTracker(node.topology().forEpoch(exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.sourceEpoch())), exclusiveSyncPoint);
+        super(node, new AllTracker(node.topology().forEpoch(exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.sourceEpoch())), exclusiveSyncPoint);
     }
 
     public static AsyncResult<SyncPoint<Ranges>> coordinate(Node node, SyncPoint<Ranges> exclusiveSyncPoint)

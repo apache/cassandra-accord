@@ -76,7 +76,7 @@ public class TopologyMismatch extends CoordinationFailed
 
     private static String buildMessage(Topology t, Unseekables<?> select)
     {
-        return String.format("Attempted to access %s that are no longer valid globally (%d -> %s)", select.subtract(t.ranges()), t.epoch(), t.ranges());
+        return String.format("Attempted to access %s that are no longer valid globally (%d -> %s)", select.without(t.ranges()), t.epoch(), t.ranges());
     }
 
     @Nullable

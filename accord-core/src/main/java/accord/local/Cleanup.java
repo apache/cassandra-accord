@@ -29,6 +29,7 @@ import static accord.local.RedundantBefore.NO_UPPER_BOUND;
 import static accord.local.RedundantBefore.PreBootstrapOrStale.FULLY;
 import static accord.local.RedundantStatus.NOT_OWNED;
 import static accord.local.SaveStatus.Erased;
+import static accord.local.SaveStatus.Invalidated;
 import static accord.local.SaveStatus.TruncatedApply;
 import static accord.local.SaveStatus.TruncatedApplyWithOutcome;
 import static accord.local.SaveStatus.Uninitialised;
@@ -48,6 +49,7 @@ public enum Cleanup
     NO(Uninitialised),
     TRUNCATE_WITH_OUTCOME(TruncatedApplyWithOutcome),
     TRUNCATE(TruncatedApply),
+    INVALIDATE(Invalidated),
     ERASE(Erased);
 
     public final SaveStatus appliesIfNot;
@@ -98,7 +100,7 @@ public enum Cleanup
 
         if (durableBefore.min(txnId) == UniversalOrInvalidated)
         {
-            if (status.hasBeen(PreCommitted) && !status.hasBeen(Applied)) // TODO (expected): may be stale
+            if (status.hasBeen(PreCommitted) && !status.hasBeen(Applied)) // TODO (expected): either stale or pre-bootstrap
                 illegalState("Loading universally-durable command that has been PreCommitted but not Applied");
             return Cleanup.ERASE;
         }
@@ -106,6 +108,8 @@ public enum Cleanup
         if (!Route.isFullRoute(route))
             return Cleanup.NO;
 
+        // TODO (required): should we apply additionalKeysOrRanges() to calculations here?
+        // TODO (required): enrich with additional epochs we know the command applies to
         // We first check if the command is redundant locally, i.e. whether it has been applied to all non-faulty replicas of the local shard
         // If not, we don't want to truncate its state else we may make catching up for these other replicas much harder
         RedundantStatus redundant = redundantBefore.status(txnId, toEpoch, route.participants());
@@ -134,8 +138,11 @@ public enum Cleanup
                 return Cleanup.NO;
             case SHARD_REDUNDANT:
                 if (enforceInvariants && status.hasBeen(PreCommitted) && !status.hasBeen(Applied) && redundantBefore.preBootstrapOrStale(txnId, toEpoch, route.participants()) != FULLY)
-                    illegalState("Loading redundant command that has been PreCommitted but not Applied");
+                    illegalState("Loading redundant command that has been PreCommitted but not Applied.");
         }
+
+        if (!status.hasBeen(PreCommitted))
+            return INVALIDATE;
 
         Durability min = durableBefore.min(txnId, route);
         switch (min)
@@ -145,6 +152,7 @@ public enum Cleanup
                 throw new AssertionError("Unexpected durability: " + min);
 
             case NotDurable:
+                // TODO (required): disambiguate INVALIDATE and TRUNCATE_WITH_OUTCOME, and impose stronger invariants on former
                 if (durability == Majority)
                     return Cleanup.TRUNCATE;
                 return Cleanup.TRUNCATE_WITH_OUTCOME;

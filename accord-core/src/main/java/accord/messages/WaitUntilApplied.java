@@ -18,9 +18,6 @@
 
 package accord.messages;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import accord.api.Data;
 import accord.local.Command;
 import accord.local.Node;
@@ -38,8 +35,6 @@ import static accord.local.SaveStatus.TruncatedApply;
  */
 public class WaitUntilApplied extends ReadData
 {
-    private static final Logger logger = LoggerFactory.getLogger(WaitUntilApplied.class);
-
     public static class SerializerSupport
     {
         public static WaitUntilApplied create(TxnId txnId, Participants<?> scope, long executeAtEpoch)
@@ -79,13 +74,15 @@ public class WaitUntilApplied extends ReadData
         long retryInLaterEpoch = ReadEphemeralTxnData.retryInLaterEpoch(executeAtEpoch, safeStore, command);
         if (retryInLaterEpoch > this.retryInLaterEpoch)
             this.retryInLaterEpoch = retryInLaterEpoch;
-        onOneSuccess(safeStore.commandStore(), unavailable(safeStore, command));
+        onOneSuccess(safeStore.commandStore().id(), unavailable(safeStore, command));
     }
 
     @Override
     protected ReadOk constructReadOk(Ranges unavailable, Data data)
     {
-        return new ReadOkWithFutureEpoch(unavailable, data, retryInLaterEpoch);
+        if (retryInLaterEpoch > 0)
+            return new ReadOkWithFutureEpoch(unavailable, data, retryInLaterEpoch);
+        return new ReadOk(unavailable, data);
     }
 
     @Override

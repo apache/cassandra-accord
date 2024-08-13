@@ -19,11 +19,14 @@
 package accord.primitives;
 
 import accord.coordinate.Outcome;
+import accord.local.Command;
 import accord.local.Status;
 import accord.local.Status.Durability;
 import accord.local.Status.Phase;
 
 import javax.annotation.Nonnull;
+
+import static accord.local.Status.AcceptedInvalidate;
 
 /**
  * A representation of activity on a command, so that peers may monitor a command to ensure it is making progress
@@ -34,7 +37,7 @@ public class ProgressToken implements Comparable<ProgressToken>, Outcome
     public static final ProgressToken INVALIDATED = new ProgressToken(Durability.MajorityOrInvalidated, Status.Invalidated, Ballot.ZERO, false);
     public static final ProgressToken APPLIED = new ProgressToken(Durability.NotDurable, Status.PreApplied, Ballot.ZERO, false);
     public static final ProgressToken DURABLE = new ProgressToken(Durability.Majority, Status.PreApplied, Ballot.ZERO, false);
-    public static final ProgressToken TRUNCATED = new ProgressToken(Durability.MajorityOrInvalidated, Status.Truncated, Ballot.ZERO, false);
+    public static final ProgressToken TRUNCATED_DURABLE_OR_INVALIDATED = new ProgressToken(Durability.MajorityOrInvalidated, Status.Truncated, Ballot.ZERO, false);
 
     public final Durability durability;
     public final Status status;
@@ -66,6 +69,15 @@ public class ProgressToken implements Comparable<ProgressToken>, Outcome
         return c;
     }
     
+    public int compareTo(@Nonnull Command that)
+    {
+        int c = this.durability.compareTo(that.durability());
+        if (c == 0) c = this.status.phase.compareTo(that.status().phase);
+        if (c == 0) c = this.promised.compareTo(that.promised());
+        if (c == 0 && this.isAccepted != (that.isAccepted() && that.promised().equals(that.acceptedOrCommitted()))) c = this.isAccepted ? 1 : -1;
+        return c;
+    }
+
     public ProgressToken merge(ProgressToken that)
     {
         Durability durability = this.durability.compareTo(that.durability) >= 0 ? this.durability : that.durability;
@@ -76,6 +88,29 @@ public class ProgressToken implements Comparable<ProgressToken>, Outcome
             return this;
         if (that.isSame(durability, status, promised, isAccepted))
             return that;
+        return new ProgressToken(durability, status, promised, isAccepted);
+    }
+
+    public ProgressToken merge(Command command)
+    {
+        Durability durability = command.durability();
+        if (this.durability.compareTo(command.durability()) > 0)
+            durability = this.durability;
+
+        Status status = command.status();
+        if (this.status.compareTo(status) > 0)
+            status = this.status;
+
+        Ballot promised = command.promised();
+        boolean isAccepted = status.hasBeen(AcceptedInvalidate) && command.acceptedOrCommitted().equals(command.promised());
+        if (this.promised.compareTo(promised) >= 0)
+        {
+            promised = this.promised;
+            isAccepted = this.isAccepted || (isAccepted && this.promised.equals(promised));
+        }
+
+        if (isSame(durability, status, promised, isAccepted))
+            return this;
         return new ProgressToken(durability, status, promised, isAccepted);
     }
 

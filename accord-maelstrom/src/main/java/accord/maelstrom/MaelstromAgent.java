@@ -18,15 +18,21 @@
 
 package accord.maelstrom;
 
+import java.util.concurrent.TimeUnit;
+
 import accord.api.Agent;
+import accord.api.ProgressLog;
 import accord.api.Result;
 import accord.local.Command;
 import accord.local.Node;
+import accord.local.SafeCommandStore;
+import accord.messages.ReplyContext;
 import accord.primitives.Keys;
 import accord.primitives.Ranges;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
+import accord.primitives.TxnId;
 
 import static accord.utils.Invariants.checkState;
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
@@ -100,5 +106,29 @@ public class MaelstromAgent implements Agent
     public Txn emptySystemTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges)
     {
         return new Txn.InMemory(kind, keysOrRanges, new MaelstromRead(Keys.EMPTY, Keys.EMPTY), new MaelstromQuery(Node.Id.NONE, -1), null);
+    }
+
+    @Override
+    public long replyTimeout(ReplyContext replyContext, TimeUnit units)
+    {
+        return units.convert(1L, SECONDS);
+    }
+
+    @Override
+    public long attemptCoordinationDelay(Node node, SafeCommandStore safeStore, TxnId txnId, TimeUnit units, int retryCount)
+    {
+        return units.convert(1L, SECONDS);
+    }
+
+    @Override
+    public long seekProgressDelay(Node node, SafeCommandStore safeStore, TxnId txnId, int retryCount, ProgressLog.BlockedUntil blockedUntil, TimeUnit units)
+    {
+        return units.convert(1L, SECONDS);
+    }
+
+    @Override
+    public long retryAwaitTimeout(Node node, SafeCommandStore safeStore, TxnId txnId, int retryCount, ProgressLog.BlockedUntil retrying, TimeUnit units)
+    {
+        return units.convert(1L, SECONDS);
     }
 }

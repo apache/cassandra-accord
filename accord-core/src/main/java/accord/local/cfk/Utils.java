@@ -32,8 +32,8 @@ import net.nicoulaj.compilecommand.annotations.Inline;
 
 import static accord.local.cfk.CommandsForKey.InternalStatus.ACCEPTED;
 import static accord.local.cfk.CommandsForKey.InternalStatus.COMMITTED;
-import static accord.local.cfk.CommandsForKey.NO_TXNIDS;
 import static accord.local.cfk.CommandsForKey.Unmanaged.Pending.COMMIT;
+import static accord.primitives.TxnId.NO_TXNIDS;
 import static accord.utils.ArrayBuffers.cachedTxnIds;
 import static accord.utils.SortedArrays.Search.FAST;
 

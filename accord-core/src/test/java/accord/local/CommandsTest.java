@@ -84,11 +84,6 @@ class CommandsTest
                     // the node selected does not matter and should not impact determinism, they all share the same scheduler
                     ((Cluster) nodeMap.values().stream().findFirst().get().scheduler()).onDone(() -> checkState(0, nodeMap.values()));
                 }
-                @Override
-                public void preProcess(Node on, Node.Id from, ReplyContext replyContext)
-                {
-                    // no-op
-                }
 
                 @Override
                 public void process(Node node, Node.Id from, ReplyContext replyContext)

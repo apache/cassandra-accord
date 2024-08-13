@@ -18,12 +18,12 @@
 
 package accord.local;
 
-import java.util.Iterator;
 import javax.annotation.Nullable;
 
 import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.Key;
+import accord.api.LocalListeners;
 import accord.api.ProgressLog;
 import accord.api.RoutingKey;
 import accord.impl.ErasedSafeCommand;
@@ -41,6 +41,7 @@ import accord.primitives.Timestamp;
 import accord.primitives.Txn.Kind.Kinds;
 import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
+import accord.utils.Invariants;
 
 import static accord.local.Cleanup.NO;
 import static accord.local.KeyHistory.COMMANDS;
@@ -324,68 +325,29 @@ public abstract class SafeCommandStore
         return commandStore().redundantBefore().preBootstrapOrStale(command.txnId(), command.executeAtOrTxnId(), forKeys) == FULLY;
     }
 
-    public void notifyListeners(SafeCommand safeCommand)
+    public void registerListener(SafeCommand listeningTo, SaveStatus await, Status.KnownRoute route, TxnId waiting)
     {
-        Command command = safeCommand.current();
-        notifyListeners(safeCommand, command, command.durableListeners(), safeCommand.transientListeners());
+        Invariants.checkState(listeningTo.current().saveStatus().compareTo(await) < 0);
+        Invariants.checkState(!CommandsForKey.managesExecution(listeningTo.txnId()));
+        commandStore().listeners.register(listeningTo.txnId(), await, waiting);
     }
 
-    public void notifyListeners(SafeCommand safeCommand, Command command, Listeners<Command.DurableAndIdempotentListener> durableListeners, Listeners<Command.TransientListener> transientListeners)
+    public LocalListeners.Registered registerAndInvoke(TxnId txnId, RoutingKey someKey, LocalListeners.ComplexListener listener)
     {
-        Iterator<Command.DurableAndIdempotentListener> durableIterator = durableListeners.reverseIterator();
-        while (durableIterator.hasNext())
-        {
-            Command.DurableAndIdempotentListener listener = durableIterator.next();
-            notifyListener(this, safeCommand, command, listener);
-        }
-
-        Iterator<Command.TransientListener> transientIterator = transientListeners.reverseIterator();
-        while (transientIterator.hasNext())
-        {
-            Command.TransientListener listener = transientIterator.next();
-            notifyListener(this, safeCommand, command, listener);
-        }
+        LocalListeners.Registered registered = register(txnId, listener);
+        if (!listener.notify(this, get(txnId, someKey)))
+            registered.cancel();
+        return registered;
     }
 
-    public static void notifyListener(SafeCommandStore safeStore, SafeCommand safeCommand, Command command, Command.TransientListener listener)
+    public LocalListeners.Registered register(TxnId txnId, LocalListeners.ComplexListener listener)
     {
-        if (!safeCommand.transientListeners().contains(listener))
-            return;
-
-        PreLoadContext context = listener.listenerPreLoadContext(command.txnId());
-        if (safeStore.canExecuteWith(context))
-        {
-            listener.onChange(safeStore, safeCommand);
-        }
-        else
-        {
-            TxnId txnId = command.txnId();
-            safeStore.commandStore()
-                     .execute(context, safeStore2 -> {
-                         SafeCommand safeCommand2 = safeStore2.get(txnId);
-                         // listeners invocations may be triggered more than once asynchronously for different changes
-                         // so one pending invocation may unregister the listener prior to the second invocation running
-                         // so we check if the listener is still valid before running
-                         if (safeCommand2.transientListeners().contains(listener))
-                            listener.onChange(safeStore2, safeCommand2);
-                     })
-                     .begin(safeStore.agent());
-        }
+        return commandStore().listeners.register(txnId, listener);
     }
 
-    public static void notifyListener(SafeCommandStore safeStore, SafeCommand safeCommand, Command command, Command.DurableAndIdempotentListener listener)
+    public void notifyListeners(SafeCommand safeCommand, Command prev)
     {
-        PreLoadContext context = listener.listenerPreLoadContext(command.txnId());
-        if (safeStore.canExecuteWith(context))
-        {
-            listener.onChange(safeStore, safeCommand);
-        }
-        else
-        {
-            TxnId txnId = command.txnId();
-            safeStore.commandStore()
-                     .execute(context, safeStore2 -> listener.onChange(safeStore2, safeStore2.get(txnId)))
-                     .begin(safeStore.agent());
-        }
+        commandStore().listeners.notify(this, safeCommand, prev);
     }
+
 }

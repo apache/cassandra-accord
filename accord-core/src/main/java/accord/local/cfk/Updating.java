@@ -32,7 +32,6 @@ import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
-import accord.local.SafeCommandStore;
 import accord.local.Status;
 import accord.local.cfk.CommandsForKey.TxnInfo;
 import accord.primitives.Ballot;
@@ -51,7 +50,6 @@ import static accord.local.cfk.CommandsForKey.InternalStatus.COMMITTED;
 import static accord.local.cfk.CommandsForKey.InternalStatus.HISTORICAL;
 import static accord.local.cfk.CommandsForKey.InternalStatus.INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED;
 import static accord.local.cfk.CommandsForKey.InternalStatus.TRANSITIVELY_KNOWN;
-import static accord.local.cfk.CommandsForKey.NO_TXNIDS;
 import static accord.local.cfk.CommandsForKey.managesExecution;
 import static accord.local.cfk.CommandsForKey.Unmanaged.Pending.APPLY;
 import static accord.local.cfk.CommandsForKey.Unmanaged.Pending.COMMIT;
@@ -66,6 +64,7 @@ import static accord.local.cfk.Utils.validateMissing;
 import static accord.primitives.Txn.Kind.EphemeralRead;
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static accord.primitives.Txn.Kind.Write;
+import static accord.primitives.TxnId.NO_TXNIDS;
 import static accord.utils.ArrayBuffers.cachedTxnIds;
 import static accord.utils.Invariants.Paranoia.NONE;
 import static accord.utils.Invariants.Paranoia.SUPERLINEAR;
@@ -141,14 +140,14 @@ class Updating
             for (int i = 0 ; i < additionsBeforeOldUndecided ; ++i)
             {
                 TxnId addition = additions[i];
-                if (!managesExecution(addition))
+                if (!managesExecution(addition) || cfk.isPreBootstrap(addition))
                     continue;
 
                 newMinUndecided = addition;
                 break;
             }
 
-            if ((newMinUndecided == null || newMinUndecided.compareTo(newInfo) > 0) && newInfo.status.compareTo(COMMITTED) < 0 && managesExecution(newInfo))
+            if ((newMinUndecided == null || newMinUndecided.compareTo(newInfo) > 0) && newInfo.status.compareTo(COMMITTED) < 0 && managesExecution(newInfo) && !cfk.isPreBootstrap(newInfo))
                 newMinUndecided = newInfo;
 
             if (newMinUndecided != null && curMinUndecided != null && curMinUndecided.compareTo(newMinUndecided) < 0)
@@ -158,17 +157,22 @@ class Updating
                 ++additionsBeforeOldUndecided;
 
             if (newMinUndecided == null && curMinUndecided == curInfo)
-                newMinUndecidedById = nextUndecided(newById, insertPos + 1);
+                newMinUndecidedById = nextUndecided(newById, insertPos + 1, cfk);
             else if (newMinUndecided == null && newMinUndecidedById >= 0)
                 newMinUndecidedById += additionsBeforeOldUndecided;
             else if (newMinUndecided == newInfo)
-                newMinUndecidedById = insertPos + -1 - Arrays.binarySearch(additions, 0, additionCount, newInfo);
+                newMinUndecidedById = insertPos + (-1 - Arrays.binarySearch(additions, 0, additionCount, newInfo));
             else if (newMinUndecided != null)
                 newMinUndecidedById = Arrays.binarySearch(newById, 0, newById.length, newMinUndecided);
         }
 
         cachedTxnIds().forceDiscard(additions, additionCount + prunedIds.length);
-        return PostProcess.LoadPruned.load(prunedIds, cfk.update(newById, newMinUndecidedById, newCommittedByExecuteAt, newMaxAppliedWriteByExecuteAt, newLoadingPruned, plainTxnId, curInfo, newInfo));
+
+        int newPrunedBeforeById = cfk.prunedBeforeById;
+        if (curInfo == null && insertPos <= cfk.prunedBeforeById)
+            ++newPrunedBeforeById;
+
+        return PostProcess.LoadPruned.load(prunedIds, cfk.update(newById, newMinUndecidedById, newCommittedByExecuteAt, newMaxAppliedWriteByExecuteAt, newLoadingPruned, newPrunedBeforeById, curInfo, newInfo));
     }
 
     static Object computeInfoAndAdditions(CommandsForKey cfk, int insertPos, int updatePos, TxnId txnId, CommandsForKey.InternalStatus newStatus, Command command)
@@ -182,7 +186,7 @@ class Updating
 
         Timestamp depsKnownBefore = newStatus.depsKnownBefore(txnId, executeAt);
         SortedCursor<TxnId> deps = command.partialDeps().txnIds(cfk.key());
-        deps.find(cfk.redundantBefore().shardRedundantBefore());
+        deps.find(cfk.redundantBefore());
 
         return Updating.computeInfoAndAdditions(cfk.byId, insertPos, updatePos, txnId, newStatus, ballot, executeAt, depsKnownBefore, deps);
     }
@@ -307,14 +311,14 @@ class Updating
             System.arraycopy(byId, 0, newById, 0, pos);
             newById[pos] = newInfo;
             System.arraycopy(byId, pos, newById, pos + 1, byId.length - pos);
-            if (managesExecution(newInfo))
+            if (managesExecution(newInfo) && cfk.isPostBootstrap(newInfo))
             {
                 if (newInfo.status.compareTo(COMMITTED) >= 0)
                 {
                     if (newMinUndecidedById < 0 || pos <= newMinUndecidedById)
                     {
                         if (pos < newMinUndecidedById) ++newMinUndecidedById;
-                        else newMinUndecidedById = nextUndecided(newById, pos + 1);
+                        else newMinUndecidedById = nextUndecided(newById, pos + 1, cfk);
                     }
                 }
                 else
@@ -331,7 +335,7 @@ class Updating
             newById = byId.clone();
             newById[pos] = newInfo;
             if (pos == newMinUndecidedById && curInfo.status.compareTo(COMMITTED) < 0 && newInfo.status.compareTo(COMMITTED) >= 0)
-                newMinUndecidedById = nextUndecided(newById, pos + 1);
+                newMinUndecidedById = nextUndecided(newById, pos + 1, cfk);
         }
 
         if (loadingAsPrunedFor == null)
@@ -354,7 +358,11 @@ class Updating
         if (testParanoia(SUPERLINEAR, NONE, LOW) && curInfo == null && newInfo.status.compareTo(COMMITTED) < 0)
             validateMissing(newById, NO_TXNIDS, 0, curInfo, newInfo, loadingAsPrunedFor);
 
-        return cfk.update(newById, newMinUndecidedById, newCommittedByExecuteAt, newMaxAppliedWriteByExecuteAt, newLoadingPruned, plainTxnId, curInfo, newInfo);
+        int newPrunedBeforeById = cfk.prunedBeforeById;
+        if (curInfo == null && pos <= cfk.prunedBeforeById)
+            ++newPrunedBeforeById;
+
+        return cfk.update(newById, newMinUndecidedById, newCommittedByExecuteAt, newMaxAppliedWriteByExecuteAt, newLoadingPruned, newPrunedBeforeById, curInfo, newInfo);
     }
 
     /**
@@ -573,13 +581,13 @@ class Updating
         {
             return Arrays.binarySearch(committedByExecuteAt, 0, committedByExecuteAt.length, curInfo, TxnInfo::compareExecuteAt);
         }
-        return committedByExecuteAt.length;
+        return Integer.MAX_VALUE;
     }
 
     private static TxnInfo[] updateCommittedByExecuteAt(CommandsForKey cfk, int pos, TxnInfo newInfo, boolean wasPruned)
     {
         TxnInfo[] committedByExecuteAt = cfk.committedByExecuteAt;
-        if (pos == committedByExecuteAt.length)
+        if (pos == Integer.MAX_VALUE)
             return committedByExecuteAt;
 
         if (newInfo.status != INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED)
@@ -603,7 +611,7 @@ class Updating
                 int maxAppliedWriteByExecuteAt = cfk.maxAppliedWriteByExecuteAt;
                 if (pos <= maxAppliedWriteByExecuteAt)
                 {
-                    if (pos < maxAppliedWriteByExecuteAt && !wasPruned && cfk.redundantBefore.bootstrappedAt.compareTo(newInfo) < 0)
+                    if (pos < maxAppliedWriteByExecuteAt && !wasPruned && cfk.isPostBootstrap(newInfo))
                     {
                         for (int i = pos; i <= maxAppliedWriteByExecuteAt; ++i)
                         {
@@ -631,7 +639,7 @@ class Updating
     private static int updateMaxAppliedWriteByExecuteAt(CommandsForKey cfk, int pos, TxnInfo newInfo, TxnInfo[] newCommittedByExecuteAt, boolean wasPruned)
     {
         int maxAppliedWriteByExecuteAt = cfk.maxAppliedWriteByExecuteAt;
-        if (pos == cfk.committedByExecuteAt.length)
+        if (pos == Integer.MAX_VALUE) // this is a sentinel pos value returned by committedByExecuteAtUpdatePos to indicate no update
             return maxAppliedWriteByExecuteAt;
 
         boolean inserted = pos < 0;
@@ -651,16 +659,16 @@ class Updating
                 return newMaxAppliedWriteByExecuteAt;
             }
         }
-        else if (newInfo.status == APPLIED)
+        else if (newInfo.status == APPLIED || (cfk.isPreBootstrap(newInfo) && pos - 1 == maxAppliedWriteByExecuteAt))
         {
-            return maybeUpdateMaxAppliedAndCheckForLinearizabilityViolations(cfk, pos, newInfo.kind(), newInfo, wasPruned);
+            return maybeAdvanceMaxAppliedAndCheckForLinearizabilityViolations(cfk, pos, newInfo.kind(), newInfo, wasPruned);
         }
         return maxAppliedWriteByExecuteAt;
     }
 
-    private static int maybeUpdateMaxAppliedAndCheckForLinearizabilityViolations(CommandsForKey cfk, int appliedPos, Txn.Kind appliedKind, TxnInfo applied, boolean wasPruned)
+    private static int maybeAdvanceMaxAppliedAndCheckForLinearizabilityViolations(CommandsForKey cfk, int appliedPos, Txn.Kind appliedKind, TxnInfo applied, boolean wasPruned)
     {
-        if (!wasPruned && cfk.redundantBefore.bootstrappedAt.compareTo(applied) < 0)
+        if (!wasPruned && cfk.isPostBootstrap(applied))
         {
             TxnInfo[] committedByExecuteAt = cfk.committedByExecuteAt;
             for (int i = cfk.maxAppliedWriteByExecuteAt + 1; i < appliedPos ; ++i)
@@ -673,14 +681,14 @@ class Updating
         return appliedKind == Txn.Kind.Write ? appliedPos : cfk.maxAppliedWriteByExecuteAt;
     }
 
-    static int nextUndecided(TxnInfo[] infos, int pos)
+    static int nextUndecided(TxnInfo[] infos, int pos, CommandsForKey cfk)
     {
         while (true)
         {
             if (pos == infos.length)
                 return -1;
 
-            if (infos[pos].status.compareTo(COMMITTED) < 0 && managesExecution(infos[pos]))
+            if (infos[pos].status.compareTo(COMMITTED) < 0 && managesExecution(infos[pos]) && cfk.isPostBootstrap(infos[pos]))
                 return pos;
 
             ++pos;
@@ -693,17 +701,22 @@ class Updating
         commandStore.execute(context, safeStore -> {
             SafeCommandsForKey safeCommandsForKey = safeStore.get(key);
             CommandsForKey cur = safeCommandsForKey.current();
-            CommandsForKey next = Updating.updateUnmanaged(cur, safeStore, safeStore.unsafeGet(txnId), notifySink);
+            CommandsForKeyUpdate next = Updating.updateUnmanaged(cur, safeStore.unsafeGet(txnId));
             if (cur != next)
-                safeCommandsForKey.set(next);
+            {
+                if (cur != next.cfk())
+                    safeCommandsForKey.set(next.cfk());
+
+                PostProcess postProcess = next.postProcess();
+                if (postProcess != null)
+                    postProcess.postProcess(safeStore, key, notifySink);
+            }
         }).begin(commandStore.agent());
     }
 
-    static CommandsForKey updateUnmanaged(CommandsForKey cfk, SafeCommandStore safeStore, SafeCommand safeCommand, NotifySink notifySink)
+    static CommandsForKeyUpdate updateUnmanaged(CommandsForKey cfk, SafeCommand safeCommand)
     {
-        CommandsForKeyUpdate upd = Updating.updateUnmanaged(cfk, safeStore, safeCommand, notifySink, false, null);
-        Invariants.checkState(upd instanceof CommandsForKey);
-        return (CommandsForKey) upd;
+        return Updating.updateUnmanaged(cfk, safeCommand, false, null);
     }
 
     /**
@@ -712,7 +725,7 @@ class Updating
      *  - {@code !register, update == null}: fails if any dependencies are missing; always returns a CommandsForKey
      *  - {@code !register && update != null}: fails if any dependencies are missing; always returns the original CommandsForKey, and maybe adds a new Unmanaged to {@code update}
      */
-    static CommandsForKeyUpdate updateUnmanaged(CommandsForKey cfk, SafeCommandStore safeStore, SafeCommand safeCommand, NotifySink notifySink, boolean register, @Nullable List<CommandsForKey.Unmanaged> update)
+    static CommandsForKeyUpdate updateUnmanaged(CommandsForKey cfk, SafeCommand safeCommand, boolean register, @Nullable List<CommandsForKey.Unmanaged> update)
     {
         Invariants.checkArgument(!register || update == null);
         if (safeCommand.current().hasBeen(Status.Truncated))
@@ -726,7 +739,9 @@ class Updating
         RelationMultiMap.SortedRelationList<TxnId> txnIds = command.partialDeps().keyDeps.txnIds(cfk.key());
         TxnId[] missing = NO_TXNIDS;
         int missingCount = 0;
-        int i = txnIds.find(cfk.shardRedundantBefore());
+        // we only populate dependencies to facilitate execution, not for any distributed decision,
+        // so we can filter to only transactions we need to execute locally
+        int i = txnIds.find(cfk.redundantOrBootstrappedBefore());
         if (i < 0) i = -1 - i;
         if (i < txnIds.size())
         {
@@ -789,7 +804,7 @@ class Updating
                 }
                 else
                 {
-                    Invariants.checkState(txnIds.get(i++).compareTo(cfk.prunedBefore) < 0);
+                    Invariants.checkState(txnIds.get(i++).compareTo(cfk.prunedBefore()) < 0);
                 }
             }
 
@@ -855,22 +870,26 @@ class Updating
 
                 CommandsForKey result;
                 if (newById == byId) result = new CommandsForKey(cfk, newLoadingPruned, newUnmanaged);
-                else result = new CommandsForKey(cfk.key(), cfk.redundantBefore(), cfk.prunedBefore, newLoadingPruned, newById, newCommittedByExecuteAt, newMinUndecidedById, cfk.maxAppliedWriteByExecuteAt, newUnmanaged);
+                else
+                {
+                    int prunedBeforeById = cfk.prunedBeforeById;
+                    Invariants.checkState(prunedBeforeById < 0 || newById[prunedBeforeById].equals(cfk.prunedBefore()));
+                    result = new CommandsForKey(cfk.key(), cfk.redundantBefore, cfk.bootstrappedAt, newById, newCommittedByExecuteAt, newMinUndecidedById, cfk.maxAppliedWriteByExecuteAt, newLoadingPruned, prunedBeforeById, cfk.safelyPrunedBefore, newUnmanaged);
+                }
 
                 if (loadPruned == NO_TXNIDS)
                     return result;
 
-                return new CommandsForKeyUpdate.CommandsForKeyUpdateWithNotifier(result, new PostProcess.LoadPruned(null, loadPruned));
+                return new CommandsForKeyUpdate.CommandsForKeyUpdateWithPostProcess(result, new PostProcess.LoadPruned(null, loadPruned));
             }
         }
 
-        notifySink.notWaiting(safeStore, safeCommand, cfk.key());
-        return cfk;
+        return new CommandsForKeyUpdate.CommandsForKeyUpdateWithPostProcess(cfk, new PostProcess.NotifyNotWaiting(null, new TxnId[] { safeCommand.txnId() }));
     }
 
     static CommandsForKeyUpdate registerHistorical(CommandsForKey cfk, TxnId txnId)
     {
-        if (txnId.compareTo(cfk.shardRedundantBefore()) < 0)
+        if (txnId.compareTo(cfk.redundantBefore()) < 0)
             return cfk;
 
         int i = Arrays.binarySearch(cfk.byId, txnId);
@@ -880,9 +899,13 @@ class Updating
                 return cfk;
             return cfk.update(i, txnId, cfk.byId[i], TxnInfo.create(txnId, HISTORICAL, txnId, Ballot.ZERO), false, null);
         }
-        else if (txnId.compareTo(cfk.prunedBefore) >= 0)
+        else if (txnId.compareTo(cfk.prunedBefore()) >= 0)
         {
             return cfk.insert(-1 - i, txnId, TxnInfo.create(txnId, HISTORICAL, txnId, Ballot.ZERO), false, null);
+        }
+        else if (txnId.compareTo(cfk.safelyPrunedBefore) < 0)
+        {
+            return cfk;
         }
         else
         {

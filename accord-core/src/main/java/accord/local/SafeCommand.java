@@ -19,7 +19,6 @@
 package accord.local;
 
 import accord.api.Result;
-import accord.local.Command.TransientListener;
 import accord.local.Command.Truncated;
 import accord.primitives.Ballot;
 import accord.primitives.Seekables;
@@ -40,9 +39,6 @@ public abstract class SafeCommand
     public abstract Command current();
     public abstract void invalidate();
     public abstract boolean invalidated();
-    public abstract void addListener(Command.TransientListener listener);
-    public abstract boolean removeListener(Command.TransientListener listener);
-    public abstract Listeners<Command.TransientListener> transientListeners();
 
     public boolean isUnset()
     {
@@ -63,6 +59,7 @@ public abstract class SafeCommand
             return update;
 
         set(update);
+        safeStore.progressLog().update(safeStore, txnId, prev, update);
         safeStore.update(prev, update);
         return update;
     }
@@ -76,33 +73,17 @@ public abstract class SafeCommand
         return update;
     }
 
-    public Command addListener(Command.DurableAndIdempotentListener listener)
-    {
-        return incidentalUpdate(Command.addListener(current(), listener));
-    }
-
-    public void addAndInvokeListener(SafeCommandStore safeStore, TransientListener listener)
-    {
-        addListener(listener);
-        listener.onChange(safeStore, this);
-    }
-
-    public Command removeListener(Command.DurableAndIdempotentListener listener)
-    {
-        Command current = current();
-        if (!current.durableListeners().contains(listener))
-            return current;
-        return incidentalUpdate(Command.removeListener(current(), listener));
-    }
-
     public Command.Committed updateWaitingOn(Command.WaitingOn.Update waitingOn)
     {
         return incidentalUpdate(Command.updateWaitingOn(current().asCommitted(), waitingOn));
     }
 
-    public Command updateAttributes(CommonAttributes attrs)
+    public Command updateAttributes(SafeCommandStore safeStore, CommonAttributes attrs)
     {
-        return incidentalUpdate(current().updateAttributes(attrs));
+        Command prev = current();
+        Command update = incidentalUpdate(prev.updateAttributes(attrs));
+        safeStore.progressLog().update(safeStore, txnId, prev, update);
+        return update;
     }
 
     public Command.PreAccepted preaccept(SafeCommandStore safeStore, CommonAttributes attrs, Timestamp executeAt, Ballot ballot)
@@ -137,7 +118,7 @@ public abstract class SafeCommand
             return attrs;
 
         if (attrs.partialTxn() != null)
-            keysOrRanges = ((Seekables)keysOrRanges).subtract(attrs.partialTxn().keys());
+            keysOrRanges = ((Seekables)keysOrRanges).without(attrs.partialTxn().keys());
 
         if (attrs.additionalKeysOrRanges() != null)
             keysOrRanges = ((Seekables)keysOrRanges).with(attrs.additionalKeysOrRanges());
@@ -148,7 +129,7 @@ public abstract class SafeCommand
         return attrs;
     }
 
-    public Command.Accepted acceptInvalidated(SafeCommandStore safeStore, Ballot ballot)
+    public Command acceptInvalidated(SafeCommandStore safeStore, Ballot ballot)
     {
         return update(safeStore, Command.acceptInvalidated(current(), ballot));
     }
@@ -194,9 +175,7 @@ public abstract class SafeCommand
 
     public Command.Executed applied(SafeCommandStore safeStore)
     {
-        Command.Executed executed = update(safeStore, Command.applied(current().asExecuted()));
-        safeStore.progressLog().clear(txnId);
-        return executed;
+        return update(safeStore, Command.applied(current().asExecuted()));
     }
 
     public Command.NotDefined uninitialised()

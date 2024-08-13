@@ -15,29 +15,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package accord.messages;
 
-import accord.local.Node;
+package accord.impl.progresslog;
+
+import accord.primitives.ProgressToken;
 import accord.primitives.TxnId;
 
-import java.util.function.BiConsumer;
-import javax.annotation.Nullable;
-
-public interface LocalRequest<R> extends Message
+class SavedProgressToken extends ProgressToken
 {
-    default long waitForEpoch() { return 0; }
-    @Nullable
-    TxnId primaryTxnId();
+    final TxnId txnId;
 
-    void process(Node on, BiConsumer<? super R, Throwable> callback);
-
-    interface Handler
+    public SavedProgressToken(TxnId txnId, ProgressToken copy)
     {
-        <R> void handle(LocalRequest<R> message, BiConsumer<? super R, Throwable> callback, Node node);
+        super(copy.durability, copy.status, copy.promised, copy.isAccepted);
+        this.txnId = txnId;
     }
 
-    static <R> void simpleHandler(LocalRequest<R> message, BiConsumer<? super R, Throwable> callback, Node node)
+    public int compare(SavedProgressToken that)
     {
-        message.process(node, callback);
+        return this.txnId.compareTo(that.txnId);
     }
 }

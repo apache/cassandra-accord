@@ -84,21 +84,21 @@ public abstract class FetchCoordinator
             contacted = contacted.with(ranges);
             inflight = inflight.with(ranges);
             waitingOn = waitingOn.with(ranges);
-            uncontacted = uncontacted.subtract(ranges);
+            uncontacted = uncontacted.without(ranges);
         }
 
         void slow(Ranges ranges)
         {
             checkArgument(waitingOn.containsAll(ranges));
-            waitingOn = waitingOn.subtract(ranges);
+            waitingOn = waitingOn.without(ranges);
         }
 
         void successful(Ranges ranges)
         {
             checkArgument(inflight.containsAll(ranges));
             successful = successful.with(ranges);
-            inflight = inflight.subtract(ranges);
-            waitingOn = waitingOn.subtract(ranges);
+            inflight = inflight.without(ranges);
+            waitingOn = waitingOn.without(ranges);
         }
 
         Ranges waitingOn(Ranges ranges)
@@ -110,8 +110,8 @@ public abstract class FetchCoordinator
         {
             checkArgument(inflight.containsAll(ranges));
             unsuccessful = unsuccessful.with(ranges);
-            inflight = inflight.subtract(ranges);
-            waitingOn = waitingOn.subtract(ranges);
+            inflight = inflight.without(ranges);
+            waitingOn = waitingOn.without(ranges);
         }
 
         void fail()
@@ -204,13 +204,13 @@ public abstract class FetchCoordinator
 
         // some portion of the range is completely unavailable
         isDone = true;
-        failures = FailureAccumulator.createFailure(failures, syncPoint.syncId, null, "No more nodes to contact for " + needed);
+        failures = FailureAccumulator.createFailure(failures, syncPoint.syncId, null, needed);
         onDone(success, failures);
     }
 
     protected void exhausted(Ranges exhausted)
     {
-        fetchRanges.fail(exhausted, new Exhausted(syncPoint.syncId, null, "No more nodes to contact for " + exhausted));
+        fetchRanges.fail(exhausted, new Exhausted(syncPoint.syncId, null, exhausted));
     }
 
     // this method can be completely overridden by an implementing class, which may simply call contact()
@@ -227,7 +227,7 @@ public abstract class FetchCoordinator
                 ++inflight;
             state.contact(contact);
             contact(state.id, contact);
-            needed = needed.subtract(contact);
+            needed = needed.without(contact);
             if (needed.isEmpty())
                 break;
         }

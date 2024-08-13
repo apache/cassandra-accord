@@ -34,12 +34,14 @@ import org.slf4j.LoggerFactory;
 
 import accord.NetworkFilter;
 import accord.api.MessageSink;
-import accord.config.LocalConfig;
-import accord.config.MutableLocalConfig;
+import accord.api.LocalConfig;
 import accord.coordinate.CoordinationAdapter;
+import accord.impl.DefaultRequestTimeouts;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.IntKey;
-import accord.impl.SimpleProgressLog;
+import accord.impl.DefaultLocalListeners;
+import accord.impl.progresslog.DefaultProgressLogs;
+import accord.impl.DefaultRemoteListeners;
 import accord.impl.SizeOfIntersectionSorter;
 import accord.impl.TestAgent;
 import accord.local.AgentExecutor;
@@ -48,7 +50,6 @@ import accord.local.Node.Id;
 import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
 import accord.messages.Callback;
-import accord.messages.LocalRequest;
 import accord.messages.Reply;
 import accord.messages.Request;
 import accord.messages.SafeCallback;
@@ -122,10 +123,9 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         MockStore store = new MockStore();
         MessageSink messageSink = messageSinkFactory.apply(id, this);
         MockConfigurationService configurationService = new MockConfigurationService(messageSink, onFetchTopology, topology);
-        LocalConfig localConfig = new MutableLocalConfig();
+        LocalConfig localConfig = LocalConfig.DEFAULT;
         Node node = new Node(id,
                              messageSink,
-                             LocalRequest::simpleHandler,
                              configurationService,
                              nowSupplier,
                              NodeTimeService.elapsedWrapperFromNonMonotonicSource(TimeUnit.MILLISECONDS, nowSupplier),
@@ -135,7 +135,10 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
                              random.fork(),
                              new ThreadPoolScheduler(),
                              SizeOfIntersectionSorter.SUPPLIER,
-                             SimpleProgressLog::new,
+                             DefaultRemoteListeners::new,
+                             DefaultRequestTimeouts::new,
+                             DefaultProgressLogs::new,
+                             DefaultLocalListeners.Factory::new,
                              InMemoryCommandStores.SingleThread::new,
                              new CoordinationAdapter.DefaultFactory(),
                              localConfig);

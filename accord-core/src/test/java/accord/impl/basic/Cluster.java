@@ -55,8 +55,7 @@ import accord.api.Scheduler;
 import accord.burn.BurnTestConfigurationService;
 import accord.burn.TopologyUpdates;
 import accord.burn.random.FrequentLargeRange;
-import accord.config.LocalConfig;
-import accord.config.MutableLocalConfig;
+import accord.api.LocalConfig;
 import accord.coordinate.Barrier;
 import accord.coordinate.CoordinationAdapter;
 import accord.coordinate.Exhausted;
@@ -65,10 +64,13 @@ import accord.coordinate.Preempted;
 import accord.coordinate.Timeout;
 import accord.coordinate.Truncated;
 import accord.impl.CoordinateDurabilityScheduling;
-import accord.impl.InMemoryCommandStore;
+import accord.impl.DefaultRequestTimeouts;
+import accord.impl.InMemoryCommandStore.GlobalCommand;
 import accord.impl.MessageListener;
 import accord.impl.PrefixedIntHashKey;
-import accord.impl.SimpleProgressLog;
+import accord.impl.DefaultLocalListeners;
+import accord.impl.progresslog.DefaultProgressLogs;
+import accord.impl.DefaultRemoteListeners;
 import accord.impl.SizeOfIntersectionSorter;
 import accord.impl.TopologyFactory;
 import accord.impl.basic.DelayedCommandStores.DelayedCommandStore;
@@ -91,7 +93,6 @@ import accord.messages.SafeCallback;
 import accord.primitives.Keys;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
-import accord.primitives.Routables;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
@@ -124,10 +125,16 @@ public class Cluster implements Scheduler
 
     public static class Stats
     {
+        final Object key;
         int count;
 
+        public Stats(Object key)
+        {
+            this.key = key;
+        }
+
         public int count() { return count; }
-        public String toString() { return Integer.toString(count); }
+        public String toString() { return key + ": " + count; }
     }
 
     public static class LinkConfig
@@ -194,7 +201,7 @@ public class Cluster implements Scheduler
     {
         MessageType type = packet.message.type();
         if (type != null)
-            statsMap.computeIfAbsent(type, ignore -> new Stats()).count++;
+            statsMap.computeIfAbsent(type, Stats::new).count++;
         if (trace.isTraceEnabled())
             trace.trace("{} {} {}", clock++, packet.message instanceof Reply ? "RPLY" : "SEND", packet);
         if (lookup.apply(packet.dst) == null) responseSink.accept(packet);
@@ -293,6 +300,7 @@ public class Cluster implements Scheduler
         run.run();
     }
 
+    // TODO (expected): merge with BurnTest.burn
     public static Map<MessageType, Cluster.Stats> run(Supplier<RandomSource> randomSupplier,
                                                       List<Node.Id> nodes,
                                                       Topology initialTopology,
@@ -300,12 +308,20 @@ public class Cluster implements Scheduler
     {
         List<Throwable> failures = Collections.synchronizedList(new ArrayList<>());
         PropagatingPendingQueue queue = new PropagatingPendingQueue(failures, new RandomDelayQueue(randomSupplier.get()));
-        RandomSource retryRandom = randomSupplier.get();
-        Consumer<Runnable> retryBootstrap = retry -> {
-            long delay = retryRandom.nextInt(1, 15);
-            queue.add((PendingRunnable) retry::run, delay, TimeUnit.SECONDS);
-        };
-        Function<BiConsumer<Timestamp, Ranges>, ListAgent> agentSupplier = onStale -> new ListAgent(1000L, failures::add, retryBootstrap, onStale);
+        Consumer<Runnable> retryBootstrap;
+        {
+            RandomSource rnd = randomSupplier.get();
+            retryBootstrap = retry -> {
+                long delay = rnd.nextInt(1, 15);
+                queue.add((PendingRunnable) retry::run, delay, TimeUnit.SECONDS);
+            };
+        }
+        IntSupplier coordinationDelays, progressDelays, timeoutDelays;
+        {
+            RandomSource rnd = randomSupplier.get();
+            timeoutDelays = progressDelays = coordinationDelays = () -> rnd.nextInt(100, 1000);
+        }
+        Function<BiConsumer<Timestamp, Ranges>, ListAgent> agentSupplier = onStale -> new ListAgent(randomSupplier.get(), 1000L, failures::add, retryBootstrap, onStale, coordinationDelays, progressDelays, timeoutDelays);
         RandomSource nowRandom = randomSupplier.get();
         Supplier<LongSupplier> nowSupplier = () -> {
             RandomSource forked = nowRandom.fork();
@@ -318,9 +334,9 @@ public class Cluster implements Scheduler
                                      .mapAsLong(j -> Math.max(0, queue.nowInMillis() + TimeUnit.NANOSECONDS.toMillis(j)))
                                      .asLongSupplier(forked);
         };
-        SimulatedDelayedExecutorService globalExecutor = new SimulatedDelayedExecutorService(queue, new ListAgent(1000L, failures::add, retryBootstrap, (i1, i2) -> {
-            throw new IllegalAccessError("Global executor should enver get a stale event");
-        }));
+        SimulatedDelayedExecutorService globalExecutor = new SimulatedDelayedExecutorService(queue, new ListAgent(randomSupplier.get(), 1000L, failures::add, retryBootstrap, (i1, i2) -> {
+            throw new IllegalAccessError("Global executor should never get a stale event");
+        }, () -> { throw new UnsupportedOperationException(); }, () -> { throw new UnsupportedOperationException(); }, timeoutDelays));
         TopologyFactory topologyFactory = new TopologyFactory(initialTopology.maxRf(), initialTopology.ranges().stream().toArray(Range[]::new))
         {
             @Override
@@ -402,19 +418,19 @@ public class Cluster implements Scheduler
             {
                 MessageSink messageSink = sinks.create(id, randomSupplier.get());
                 LongSupplier nowSupplier = nowSupplierSupplier.get();
-                LocalConfig localConfig = new MutableLocalConfig();
+                LocalConfig localConfig = LocalConfig.DEFAULT;
                 BiConsumer<Timestamp, Ranges> onStale = (sinceAtLeast, ranges) -> configRandomizer.onStale(id, sinceAtLeast, ranges);
                 AgentExecutor nodeExecutor = nodeExecutorSupplier.apply(id, onStale);
                 executorMap.put(id, nodeExecutor);
-                Journal journal = new Journal(messageListener);
+                Journal journal = new Journal();
                 journalMap.put(id, journal);
                 BurnTestConfigurationService configService = new BurnTestConfigurationService(id, nodeExecutor, randomSupplier, topology, nodeMap::get, topologyUpdates);
                 BooleanSupplier isLoadedCheck = Gens.supplier(Gens.bools().mixedDistribution().next(random), random);
-                Node node = new Node(id, messageSink, journal, configService, nowSupplier, NodeTimeService.elapsedWrapperFromNonMonotonicSource(TimeUnit.MILLISECONDS, nowSupplier),
+                Node node = new Node(id, messageSink, configService, nowSupplier, NodeTimeService.elapsedWrapperFromNonMonotonicSource(TimeUnit.MILLISECONDS, nowSupplier),
                                      () -> new ListStore(id), new ShardDistributor.EvenSplit<>(8, ignore -> new PrefixedIntHashKey.Splitter()),
                                      nodeExecutor.agent(),
-                                     randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
-                                     SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending, isLoadedCheck, journal), new CoordinationAdapter.DefaultFactory(),
+                                     randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER, DefaultRemoteListeners::new, DefaultRequestTimeouts::new,
+                                     DefaultProgressLogs::new, DefaultLocalListeners.Factory::new, DelayedCommandStores.factory(sinks.pending, isLoadedCheck, journal), new CoordinationAdapter.DefaultFactory(),
                                      localConfig);
                 CoordinateDurabilityScheduling durability = new CoordinateDurabilityScheduling(node);
                 // TODO (desired): randomise
@@ -766,10 +782,10 @@ public class Cluster implements Scheduler
         final TxnId txnId;
         final Command command;
         final DelayedCommandStore commandStore;
-        final TxnId blockedOn;
-        final Routables<?> blockedVia;
+        final Command blockedOn;
+        final Object blockedVia;
 
-        public BlockingTransaction(TxnId txnId, Command command, DelayedCommandStore commandStore, @Nullable TxnId blockedOn, @Nullable Routables<?> blockedVia)
+        public BlockingTransaction(TxnId txnId, Command command, DelayedCommandStore commandStore, @Nullable Command blockedOn, @Nullable Object blockedVia)
         {
             this.txnId = txnId;
             this.command = command;
@@ -803,7 +819,7 @@ public class Cluster implements Scheduler
             if (!command.hasBeen(Status.Stable) || cur.blockedOn == null)
                 break;
 
-            cur = find(cur.blockedOn, null, SaveStatus.Stable);
+            cur = find(cur.blockedOn.txnId(), null, SaveStatus.Stable);
         }
         return result;
     }
@@ -827,6 +843,30 @@ public class Cluster implements Scheduler
     public BlockingTransaction find(TxnId txnId, @Nullable SaveStatus minSaveStatus, @Nullable SaveStatus maxSaveStatus)
     {
         return findMin(minSaveStatus, maxSaveStatus, txnId::equals);
+    }
+
+    public List<BlockingTransaction> findTransitivelyBlocking(TxnId txnId)
+    {
+        BlockingTransaction txn = find(txnId, null, null);
+        if (txn == null)
+            return null;
+
+        List<BlockingTransaction> result = new ArrayList<>();
+        while (true)
+        {
+            result.add(txn);
+            if (txn.blockedOn == null || txn.command.saveStatus().compareTo(SaveStatus.Stable) < 0)
+                return result;
+
+            Command blockedOn = txn.blockedOn;
+            GlobalCommand command = txn.commandStore.unsafeCommands().get(blockedOn.txnId());
+            if (command == null)
+                return result;
+            else if (command.value().saveStatus().compareTo(SaveStatus.Applied) < 0)
+                txn = toBlocking(command.value(), txn.commandStore);
+            else
+                txn = find(txn.blockedOn.txnId(), null, null);
+        }
     }
 
     public BlockingTransaction findMin(@Nullable SaveStatus minSaveStatus, @Nullable SaveStatus maxSaveStatus, Predicate<TxnId> testTxnId)
@@ -860,12 +900,12 @@ public class Cluster implements Scheduler
             DelayedCommandStores stores = (DelayedCommandStores) node.commandStores();
             for (DelayedCommandStore store : stores.unsafeStores())
             {
-                for (Map.Entry<TxnId, InMemoryCommandStore.GlobalCommand> e : store.unsafeCommands().entrySet())
+                for (Map.Entry<TxnId, GlobalCommand> e : store.unsafeCommands().entrySet())
                 {
                     Command command = e.getValue().value();
                     if ((minSaveStatus == null || command.saveStatus().compareTo(minSaveStatus) >= 0) &&
                         (maxSaveStatus == null || command.saveStatus().compareTo(maxSaveStatus) <= 0) &&
-                        testTxnId.test(command.txnId()))
+                        (testTxnId == null || testTxnId.test(command.txnId())))
                     {
                         accumulate = fold.apply(accumulate, toBlocking(command, store));
                         break;
@@ -878,25 +918,28 @@ public class Cluster implements Scheduler
 
     private BlockingTransaction toBlocking(Command command, DelayedCommandStore store)
     {
-        Routables<?> blockedVia = null;
-        TxnId blockedOn = null;
+        Object blockedVia = null;
+        TxnId blockedOnId = null;
         if (command.hasBeen(Status.Stable) && !command.hasBeen(Status.Truncated))
         {
             Command.WaitingOn waitingOn = command.asCommitted().waitingOn();
             Key blockedOnKey = waitingOn.lastWaitingOnKey();
             if (blockedOnKey == null)
             {
-                blockedOn = waitingOn.nextWaitingOn();
-                if (blockedOn != null)
-                    blockedVia = command.partialDeps().participants(blockedOn);
+                blockedOnId = waitingOn.nextWaitingOn();
+                if (blockedOnId != null)
+                    blockedVia = command.partialDeps().participants(blockedOnId);
             }
             else
             {
                 CommandsForKey cfk = store.unsafeCommandsForKey().get(blockedOnKey).value();
-                blockedOn = cfk.blockedOnTxnId(command.txnId(), command.executeAt());
-                blockedVia = Keys.of(blockedOnKey);
+                blockedOnId = cfk.blockedOnTxnId(command.txnId(), command.executeAt());
+                blockedVia = cfk;
             }
         }
+        Command blockedOn = null;
+        if (blockedOnId != null)
+            blockedOn = store.unsafeCommands().get(blockedOnId).value();
         return new BlockingTransaction(command.txnId(), command, store, blockedOn, blockedVia);
     }
 

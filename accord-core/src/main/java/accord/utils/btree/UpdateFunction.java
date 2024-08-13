@@ -20,6 +20,8 @@ package accord.utils.btree;
 
 import java.util.function.BiFunction;
 
+import static accord.utils.Invariants.illegalState;
+
 /**
  * An interface defining the method to be applied to the existing and replacing object in a BTree. The objects returned
  * by the methods will be the object that need to be stored in the BTree.
@@ -43,7 +45,7 @@ public interface UpdateFunction<K, V>
      */
     V merge(V replacing, K update);
 
-    final class Simple<V> implements UpdateFunction<V, V>
+    class Simple<V> implements UpdateFunction<V, V>
     {
         private final BiFunction<V, V, V> wrapped;
         public Simple(BiFunction<V, V, V> wrapped)
@@ -52,13 +54,13 @@ public interface UpdateFunction<K, V>
         }
 
         @Override
-        public V insert(V v)
+        public final V insert(V v)
         {
             return v;
         }
 
         @Override
-        public V merge(V replacing, V update)
+        public final V merge(V replacing, V update)
         {
             return wrapped.apply(replacing, update);
         }
@@ -74,10 +76,35 @@ public interface UpdateFunction<K, V>
         }
     }
 
-    static final Simple<Object> noOp = Simple.of((a, b) -> a);
-
-    public static <K> UpdateFunction<K, K> noOp()
+    final class NoOp<V> extends Simple<V>
     {
-        return (UpdateFunction<K, K>) noOp;
+        public NoOp(BiFunction<V, V, V> wrapped)
+        {
+            super(wrapped);
+        }
+
+        NoOp<V> flip()
+        {
+            return noOp == this ? noOpReplace() : noOp();
+        }
+    }
+
+    NoOp<Object> noOp = new NoOp<>((a, b) -> a);
+    NoOp<Object> replace = new NoOp<>((a, b) -> b);
+    NoOp<Object> reject = new NoOp<>((a, b) -> { throw illegalState("%s = %s; but updates are rejected", a, b); });
+
+    static <K> NoOp<K> noOp()
+    {
+        return (NoOp<K>) noOp;
+    }
+
+    static <K> NoOp<K> noOpReplace()
+    {
+        return (NoOp<K>) replace;
+    }
+
+    static <K> NoOp<K> rejectUpdates()
+    {
+        return (NoOp<K>) reject;
     }
 }

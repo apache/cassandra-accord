@@ -37,39 +37,32 @@ public abstract class RangeRoute extends AbstractRanges implements Route<Range>,
     }
 
     @Override
-    public Unseekables<Range> with(Unseekables<Range> with)
+    public RangeRoute with(Unseekables<Range> with)
     {
-        if (isEmpty())
-            return with;
-
-        return merge((AbstractRanges) with);
+        AbstractRanges that = (AbstractRanges) with;
+        return AbstractRanges.union(MERGE_OVERLAPPING, this, that, this, that, (p1, p2, rs) -> {
+            if (rs == p1.ranges)
+                return p1;
+            Invariants.checkState(p1.getClass() == PartialRangeRoute.class);
+            if (rs == p2.ranges && p2 instanceof RangeRoute)
+                return (RangeRoute)p2;
+            return new PartialRangeRoute(homeKey, rs);
+        });
     }
 
     @Override
-    public Participants<Range> with(Participants<Range> with)
+    public RangeRoute with(RoutingKey withKey)
     {
-        if (isEmpty())
-            return with;
-
-        return merge((AbstractRanges) with);
-    }
-
-    private Ranges merge(AbstractRanges with)
-    {
-        return union(MERGE_OVERLAPPING, this, with, null, null,
-                (left, right, rs) -> Ranges.ofSortedAndDeoverlapped(rs));
-    }
-
-    @Override
-    public Unseekables<Range> with(RoutingKey withKey)
-    {
-        if (withKey.equals(homeKey))
-            return withHomeKey();
-
         if (contains(withKey))
             return this;
 
-        return with(Ranges.of(withKey.asRange()));
+        return with((Unseekables<Range>) Ranges.of(withKey.asRange()));
+    }
+
+    @Override
+    public Route<Range> withHomeKey()
+    {
+        return with(homeKey);
     }
 
     @Override
@@ -133,6 +126,21 @@ public abstract class RangeRoute extends AbstractRanges implements Route<Range>,
     public RoutingKey homeKey()
     {
         return homeKey;
+    }
+
+    @Override
+    public Route<Range> homeKeyOnlyRoute()
+    {
+        Range asRange = homeKey.asRange();
+        if (ranges.length == 1 && ranges[0].contains(homeKey) && ranges[0].equals(asRange))
+            return this;
+        return new PartialRangeRoute(homeKey, new Range[] { asRange });
+    }
+
+    @Override
+    public boolean isHomeKeyOnlyRoute()
+    {
+        return ranges.length == 1 && ranges[0].contains(homeKey) && ranges[0].equals(homeKey.asRange());
     }
 
     @Override

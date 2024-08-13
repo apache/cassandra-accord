@@ -310,6 +310,24 @@ public class Deps
         return TxnId.nonNullOrMax(TxnId.nonNullOrMax(maxKeyDep, maxRangeDep), maxDirectKeyDep);
     }
 
+    public TxnId maxTxnId(TxnId orElse)
+    {
+        return TxnId.nonNullOrMax(maxTxnId(), orElse);
+    }
+
+    public @Nullable TxnId minTxnId()
+    {
+        TxnId minKeyDep = keyDeps.isEmpty() ? null : keyDeps.txnId(0);
+        TxnId minRangeDep = rangeDeps.isEmpty() ? null : rangeDeps.txnId(0);
+        TxnId minDirectKeyDep = directKeyDeps.isEmpty() ? null : directKeyDeps.txnId(0);
+        return TxnId.nonNullOrMin(TxnId.nonNullOrMin(minKeyDep, minRangeDep), minDirectKeyDep);
+    }
+
+    public TxnId minTxnId(TxnId orElse)
+    {
+        return TxnId.nonNullOrMin(minTxnId(), orElse);
+    }
+
     @Override
     public int hashCode()
     {

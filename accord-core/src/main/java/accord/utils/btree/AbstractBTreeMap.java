@@ -26,6 +26,8 @@ import java.util.Set;
 
 import com.google.common.collect.ImmutableSet;
 
+import accord.utils.AsymmetricComparator;
+
 public abstract class AbstractBTreeMap<K, V> extends AbstractMap<K, V>
 {
     protected final Object[] tree;
@@ -90,7 +92,7 @@ public abstract class AbstractBTreeMap<K, V> extends AbstractMap<K, V>
     {
         if (key == null)
             throw new NullPointerException();
-        Entry<K, V> entry = BTree.find(tree, comparator, new Entry<>((K)key, null));
+        Entry<K, V> entry = BTree.find(tree, (Comparator<Map.Entry<K, V>>)comparator, new Entry<>((K)key, null));
         if (entry != null)
             return entry.getValue();
         return null;
@@ -128,13 +130,15 @@ public abstract class AbstractBTreeMap<K, V> extends AbstractMap<K, V>
     public Map.Entry<K, V> pollFirstEntry() { throw new UnsupportedOperationException(); }
     public Map.Entry<K, V> pollLastEntry() { throw new UnsupportedOperationException(); }
 
-    protected static class KeyComparator<K, V> implements Comparator<Map.Entry<K, V>>
+    protected static class KeyComparator<K, V> implements Comparator<Map.Entry<K, V>>, AsymmetricComparator<Map.Entry<K, V>, Map.Entry<K, V>>
     {
         protected final Comparator<K> keyComparator;
+        protected final AsymmetricComparator<K, Map.Entry<K, V>> asymmetricKeyComparator;
 
         protected KeyComparator(Comparator<K> keyComparator)
         {
             this.keyComparator = keyComparator;
+            this.asymmetricKeyComparator = (k, e) -> keyComparator.compare(k, e.getKey());
         }
 
         @Override

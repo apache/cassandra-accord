@@ -46,13 +46,16 @@ import accord.api.ConfigurationService;
 import accord.api.ConfigurationService.EpochReady;
 import accord.api.DataStore;
 import accord.api.Key;
+import accord.api.LocalConfig;
+import accord.api.LocalListeners;
 import accord.api.MessageSink;
 import accord.api.ProgressLog;
+import accord.api.RemoteListeners;
+import accord.api.RequestTimeouts;
 import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.api.Scheduler;
 import accord.api.TopologySorter;
-import accord.config.LocalConfig;
 import accord.coordinate.CoordinateEphemeralRead;
 import accord.coordinate.CoordinateTransaction;
 import accord.coordinate.CoordinationAdapter;
@@ -62,7 +65,6 @@ import accord.coordinate.MaybeRecover;
 import accord.coordinate.Outcome;
 import accord.coordinate.RecoverWithRoute;
 import accord.messages.Callback;
-import accord.messages.LocalRequest;
 import accord.messages.Reply;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
@@ -88,7 +90,6 @@ import accord.utils.Invariants;
 import accord.utils.MapReduceConsume;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncChain;
-import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncExecutor;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
@@ -150,9 +151,10 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     private final Id id;
     private final MessageSink messageSink;
-    private final LocalRequest.Handler localRequestHandler;
     private final ConfigurationService configService;
     private final TopologyManager topology;
+    private final RemoteListeners listeners;
+    private final RequestTimeouts timeouts;
     private final CommandStores commandStores;
     private final CoordinationAdapter.Factory coordinationAdapters;
 
@@ -169,27 +171,28 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     // TODO (expected, liveness): monitor the contents of this collection for stalled coordination, and excise them
     private final Map<TxnId, AsyncResult<? extends Outcome>> coordinating = new ConcurrentHashMap<>();
 
-    public Node(Id id, MessageSink messageSink, LocalRequest.Handler localRequestHandler,
+    public Node(Id id, MessageSink messageSink,
                 ConfigurationService configService, LongSupplier nowSupplier, ToLongFunction<TimeUnit> elapsed,
                 Supplier<DataStore> dataSupplier, ShardDistributor shardDistributor, Agent agent, RandomSource random, Scheduler scheduler, TopologySorter.Supplier topologySorter,
-                Function<Node, ProgressLog.Factory> progressLogFactory, CommandStores.Factory factory, CoordinationAdapter.Factory coordinationAdapters,
+                Function<Node, RemoteListeners> remoteListenersFactory, Function<Node, RequestTimeouts> requestTimeoutsFactory, Function<Node, ProgressLog.Factory> progressLogFactory, Function<Node, LocalListeners.Factory> localListenersFactory, CommandStores.Factory factory, CoordinationAdapter.Factory coordinationAdapters,
                 LocalConfig localConfig)
     {
         this.id = id;
+        this.scheduler = scheduler; // we set scheduler first so that e.g. requestTimeoutsFactory and progressLogFactory can take references to it
         this.localConfig = localConfig;
         this.messageSink = messageSink;
-        this.localRequestHandler = localRequestHandler;
         this.configService = configService;
         this.coordinationAdapters = coordinationAdapters;
         this.topology = new TopologyManager(topologySorter, agent, id, scheduler, elapsed, localConfig);
         topology.scheduleTopologyUpdateWatchdog();
+        this.listeners = remoteListenersFactory.apply(this);
+        this.timeouts = requestTimeoutsFactory.apply(this);
         this.nowSupplier = nowSupplier;
         this.elapsed = elapsed;
         this.now = new AtomicReference<>(Timestamp.fromValues(topology.epoch(), nowSupplier.getAsLong(), id));
         this.agent = agent;
         this.random = random;
-        this.scheduler = scheduler;
-        this.commandStores = factory.create(this, agent, dataSupplier.get(), random.fork(), shardDistributor, progressLogFactory.apply(this));
+        this.commandStores = factory.create(this, agent, dataSupplier.get(), random.fork(), shardDistributor, progressLogFactory.apply(this), localListenersFactory.apply(this));
         // TODO review these leak a reference to an object that hasn't finished construction, possibly to other threads
         configService.registerListener(this);
     }
@@ -304,6 +307,22 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         {
             configService.fetchTopologyForEpoch(epoch);
             topology.awaitEpoch(epoch).begin(callback);
+        }
+    }
+
+    public void withEpoch(long epoch, BiConsumer<?, Throwable> ifFailure, Runnable ifSuccess)
+    {
+        if (topology.hasEpoch(epoch))
+        {
+            ifSuccess.run();
+        }
+        else
+        {
+            configService.fetchTopologyForEpoch(epoch);
+            topology.awaitEpoch(epoch).begin((success, fail) -> {
+                if (fail != null) ifFailure.accept(null, CoordinationFailed.wrap(fail));
+                else ifSuccess.run();;
+            });
         }
     }
 
@@ -526,23 +545,6 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         messageSink.send(to, send);
     }
 
-    public <R> void localRequest(LocalRequest<R> message, BiConsumer<? super R, Throwable> callback)
-    {
-        localRequestHandler.handle(message, callback, this);
-    }
-
-    public <R> AsyncChain<R> localRequest(LocalRequest<R> message)
-    {
-        return new AsyncChains.Head<R>()
-        {
-            @Override
-            protected void start(BiConsumer<? super R, Throwable> callback)
-            {
-                localRequest(message, callback);
-            }
-        };
-    }
-
     public void reply(Id replyingToNode, ReplyContext replyContext, Reply send, Throwable failure)
     {
         if (failure != null)
@@ -621,45 +623,6 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
             return keysOrRanges.get(i).someIntersectingRoutingKey(owned);
 
         return keysOrRanges.get(random.nextInt(keysOrRanges.size())).someIntersectingRoutingKey(null);
-    }
-
-    public RoutingKey selectProgressKey(TxnId txnId, Route<?> route, RoutingKey homeKey)
-    {
-        return selectProgressKey(txnId.epoch(), route, homeKey);
-    }
-
-    public RoutingKey selectProgressKey(long epoch, Route<?> route, RoutingKey homeKey)
-    {
-        RoutingKey progressKey = trySelectProgressKey(epoch, route, homeKey);
-        if (progressKey == null)
-            throw new IllegalStateException();
-        return progressKey;
-    }
-
-    public RoutingKey trySelectProgressKey(TxnId txnId, Route<?> route)
-    {
-        return trySelectProgressKey(txnId, route, route.homeKey());
-    }
-
-    public RoutingKey trySelectProgressKey(TxnId txnId, Route<?> route, RoutingKey homeKey)
-    {
-        return trySelectProgressKey(txnId.epoch(), route, homeKey);
-    }
-
-    public RoutingKey trySelectProgressKey(long epoch, Route<?> route, RoutingKey homeKey)
-    {
-        return trySelectProgressKey(this.topology.localForEpoch(epoch), route, homeKey);
-    }
-
-    private static RoutingKey trySelectProgressKey(Topology topology, Route<?> route, RoutingKey homeKey)
-    {
-        if (topology.ranges().contains(homeKey))
-            return homeKey;
-
-        int i = (int)route.findNextIntersection(0, topology.ranges(), 0);
-        if (i < 0)
-            return null;
-        return route.get(i).someIntersectingRoutingKey(topology.ranges());
     }
 
     static class RecoverFuture<T> extends AsyncResults.SettableResult<T> implements BiConsumer<T, Throwable>
@@ -743,6 +706,16 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     public Agent agent()
     {
         return agent;
+    }
+
+    public RemoteListeners remoteListeners()
+    {
+        return listeners;
+    }
+
+    public RequestTimeouts requestTimeouts()
+    {
+        return timeouts;
     }
 
     @Override

@@ -36,6 +36,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
+import static accord.primitives.TxnId.NO_TXNIDS;
 import static accord.utils.ArrayBuffers.*;
 import static accord.utils.Invariants.illegalArgument;
 import static accord.utils.Invariants.illegalState;

@@ -408,7 +408,7 @@ public interface Txn
 
     default AsyncChain<Data> read(SafeCommandStore safeStore, Timestamp executeAt, Ranges unavailable)
     {
-        Ranges ranges = safeStore.ranges().allAt(executeAt).subtract(unavailable);
+        Ranges ranges = safeStore.ranges().allAt(executeAt).without(unavailable);
         List<AsyncChain<Data>> chains = Routables.foldlMinimal(keys(), ranges, (key, accumulate, index) -> {
             AsyncChain<Data> result = read().read(key, safeStore, executeAt, safeStore.dataStore());
             accumulate.add(result);

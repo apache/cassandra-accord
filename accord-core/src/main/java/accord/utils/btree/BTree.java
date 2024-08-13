@@ -37,6 +37,7 @@ import com.google.common.collect.Ordering;
 
 import accord.utils.AsymmetricComparator;
 import accord.utils.SortedArrays;
+import accord.utils.btree.UpdateFunction.NoOp;
 
 import static accord.utils.SortedArrays.Search.FAST;
 import static java.lang.Math.max;
@@ -344,11 +345,12 @@ public class BTree
         {
             // if both are leaves, perform a tight-loop leaf variant of update
             // possibly flipping the input order if sizes suggest and updateF permits
-            if (updateF == (UpdateFunction) UpdateFunction.noOp && toUpdate.length < insert.length)
+            if (updateF.getClass() == NoOp.class && toUpdate.length < insert.length)
             {
                 Object[] tmp = toUpdate;
                 toUpdate = insert;
                 insert = tmp;
+                updateF = ((NoOp)updateF).flip();
             }
             Object[] merged = updateLeaves(toUpdate, insert, comparator, updateF);
             return merged;
@@ -367,8 +369,7 @@ public class BTree
                 Object[] tmp = insert;
                 insert = toUpdate;
                 toUpdate = tmp;
-                if (updateF != (UpdateFunction) UpdateFunction.noOp)
-                    updateF = ((UpdateFunction.Simple) updateF).flip();
+                updateF = ((UpdateFunction.Simple) updateF).flip();
             }
         }
 
@@ -681,7 +682,7 @@ public class BTree
     /**
      * @return the item in the tree that sorts as equal to the search argument, or null if no such item
      */
-    public static <V, F> V find(Object[] node, AsymmetricComparator<? super F, ? super V> comparator, F find)
+    public static <F, V> V find(Object[] node, AsymmetricComparator<? super F, ? super V> comparator, F find)
     {
         while (true)
         {
@@ -816,27 +817,6 @@ public class BTree
                 return lb + sizeMap[i];
             else if (i > 0)
                 lb += sizeMap[i - 1] + 1;
-
-            node = (Object[]) node[keyEnd + i];
-        }
-    }
-
-    public static <V, F> int findNodeIndex(Object[] node, AsymmetricComparator<? super F, ? super V> comparator, F find)
-    {
-        int lb = 0;
-        while (true)
-        {
-            if (isLeaf(node))
-                return lb;
-
-            int keyEnd = getBranchKeyEnd(node);
-            int i = SortedArrays.binarySearch((V[]) node, 0, keyEnd, find, comparator, FAST);
-            if (i >= 0)
-                return lb;
-
-            i = -1 - i;
-            if (i > 0)
-                lb += getSizeMap(node)[i - 1] + 1;
 
             node = (Object[]) node[keyEnd + i];
         }

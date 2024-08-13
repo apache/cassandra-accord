@@ -72,6 +72,7 @@ public interface Routables<K extends Routable> extends Iterable<K>
     boolean containsAll(Routables<?> keysOrRanges);
     boolean intersectsAll(Unseekables<?> keysOrRanges);
 
+    Routables<?> slice(int from, int to);
     Routables<?> slice(Ranges ranges);
     Routables<K> slice(Ranges ranges, Slice slice);
     Routables<?> intersecting(Unseekables<?> intersecting);
@@ -107,6 +108,19 @@ public interface Routables<K extends Routable> extends Iterable<K>
      * Perform {@link SortedArrays#exponentialSearch} from {@code thisIndex} looking for {@code find} with behaviour of {@code search}
      */
     int findNext(int thisIndex, RoutableKey find, SortedArrays.Search search);
+
+    /**
+     * Perform {@link SortedArrays#exponentialSearch} from {@code thisIndex} looking for {@code find} with behaviour of {@code search}
+     */
+    default int findNext(int thisIndex, Routable find, SortedArrays.Search search)
+    {
+        switch (find.domain())
+        {
+            default: throw new AssertionError("Unhandled domain: " + find.domain());
+            case Key: return findNext(thisIndex, (RoutableKey) find, search);
+            case Range: return findNext(thisIndex, (Range) find, search);
+        }
+    }
 
     Domain domain();
 
