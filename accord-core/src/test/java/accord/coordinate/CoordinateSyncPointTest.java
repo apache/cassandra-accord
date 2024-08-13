@@ -38,7 +38,10 @@ import accord.primitives.EpochSupplier;
 import accord.primitives.PartialDeps;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
+import accord.primitives.Routable;
 import accord.primitives.SyncPoint;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
 import accord.topology.Topology;
 import accord.topology.TopologyUtils;
 import accord.utils.SortedArrays.SortedArrayList;
@@ -96,7 +99,7 @@ class CoordinateSyncPointTest
 
     private static SyncPoint<Ranges> awaitApplied(Node node, Range removed)
     {
-        var await = CoordinateSyncPoint.exclusive(node, Ranges.single(removed))
+        var await = CoordinateSyncPoint.exclusive(node, new TxnId(1, node.now(), Txn.Kind.ExclusiveSyncPoint, Routable.Domain.Range, node.id()), Ranges.single(removed))
                                        .flatMap(syncPoint ->
                                                         // the test uses an executor that runs everything right away, so this gets called outside the CommandStore
                                                         node.commandStores().forId(0).submit(() -> {
