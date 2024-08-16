@@ -1260,7 +1260,7 @@ public abstract class Command implements CommonAttributes
             return directRangeDeps.txnIdCount() + directKeyDeps.txnIdCount();
         }
 
-        TxnId txnId(int i)
+        public TxnId txnId(int i)
         {
             int ki = i - directRangeDeps.txnIdCount();
             if (ki < 0)
