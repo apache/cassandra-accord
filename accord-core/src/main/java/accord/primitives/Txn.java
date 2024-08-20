@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Predicate;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
@@ -30,18 +31,18 @@ import accord.api.Data;
 import accord.api.Query;
 import accord.api.Read;
 import accord.api.Result;
+import accord.api.Tracer;
+import accord.api.Traces;
 import accord.api.Update;
 import accord.local.SafeCommandStore;
 import accord.utils.Invariants;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 
-import java.util.function.Predicate;
-
 import static accord.primitives.Txn.Kind.Kinds.AnyGloballyVisible;
+import static accord.primitives.Txn.Kind.Kinds.ExclusiveSyncPoints;
 import static accord.primitives.Txn.Kind.Kinds.Nothing;
 import static accord.primitives.Txn.Kind.Kinds.RsOrWs;
-import static accord.primitives.Txn.Kind.Kinds.ExclusiveSyncPoints;
 import static accord.primitives.Txn.Kind.Kinds.Ws;
 import static accord.primitives.Txn.Kind.Kinds.WsOrSyncPoints;
 
@@ -274,6 +275,8 @@ public interface Txn
         private final Read read;
         private final Query query;
         private final Update update;
+        @Nullable
+        private final Tracer tracer;
 
         public InMemory(@Nonnull Seekables<?, ?> keys, @Nonnull Read read, @Nonnull Query query)
         {
@@ -282,6 +285,7 @@ public interface Txn
             this.read = read;
             this.query = query;
             this.update = null;
+            this.tracer = Traces.instance.getTracer();
         }
 
         public InMemory(@Nonnull Seekables<?, ?> keys, @Nonnull Read read, @Nonnull Query query, @Nullable Update update)
@@ -291,15 +295,17 @@ public interface Txn
             this.read = read;
             this.update = update;
             this.query = query;
+            this.tracer = Traces.instance.getTracer();
         }
 
-        public InMemory(@Nonnull Kind kind, @Nonnull Seekables<?, ?> keys, @Nonnull Read read, @Nullable Query query, @Nullable Update update)
+        public InMemory(@Nonnull Kind kind, @Nonnull Seekables<?, ?> keys, @Nonnull Read read, @Nullable Query query, @Nullable Update update, @Nullable Tracer tracer)
         {
             this.kind = kind;
             this.keys = keys;
             this.read = read;
             this.update = update;
             this.query = query;
+            this.tracer = tracer;
         }
 
         @Override
@@ -308,7 +314,8 @@ public interface Txn
             return new PartialTxn.InMemory(
                 kind(), keys().slice(ranges),
                 read().slice(ranges), includeQuery ? query() : null,
-                update() == null ? null : update().slice(ranges)
+                update() == null ? null : update().slice(ranges),
+                tracer()
             );
         }
 
@@ -319,8 +326,15 @@ public interface Txn
             return new PartialTxn.InMemory(
                 kind(), keys().intersecting(participants),
                 read().intersecting(participants), includeQuery ? query() : null,
-                update() == null ? null : update().intersecting(participants)
+                update() == null ? null : update().intersecting(participants),
+                tracer()
             );
+        }
+
+        @Override
+        public Tracer tracer()
+        {
+            return tracer;
         }
 
         @Override
@@ -420,4 +434,7 @@ public interface Txn
 
         return AsyncChains.reduce(chains, Data::merge);
     }
+
+    @Nullable
+    Tracer tracer();
 }

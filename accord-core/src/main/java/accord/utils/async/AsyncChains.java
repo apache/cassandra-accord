@@ -39,7 +39,9 @@ import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import accord.api.VisibleForImplementation;
+import accord.api.Closeable;
+import accord.api.Propagatable;
+import accord.api.Traces;
 import accord.utils.Invariants;
 
 import static accord.utils.Invariants.illegalState;
@@ -224,6 +226,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
     static class EncapsulatedMap<I, O> extends Map<I, O>
     {
         final Function<? super I, ? extends O> map;
+        final Propagatable tracer = Traces.instance.propagatable();
 
         EncapsulatedMap(Head<?> head, Function<? super I, ? extends O> map)
         {
@@ -234,7 +237,10 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         @Override
         public O apply(I i)
         {
-            return map.apply(i);
+            try (Closeable ignored = tracer.doPropagate())
+            {
+                return map.apply(i);
+            }
         }
     }
 
@@ -256,6 +262,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
     static class EncapsulatedFlatMap<I, O> extends FlatMap<I, O>
     {
         final Function<? super I, ? extends AsyncChain<O>> map;
+        final Propagatable tracer = Traces.instance.propagatable();
 
         EncapsulatedFlatMap(Head<?> head, Function<? super I, ? extends AsyncChain<O>> map)
         {
@@ -266,7 +273,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         @Override
         public AsyncChain<O> apply(I i)
         {
-            try
+            try (Closeable ignored = tracer.doPropagate())
             {
                 return map.apply(i);
             }
@@ -301,6 +308,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
     static class EncapsulatedRecover<I> extends Recover<I>
     {
         private final Function<? super Throwable, ? extends AsyncChain<I>> map;
+        final Propagatable tracer = Traces.instance.propagatable();
 
         public EncapsulatedRecover(Head<?> head, Function<? super Throwable, ? extends AsyncChain<I>> function)
         {
@@ -311,7 +319,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         @Override
         public AsyncChain<I> apply(Throwable throwable)
         {
-            try
+            try (Closeable ignored = tracer.doPropagate())
             {
                 return map.apply(throwable);
             }
@@ -323,7 +331,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
     }
 
     // if extending Callback, be sure to invoke super.accept()
-    static class Callback<I> extends Link<I, I>
+    abstract static class Callback<I> extends Link<I, I>
     {
         Callback(Head<?> head)
         {
@@ -340,6 +348,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
     static class EncapsulatedCallback<I> extends Callback<I>
     {
         final BiConsumer<? super I, Throwable> callback;
+        final Propagatable tracer = Traces.instance.propagatable();
 
         EncapsulatedCallback(Head<?> head, BiConsumer<? super I, Throwable> callback)
         {
@@ -351,7 +360,10 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         public void accept(I i, Throwable throwable)
         {
             super.accept(i, throwable);
-            callback.accept(i, throwable);
+            try (Closeable ignored = tracer.doPropagate())
+            {
+                callback.accept(i, throwable);
+            }
         }
     }
 
@@ -453,17 +465,6 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         return add(EncapsulatedCallback::new, callback);
     }
 
-    // can be used by transformations that want efficiency, and can directly extend Link, FlatMap or Callback
-    // (or perhaps some additional helper implementations that permit us to simply implement apply for Map and FlatMap)
-    <O, T extends AsyncChain<O> & BiConsumer<? super V, Throwable>> AsyncChain<O> add(Function<Head<?>, T> factory)
-    {
-        checkNextIsHead();
-        Head<?> head = (Head<?>) next;
-        T result = factory.apply(head);
-        next = result;
-        return result;
-    }
-
     <P, O, T extends AsyncChain<O> & BiConsumer<? super V, Throwable>> AsyncChain<O> add(BiFunction<Head<?>, P, T> factory, P param)
     {
         checkNextIsHead();
@@ -486,8 +487,9 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
 
     private static <V> Runnable encapsulate(Callable<V> callable, BiConsumer<? super V, Throwable> receiver)
     {
+        Propagatable tracer = Traces.propagate();
         return () -> {
-            try
+            try (Closeable ignore = tracer.doPropagate())
             {
                 V result = callable.call();
                 receiver.accept(result, null);
@@ -502,8 +504,9 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
 
     private static Runnable encapsulate(Runnable runnable, BiConsumer<? super Void, Throwable> receiver)
     {
+        Propagatable tracer = Traces.propagate();
         return () -> {
-            try
+            try (Closeable ignore = tracer.doPropagate())
             {
                 runnable.run();
                 receiver.accept(null, null);
@@ -528,6 +531,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
 
     public static <V, T> AsyncChain<T> map(AsyncChain<V> chain, Function<? super V, ? extends T> mapper, Executor executor)
     {
+        // TODO (review): Still haven't figured out how this should work with trace locals
         return chain.flatMap(v -> new Head<T>()
         {
             @Override
@@ -560,6 +564,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
 
     public static <V, T> AsyncChain<T> flatMap(AsyncChain<V> chain, Function<? super V, ? extends AsyncChain<T>> mapper, Executor executor)
     {
+        // TODO (review): Still haven't figured out how this should work with trace locals
         return chain.flatMap(v -> new Head<T>()
         {
             @Override
@@ -596,12 +601,14 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
                                                Callable<V> callable,
                                                BiFunction<Callable<V>, BiConsumer<? super V, Throwable>, Runnable> encapsulator)
     {
+        // TODO (review): Still haven't figured out how this should work with trace locals
+        Propagatable tracer = Traces.propagate();
         return new Head<>()
         {
             @Override
             protected void start(BiConsumer<? super V, Throwable> callback)
             {
-                try
+                try (Closeable ignored = tracer.doPropagate())
                 {
                     executor.execute(encapsulator.apply(callable, callback));
                 }
@@ -615,12 +622,14 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
 
     public static AsyncChain<Void> ofRunnable(Executor executor, Runnable runnable)
     {
+        // TODO (review): Still haven't figured out how this should work with trace locals
+        Propagatable tracer = Traces.propagate();
         return new Head<Void>()
         {
             @Override
             protected void start(BiConsumer<? super Void, Throwable> callback)
             {
-                try
+                try (Closeable ignored = tracer.doPropagate())
                 {
                     executor.execute(encapsulate(runnable, callback));
                 }
@@ -630,30 +639,6 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
                 }
             }
         };
-    }
-
-    @VisibleForImplementation
-    public static AsyncChain<Void> ofRunnables(Executor executor, Iterable<? extends Runnable> runnables)
-    {
-        return ofRunnable(executor, () -> {
-            Throwable failure = null;
-            for (Runnable runnable : runnables)
-            {
-                try
-                {
-                    runnable.run();
-                }
-                catch (Throwable t)
-                {
-                    if (failure == null)
-                        failure = t;
-                    else
-                        failure.addSuppressed(t);
-                }
-            }
-            if (failure != null)
-                throw new RuntimeException(failure);
-        });
     }
 
     public static <V> AsyncChain<V[]> allOf(List<? extends AsyncChain<? extends V>> chains)
@@ -731,6 +716,8 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         }
     }
 
+    // Used in AccordVirtualTables.java:107 at one point
+    @SuppressWarnings("unused")
     public static <V> V getBlockingAndRethrow(AsyncChain<V> chain)
     {
         class Result
@@ -838,6 +825,8 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         }
     }
 
+    // Used in AccordSafeCommandsForRanges.java:49 at one point
+    @SuppressWarnings("unused")
     public static <V> V getUnchecked(AsyncChain<V> chain)
     {
         try
@@ -862,6 +851,8 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         }
     }
 
+    // Used in AccordBootstrapTest.java a few times at one point
+    @SuppressWarnings("unused")
     public static void awaitUninterruptiblyAndRethrow(AsyncChain<?> chain)
     {
         try

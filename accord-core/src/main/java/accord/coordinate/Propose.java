@@ -25,6 +25,7 @@ import java.util.TreeMap;
 import java.util.function.BiConsumer;
 
 import accord.api.RoutingKey;
+import accord.api.Traces;
 import accord.coordinate.tracking.AbstractTracker.ShardOutcomes;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.coordinate.tracking.QuorumTracker.QuorumShardTracker;
@@ -84,6 +85,7 @@ abstract class Propose<R> implements Callback<AcceptReply>
 
     void start()
     {
+        Traces.trace(txnId, "Sending propose");
         node.send(acceptTracker.nodes(), to -> new Accept(to, acceptTracker.topologies(), ballot, txnId, route, executeAt, txn.keys(), deps), this);
     }
 
@@ -100,11 +102,13 @@ abstract class Propose<R> implements Callback<AcceptReply>
             default: throw new IllegalStateException();
             case Truncated:
                 isDone = true;
+                Traces.trace(txnId, "Propose/accept rejected {}", reply.outcome);
                 callback.accept(null, new Truncated(txnId, route.homeKey()));
                 break;
             case Redundant:
             case RejectedBallot:
                 isDone = true;
+                Traces.trace(txnId, "Propose/accept rejected {}", reply.outcome);
                 callback.accept(null, new Preempted(txnId, route.homeKey()));
                 break;
             case Success:
@@ -112,6 +116,7 @@ abstract class Propose<R> implements Callback<AcceptReply>
                 if (acceptTracker.recordSuccess(from) == RequestStatus.Success)
                 {
                     isDone = true;
+                    Traces.trace(txnId, "Propose/accept completed successfully");
                     onAccepted();
                 }
         }
@@ -161,6 +166,7 @@ abstract class Propose<R> implements Callback<AcceptReply>
 
         public static Invalidate proposeInvalidate(Node node, Ballot ballot, TxnId txnId, RoutingKey invalidateWithParticipant, BiConsumer<Void, Throwable> callback)
         {
+            Traces.trace(txnId, "Proposing invalidate");
             Shard shard = node.topology().forEpochIfKnown(invalidateWithParticipant, txnId.epoch());
             Invalidate invalidate = new Invalidate(node, shard, ballot, txnId, invalidateWithParticipant, callback);
             node.send(shard.nodes, to -> new Accept.Invalidate(ballot, txnId, invalidateWithParticipant), invalidate);
@@ -169,13 +175,16 @@ abstract class Propose<R> implements Callback<AcceptReply>
 
         public static Invalidate proposeAndCommitInvalidate(Node node, Ballot ballot, TxnId txnId, RoutingKey invalidateWithParticipant, Route<?> commitInvalidationTo, Timestamp invalidateUntil, BiConsumer<?, Throwable> callback)
         {
+            Traces.trace(txnId, "Proposing commit and invalidate");
             return proposeInvalidate(node, ballot, txnId, invalidateWithParticipant, (success, fail) -> {
                 if (fail != null)
                 {
+                    Traces.trace(txnId, "Proposing commit and invalidate failed: {}", fail);
                     callback.accept(null, fail);
                 }
                 else
                 {
+                    Traces.trace(txnId, "Proposing commit and invalidate succeeded");
                     node.withEpoch(invalidateUntil.epoch(), (ignored, withEpochFailure) -> {
                         if (withEpochFailure != null)
                         {

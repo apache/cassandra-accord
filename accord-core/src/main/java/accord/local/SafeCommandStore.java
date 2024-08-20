@@ -22,16 +22,19 @@ import java.util.Iterator;
 import javax.annotation.Nullable;
 
 import accord.api.Agent;
+import accord.api.Closeable;
 import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.ProgressLog;
 import accord.api.RoutingKey;
+import accord.api.Traces;
 import accord.impl.ErasedSafeCommand;
 import accord.local.cfk.CommandsForKey;
 import accord.local.cfk.SafeCommandsForKey;
 import accord.primitives.Deps;
 import accord.primitives.EpochSupplier;
 import accord.primitives.Keys;
+import accord.primitives.PartialTxn;
 import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Routables;
@@ -355,7 +358,10 @@ public abstract class SafeCommandStore
         PreLoadContext context = listener.listenerPreLoadContext(command.txnId());
         if (safeStore.canExecuteWith(context))
         {
-            listener.onChange(safeStore, safeCommand);
+            try (Closeable ignored = propagateTracingForListener(context, safeStore))
+            {
+                listener.onChange(safeStore, safeCommand);
+            }
         }
         else
         {
@@ -378,7 +384,10 @@ public abstract class SafeCommandStore
         PreLoadContext context = listener.listenerPreLoadContext(command.txnId());
         if (safeStore.canExecuteWith(context))
         {
-            listener.onChange(safeStore, safeCommand);
+            try (Closeable ignored = propagateTracingForListener(context, safeStore))
+            {
+                listener.onChange(safeStore, safeCommand);
+            }
         }
         else
         {
@@ -387,5 +396,26 @@ public abstract class SafeCommandStore
                      .execute(context, safeStore2 -> listener.onChange(safeStore2, safeStore2.get(txnId)))
                      .begin(safeStore.agent());
         }
+    }
+
+    private static Closeable propagateTracingForListener(PreLoadContext preloadContext, SafeCommandStore safeStore)
+    {
+        TxnId primaryTxnId = preloadContext.primaryTxnId();
+        if (primaryTxnId != null)
+        {
+            SafeCommand safeCommand = safeStore.get(primaryTxnId);
+            if (safeCommand != null)
+            {
+                Command command = safeCommand.current();
+                if (command != null)
+                {
+                    PartialTxn partialTxn = command.partialTxn();
+                    if (partialTxn != null)
+                        return Traces.instance.propagate(partialTxn.tracer());
+                }
+            }
+        }
+        // Don't want to blindly pass forward a potentially unrelated tracing state to a listener
+        return Traces.instance.propagate(null);
     }
 }

@@ -183,7 +183,7 @@ public class BurnTest
                         requestKeys.addAll(update.keySet());
                     ListRead read = new ListRead(random.decide(readInCommandStore) ? Function.identity() : executor, kind == EphemeralRead, readKeys, new Keys(requestKeys));
                     ListQuery query = new ListQuery(client, finalCount, kind == EphemeralRead);
-                    return new Txn.InMemory(kind, new Keys(requestKeys), read, query, update);
+                    return new Txn.InMemory(kind, new Keys(requestKeys), read, query, update, null);
                 };
             }
             packets.add(new Packet(client, node, count, new ListRequest(description, txnGenerator, listener)));
