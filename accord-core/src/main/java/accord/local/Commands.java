@@ -59,6 +59,7 @@ import static accord.api.ProgressLog.ProgressShard.Local;
 import static accord.api.ProgressLog.ProgressShard.No;
 import static accord.local.Cleanup.ERASE;
 import static accord.local.Cleanup.TRUNCATE;
+import static accord.local.Cleanup.TRUNCATE_WITH_OUTCOME;
 import static accord.local.Cleanup.shouldCleanup;
 import static accord.local.Command.Truncated.erased;
 import static accord.local.Command.Truncated.truncatedApply;
@@ -882,7 +883,7 @@ public class Commands
 
         Command result = purge(command, maybeFullRoute, cleanup);
         safeCommand.update(safeStore, result);
-        if (cleanup == TRUNCATE)
+        if (cleanup == TRUNCATE || (cleanup == TRUNCATE_WITH_OUTCOME && !command.hasBeen(PreApplied)))
             safeStore.progressLog().clear(safeCommand.txnId());
         if (notifyListeners)
             safeStore.notifyListeners(safeCommand, result, command.durableListeners(), safeCommand.transientListeners());
