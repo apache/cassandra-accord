@@ -24,6 +24,7 @@ import java.util.TreeMap;
 import java.util.function.BiConsumer;
 import javax.annotation.Nullable;
 
+import accord.api.Traces;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.local.Node;
 import accord.local.Node.Id;
@@ -201,10 +202,17 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
         // could have moved ahead, and the timestamp we may propose may be stale.
         // Note that these future epochs are non-voting, they only serve to inform the timestamp we decide
         long latestEpoch = executeAtEpoch();
-        if (latestEpoch <= topologies.currentEpoch())
+        long currentEpoch = topologies.currentEpoch();
+        if (latestEpoch <= currentEpoch)
+        {
+            Traces.trace(txnId, "Preaccepted with latestEpoch {} <= currentEpoch {}, executeAt {}", latestEpoch, currentEpoch);
             onPreAccepted(topologies);
+        }
         else
+        {
+            Traces.trace(txnId, "Preaccepted in later epoch {}, current epoch {}", latestEpoch, currentEpoch);
             onNewEpoch(topologies, latestEpoch);
+        }
     }
 
     final void onNewEpoch(Topologies prevTopologies, long latestEpoch)
@@ -231,10 +239,12 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
 
             if (equivalent)
             {
+                Traces.trace(txnId, "New epoch during preaccept was equivalent");
                 onPreAccepted(topologies);
             }
             else
             {
+                Traces.trace(txnId, "Contacting extra epochs/nodes for preaccept");
                 extraEpochs = new ExtraEpochs(prevTopologies.currentEpoch() + 1, latestEpoch);
                 extraEpochs.start();
             }

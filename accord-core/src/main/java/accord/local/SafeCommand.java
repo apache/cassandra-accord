@@ -19,6 +19,7 @@
 package accord.local;
 
 import accord.api.Result;
+import accord.api.Traces;
 import accord.local.Command.TransientListener;
 import accord.local.Command.Truncated;
 import accord.primitives.Ballot;
@@ -61,6 +62,9 @@ public abstract class SafeCommand
         Command prev = current();
         if (prev == update)
             return update;
+
+        if (prev.status() != update.status())
+            Traces.trace(prev.txnId(), "Status changed from {} to {}", prev.status(), update.status());
 
         set(update);
         safeStore.update(prev, update);

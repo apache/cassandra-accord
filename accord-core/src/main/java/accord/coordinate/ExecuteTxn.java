@@ -25,6 +25,7 @@ import org.slf4j.LoggerFactory;
 
 import accord.api.Data;
 import accord.api.Result;
+import accord.api.Traces;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.Commit;
@@ -39,6 +40,7 @@ import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
+import accord.primitives.Writes;
 import accord.topology.Topologies;
 import org.agrona.collections.IntHashSet;
 
@@ -83,6 +85,7 @@ public class ExecuteTxn extends ReadCoordinator<ReadReply>
     @Override
     protected void start(Iterable<Id> to)
     {
+        Traces.trace(txnId, "Beginning txn execution");
         IntHashSet readSet = new IntHashSet();
         to.forEach(i -> readSet.add(i.id));
         Commit.Kind kind;
@@ -146,8 +149,11 @@ public class ExecuteTxn extends ReadCoordinator<ReadReply>
     {
         if (failure == null)
         {
+            Traces.trace(txnId, "Execution completed successfully, computing txn result");
             Result result = txn.result(txnId, executeAt, data);
-            CoordinationAdapter.Invoke.persist(adapter(), node, allTopologies, route, txnId, txn, executeAt, stableDeps, txn.execute(txnId, executeAt, data), result, callback);
+            Traces.trace(txnId, "Txn result computed successfully, computing txn execute");
+            Writes writes = txn.execute(txnId, executeAt, data);
+            CoordinationAdapter.Invoke.persist(adapter(), node, allTopologies, route, txnId, txn, executeAt, stableDeps, writes, result, callback);
         }
         else
         {

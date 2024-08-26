@@ -25,6 +25,9 @@ import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 
+import accord.api.Closeable;
+import accord.api.Propagatable;
+import accord.api.Traces;
 import accord.api.VisibleForImplementation;
 import accord.utils.Invariants;
 
@@ -58,6 +61,7 @@ public class AsyncResults
         private static class Listener<V>
         {
             final BiConsumer<? super V, Throwable> callback;
+            final Propagatable tracer = Traces.propagate();
             Listener<V> next;
 
             public Listener(BiConsumer<? super V, Throwable> callback)
@@ -82,7 +86,7 @@ public class AsyncResults
             List<Throwable> failures = null;
             while (listener != null)
             {
-                try
+                try (Closeable ignored = listener.tracer.doPropagate())
                 {
                     listener.callback.accept(result.value, result.failure);
                 }

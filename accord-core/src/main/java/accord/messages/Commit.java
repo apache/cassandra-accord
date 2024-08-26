@@ -20,6 +20,7 @@ package accord.messages;
 import java.util.function.BiPredicate;
 import javax.annotation.Nullable;
 
+import accord.api.Traces;
 import accord.local.Commands;
 import accord.local.KeyHistory;
 import accord.local.Node;
@@ -335,6 +336,7 @@ public class Commit extends TxnRequest<CommitOrReadNack>
 
         public static void commitInvalidate(Node node, Topologies commitTo, TxnId txnId, Unseekables<?> inform)
         {
+            Traces.trace(txnId, "Sending commit invalidate");
             for (Node.Id to : commitTo.nodes())
             {
                 Invalidate send = new Invalidate(to, commitTo, txnId, inform);

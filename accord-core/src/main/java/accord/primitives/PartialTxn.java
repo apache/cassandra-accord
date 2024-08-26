@@ -18,11 +18,12 @@
 
 package accord.primitives;
 
+import javax.annotation.Nullable;
+
 import accord.api.Query;
 import accord.api.Read;
+import accord.api.Tracer;
 import accord.api.Update;
-
-import javax.annotation.Nullable;
 
 import static accord.utils.Invariants.illegalState;
 
@@ -55,9 +56,9 @@ public interface PartialTxn extends Txn
     // TODO (low priority, clarity): override toString
     class InMemory extends Txn.InMemory implements PartialTxn
     {
-        public InMemory(Kind kind, Seekables<?, ?> keys, Read read, Query query, Update update)
+        public InMemory(Kind kind, Seekables<?, ?> keys, Read read, Query query, Update update, Tracer tracer)
         {
-            super(kind, keys, read, query, update);
+            super(kind, keys, read, query, update, tracer);
         }
 
         @Override
@@ -80,7 +81,7 @@ public interface PartialTxn extends Txn
                 if (read == add.read() && query == add.query() && update == add.update())
                     return add;
             }
-            return new PartialTxn.InMemory(kind(), keys, read, query, update);
+            return new PartialTxn.InMemory(kind(), keys, read, query, update, tracer());
         }
 
         @Override
@@ -89,7 +90,7 @@ public interface PartialTxn extends Txn
             if (!covers(route) || query() == null)
                 throw illegalState("Incomplete PartialTxn: " + this + ", route: " + route);
 
-            return new Txn.InMemory(kind(), keys(), read(), query(), update());
+            return new Txn.InMemory(kind(), keys(), read(), query(), update(), tracer());
         }
 
         @Override
@@ -101,7 +102,7 @@ public interface PartialTxn extends Txn
             if (this.keys().containsAll(covering))
                 return this;
 
-            return new PartialTxn.InMemory(kind(), keys(), read(), query(), update());
+            return new PartialTxn.InMemory(kind(), keys(), read(), query(), update(), tracer());
         }
     }
 }
