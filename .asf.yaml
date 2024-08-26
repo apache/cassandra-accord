@@ -25,7 +25,7 @@ github:
   description: "Accord library for Apache Cassandra®"
   homepage: https://cassandra.apache.org/
   enabled_merge_buttons:
-    squash:  false
+    squash:  true
     merge:   false
     rebase:  true
   features:
