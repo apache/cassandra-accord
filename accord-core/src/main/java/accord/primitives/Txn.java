@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Predicate;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
@@ -36,12 +37,10 @@ import accord.utils.Invariants;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 
-import java.util.function.Predicate;
-
 import static accord.primitives.Txn.Kind.Kinds.AnyGloballyVisible;
+import static accord.primitives.Txn.Kind.Kinds.ExclusiveSyncPoints;
 import static accord.primitives.Txn.Kind.Kinds.Nothing;
 import static accord.primitives.Txn.Kind.Kinds.RsOrWs;
-import static accord.primitives.Txn.Kind.Kinds.ExclusiveSyncPoints;
 import static accord.primitives.Txn.Kind.Kinds.Ws;
 import static accord.primitives.Txn.Kind.Kinds.WsOrSyncPoints;
 
@@ -400,7 +399,9 @@ public interface Txn
     default Writes execute(TxnId txnId, Timestamp executeAt, @Nullable Data data)
     {
         Update update = update();
-        if (update == null)
+
+        // Implementation is allowed to provide an update for a read and Accord will ignore it
+        if (update == null || txnId.isRead())
             return new Writes(txnId, executeAt, Keys.EMPTY, null);
 
         return new Writes(txnId, executeAt, update.keys(), update.apply(executeAt, data));
