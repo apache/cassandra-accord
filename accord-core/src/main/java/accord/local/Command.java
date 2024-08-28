@@ -39,6 +39,7 @@ import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.RangeDeps;
 import accord.primitives.Ranges;
+import accord.primitives.Routable;
 import accord.primitives.Route;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
@@ -1223,7 +1224,15 @@ public abstract class Command implements CommonAttributes
 
     public static class WaitingOn
     {
-        public static final WaitingOn EMPTY = new WaitingOn(Keys.EMPTY, RangeDeps.NONE, KeyDeps.NONE, ImmutableBitSet.EMPTY, ImmutableBitSet.EMPTY);
+        private static final WaitingOn EMPTY_FOR_KEY = new WaitingOn(Keys.EMPTY, RangeDeps.NONE, KeyDeps.NONE, ImmutableBitSet.EMPTY, null);
+        private static final WaitingOn EMPTY_FOR_RANGE = new WaitingOn(Keys.EMPTY, RangeDeps.NONE, KeyDeps.NONE, ImmutableBitSet.EMPTY, ImmutableBitSet.EMPTY);
+
+        public static WaitingOn empty(Routable.Domain domain)
+        {
+            if (domain == Range)
+                return EMPTY_FOR_RANGE;
+            return EMPTY_FOR_KEY;
+        }
 
         public final Keys keys;
         public final RangeDeps directRangeDeps;
@@ -1288,10 +1297,11 @@ public abstract class Command implements CommonAttributes
             return ifNull;
         }
 
-        public static WaitingOn none(Deps deps)
+        public static WaitingOn none(Routable.Domain domain, Deps deps)
         {
-            ImmutableBitSet empty = new ImmutableBitSet(deps.rangeDeps.txnIdCount() + deps.directKeyDeps.txnIdCount() + deps.keyDeps.keys().size());
-            return new WaitingOn(deps.keyDeps.keys(), deps.rangeDeps, deps.directKeyDeps, empty, empty);
+            return new WaitingOn(deps.keyDeps.keys(), deps.rangeDeps, deps.directKeyDeps,
+                                 new ImmutableBitSet(deps.directKeyDeps.txnIdCount() + deps.keyDeps.keys().size()),
+                                 domain == Range ? new ImmutableBitSet(deps.rangeDeps.txnIdCount()) : null);
         }
 
         public boolean isWaiting()
