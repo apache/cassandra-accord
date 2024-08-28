@@ -21,6 +21,8 @@ package accord.primitives;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import accord.local.Node.Id;
 import accord.primitives.Routable.Domain;
 import accord.primitives.Txn.Kind;
@@ -102,6 +104,12 @@ public class TxnId extends Timestamp
     public TxnId as(Kind kind)
     {
         return new TxnId(epoch(), hlc(), kind, domain(), node);
+    }
+
+    @VisibleForTesting
+    public TxnId as(Kind kind, Domain domain)
+    {
+        return new TxnId(epoch(), hlc(), kind, domain, node);
     }
 
     public TxnId withEpoch(long epoch)
