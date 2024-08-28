@@ -30,6 +30,8 @@ import java.util.function.ToIntBiFunction;
 
 import javax.annotation.Nullable;
 
+import com.google.common.collect.Iterators;
+
 import accord.api.Key;
 import accord.api.RoutingKey;
 import accord.impl.IntHashKey;
@@ -41,6 +43,7 @@ import accord.local.RedundantBefore;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.KeyDeps;
+import accord.primitives.Keys;
 import accord.primitives.Range;
 import accord.primitives.RangeDeps;
 import accord.primitives.Ranges;
@@ -63,6 +66,11 @@ public class AccordGens
         return Gens.longs().between(0, Timestamp.MAX_EPOCH);
     }
 
+    public static Gen.LongGen epochs(long min)
+    {
+        return Gens.longs().between(min, Timestamp.MAX_EPOCH);
+    }
+
     public static Gen<Node.Id> nodes()
     {
         return nodes(RandomSource::nextInt);
@@ -79,6 +87,11 @@ public class AccordGens
     }
 
     public static Gen.LongGen hlcs()
+    {
+        return rs -> rs.nextLong(0, Long.MAX_VALUE);
+    }
+
+    public static Gen.LongGen hlcs(long min)
     {
         return rs -> rs.nextLong(0, Long.MAX_VALUE);
     }
@@ -542,6 +555,40 @@ public class AccordGens
     public static Gen<Deps> depsFromKey(Gen<? extends Key> keyGen, Gen<? extends Range> rangeGen)
     {
         return depsFromKey(keyGen, rangeGen, keyGen);
+    }
+
+    public static Gen<Deps> depsFor(TxnId txnId, Txn txn)
+    {
+        Gen<KeyDeps> keyDepsGen;
+        Gen<RangeDeps> rangeDepsGen;
+        Gen<KeyDeps> directKeyDepsGen;
+        switch (txnId.kind())
+        {
+            case Write:
+            case Read:
+            case EphemeralRead:
+            {
+                Gen<? extends Key> keyGen = Gens.pick(Iterators.toArray(((Keys) txn.keys()).iterator(), Key.class));
+                keyDepsGen = AccordGens.keyDeps(keyGen, AccordGens.txnIds(Gens.longs().between(0, txnId.epoch()),
+                                                                          Gens.longs().between(0, txnId.hlc()),
+                                                                          RandomSource::nextInt,
+                                                                          Gens.pick(Txn.Kind.Write, Txn.Kind.Read),
+                                                                          ignore -> Routable.Domain.Key));
+                rangeDepsGen = i -> RangeDeps.NONE;
+                directKeyDepsGen = i -> KeyDeps.NONE;
+            }
+            break;
+            case ExclusiveSyncPoint:
+            case SyncPoint:
+            case LocalOnly:
+                //TODO (coverage, now):
+                keyDepsGen = i -> KeyDeps.NONE;
+                rangeDepsGen = i -> RangeDeps.NONE;
+                directKeyDepsGen = i -> KeyDeps.NONE;
+                break;
+            default:throw new UnsupportedOperationException(txn.kind().name());
+        }
+        return AccordGens.deps(keyDepsGen, rangeDepsGen, directKeyDepsGen);
     }
 
     public static Gen<Command.WaitingOn> waitingOn(Gen<Deps> depsGen, Gen<Boolean> emptyGen,
