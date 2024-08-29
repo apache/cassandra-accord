@@ -104,6 +104,12 @@ public class ReflectionUtils
             accum.add(new Difference<>(path, lhs, rhs));
             return;
         }
+        if (!lhs.getClass().equals(rhs.getClass()))
+        {
+            // when types don't match the field walking won't walk... we know this isn't a match, so just return early
+            accum.add(new Difference<>(path, lhs, rhs));
+            return;
+        }
         List<Field> fields = getFields(lhs.getClass());
         if (fields.isEmpty())
         {
