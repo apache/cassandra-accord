@@ -77,4 +77,12 @@ public class ImmutableBitSet extends SimpleBitSet
     {
         throw new UnsupportedOperationException();
     }
+
+    @Override
+    public String toString()
+    {
+        return "ImmutableBitSet{" +
+               "count=" + count +
+               '}';
+    }
 }
