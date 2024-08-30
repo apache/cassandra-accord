@@ -41,6 +41,8 @@ import java.util.stream.IntStream;
 import java.util.stream.LongStream;
 import java.util.stream.Stream;
 
+import com.google.common.collect.Iterables;
+
 import accord.utils.random.Picker;
 
 public class Gens {
@@ -122,6 +124,8 @@ public class Gens {
         // this method relies on the map having some order and will reject any map that doesn't define a deterministic order
         if (!(values instanceof EnumMap || values instanceof LinkedHashMap))
             throw new IllegalArgumentException("pick(Map) requires a map with deterministic iteration; given " + values.getClass());
+        if (values.size() == 1)
+            return constant(Objects.requireNonNull(Iterables.getFirst(values.keySet(), null)));
         double totalWeight = values.values().stream().mapToDouble(Integer::intValue).sum();
         List<Weight<T>> list = new ArrayList<>(values.size());
         Iterator<Map.Entry<T, Integer>> it = values.entrySet().iterator();
@@ -870,7 +874,7 @@ public class Gens {
         }
     }
 
-    private interface Reset {
+    protected interface Reset {
         static void tryReset(Object o)
         {
             if (o instanceof Reset)
