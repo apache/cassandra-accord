@@ -69,7 +69,7 @@ class GensTest
     {
         Gen<Gen.IntGen> distroGren = Gens.mixedDistribution(0, 100, 10);
         RandomSource rs = Mockito.mock(RandomSource.class, REJECT_ALL);
-        Mockito.doReturn(0).when(rs).nextInt(0, 4); // uniform disto for bucket selection
+        Mockito.doReturn(0).when(rs).nextInt(0, 4); // uniform distro for bucket selection
         Mockito.doReturn(1).when(rs).nextInt(0, 2); // median distro for within the bucket
         // populate the median buckets
         for (int start = 0; start < 100; start += 10)
