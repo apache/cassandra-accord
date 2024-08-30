@@ -266,6 +266,56 @@ public class Gens {
         return i;
     }
 
+    public static Gen<Gen.IntGen> mixedDistribution(int minInclusive, int maxExclusive, int numBuckets)
+    {
+        int domainSize = (maxExclusive - minInclusive);
+        if (domainSize < 0)
+            throw new IllegalArgumentException("Range is too large; min=" + minInclusive + ", max=" + maxExclusive);
+        if (numBuckets <= 0 || numBuckets > domainSize)
+            throw new IllegalArgumentException("Num buckets must be between 1 and " + domainSize + "; given " + numBuckets);
+        int[] bucket, indexes;
+        bucket = new int[numBuckets];
+        int delta = domainSize / numBuckets;
+        for (int i = 0; i < numBuckets; i++)
+            bucket[i] = minInclusive + i * delta;
+        indexes = IntStream.range(0, bucket.length).toArray();
+        Gen<Gen.IntGen> indexDistro = mixedDistribution(indexes);
+        return rs -> {
+            Gen.IntGen indexGen = indexDistro.next(rs);
+            switch (rs.nextInt(0, 2))
+            {
+                case 0: // uniform
+                {
+                    return r -> {
+                        int idx = indexGen.next(rs);
+                        int start = bucket[idx];
+                        int end = idx == bucket.length - 1 ? maxExclusive : bucket[idx + 1];
+                        return r.nextInt(start, end);
+                    };
+                }
+                case 1: // median biased
+                {
+                    int medians[] = new int[bucket.length];
+                    for (int i = 0; i < medians.length; i++)
+                    {
+                        int start = bucket[i];
+                        int end = i == bucket.length - 1 ? maxExclusive : bucket[i + 1];
+                        medians[i] = rs.nextInt(start, end);
+                    }
+                    return r -> {
+                        int idx = indexGen.next(rs);
+                        int start = bucket[idx];
+                        int end = idx == bucket.length - 1 ? maxExclusive : bucket[idx + 1];
+                        int median = medians[idx];
+                        return r.nextBiasedInt(start, median, end);
+                    };
+                }
+                default:
+                    throw new AssertionError();
+            }
+        };
+    }
+
     public static Gen<Gen.IntGen> mixedDistribution(int minInclusive, int maxExclusive)
     {
         int domainSize = (maxExclusive - minInclusive + 1);
@@ -412,6 +462,32 @@ public class Gens {
                     {
                         array = new ArrayList<>(list);
                         Collections.reverse(array);
+                    }
+                    return pickZipf(array);
+                case 3: // random weight
+                    return randomWeights(list).next(rs);
+                default:
+                    throw new AssertionError();
+            }
+        };
+    }
+
+    public static <T> Gen<Gen.IntGen> mixedDistribution(int[] list)
+    {
+        return rs -> {
+            switch (rs.nextInt(0, 4))
+            {
+                case 0: // uniform
+                    return r -> list[rs.nextInt(0, list.length)];
+                case 1: // median biased
+                    int median = rs.nextInt(0, list.length);
+                    return r -> list[r.nextBiasedInt(0, median, list.length)];
+                case 2: // zipf
+                    int[] array = list;
+                    if (rs.nextBoolean())
+                    {
+                        array = Arrays.copyOf(array, array.length);
+                        Utils.reverse(array);
                     }
                     return pickZipf(array);
                 case 3: // random weight
@@ -602,6 +678,11 @@ public class Gens {
         public Gen<Gen.IntGen> mixedDistribution(int minInclusive, int maxExclusive)
         {
             return Gens.mixedDistribution(minInclusive, maxExclusive);
+        }
+
+        public Gen<Gen.IntGen> mixedDistribution(int minInclusive, int maxExclusive, int numBuckets)
+        {
+            return Gens.mixedDistribution(minInclusive, maxExclusive, numBuckets);
         }
     }
 
