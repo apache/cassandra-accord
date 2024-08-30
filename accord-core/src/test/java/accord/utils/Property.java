@@ -790,6 +790,14 @@ public class Property
             return this;
         }
 
+        public CommandsBuilder<State, SystemUnderTest> addIf(Predicate<State> predicate, Gen<Command<State, SystemUnderTest, ?>> cmd)
+        {
+            return add((rs, state) -> {
+                if (!predicate.test(state)) return ignoreCommand();
+                return cmd.next(rs);
+            });
+        }
+
         public CommandsBuilder<State, SystemUnderTest> addIf(Predicate<State> predicate, Setup<State, SystemUnderTest> cmd)
         {
             return add((rs, state) -> {
