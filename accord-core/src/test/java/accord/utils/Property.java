@@ -18,20 +18,24 @@
 
 package accord.utils;
 
-import accord.utils.async.AsyncChains;
-import accord.utils.async.AsyncResult;
-import accord.utils.async.AsyncResults;
+import accord.utils.async.TimeoutUtils;
 
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
@@ -39,7 +43,7 @@ public class Property
 {
     public static abstract class Common<T extends Common<T>>
     {
-        protected long seed = ThreadLocalRandom.current().nextLong();
+        protected long seed = SeedProvider.instance.nextSeed();
         protected int examples = 1000;
 
         protected boolean pure = true;
@@ -85,24 +89,9 @@ public class Property
 
         protected void checkWithTimeout(Runnable fn)
         {
-            AsyncResult.Settable<?> promise = AsyncResults.settable();
-            Thread t = new Thread(() -> {
-                try
-                {
-                    fn.run();
-                    promise.setSuccess(null);
-                }
-                catch (Throwable e)
-                {
-                    promise.setFailure(e);
-                }
-            });
-            t.setName("property with timeout");
-            t.setDaemon(true);
             try
             {
-                t.start();
-                AsyncChains.getBlocking(promise, timeout.toNanos(), TimeUnit.NANOSECONDS);
+                TimeoutUtils.runBlocking(timeout, "property with timeout", fn::run);
             }
             catch (ExecutionException e)
             {
@@ -110,12 +99,10 @@ public class Property
             }
             catch (InterruptedException e)
             {
-                t.interrupt();
                 throw new PropertyError(propertyError(this, e));
             }
             catch (TimeoutException e)
             {
-                t.interrupt();
                 TimeoutException override = new TimeoutException("property test did not complete within " + this.timeout);
                 override.setStackTrace(new StackTraceElement[0]);
                 throw new PropertyError(propertyError(this, override));
@@ -222,10 +209,12 @@ public class Property
         StringBuilder sb = propertyErrorCommon(input, cause);
         sb.append("Steps: ").append(input.steps).append('\n');
         sb.append("Values:\n");
-        sb.append("\tState: ").append(state).append(": ").append(state == null ? "unknown type" : state.getClass().getCanonicalName()).append('\n');
+        String stateStr = state == null ? null : state.toString().replace("\n", "\n\t\t");
+        sb.append("\tState: ").append(stateStr).append(": ").append(state == null ? "unknown type" : state.getClass().getCanonicalName()).append('\n');
         sb.append("\tHistory:").append('\n');
+        int idx = 0;
         for (var event : history)
-            sb.append("\t\t").append(event).append('\n');
+            sb.append("\t\t").append(++idx).append(": ").append(event).append('\n');
         return sb.toString();
     }
 
@@ -415,6 +404,8 @@ public class Property
     public static class StatefulBuilder extends Common<StatefulBuilder>
     {
         protected int steps = 1000;
+        @Nullable
+        protected Duration stepTimeout = null;
 
         public StatefulBuilder()
         {
@@ -424,6 +415,12 @@ public class Property
         public StatefulBuilder withSteps(int steps)
         {
             this.steps = steps;
+            return this;
+        }
+
+        public StatefulBuilder withStepTimeout(Duration duration)
+        {
+            stepTimeout = duration;
             return this;
         }
 
@@ -454,16 +451,35 @@ public class Property
                                     throw new IllegalArgumentException("Unable to find next command");
                                 cmd = cmdGen.next(rs);
                             }
-                            history.add(cmd.detailed(state));
-                            Object stateResult = cmd.apply(state);
-                            cmd.checkPostconditions(state, stateResult,
-                                                    sut, cmd.run(sut));
+                            if (cmd instanceof MultistepCommand)
+                            {
+                                for (Command<State, SystemUnderTest, ?> sub : ((MultistepCommand<State, SystemUnderTest>) cmd))
+                                {
+                                    history.add(sub.detailed(state));
+                                    process(sub, state, sut, history.size());
+                                }
+                            }
+                            else
+                            {
+                                history.add(cmd.detailed(state));
+                                process(cmd, state, sut, history.size());
+                            }
                         }
+                        commands.destroySut(sut, null);
+                        commands.destroyState(state, null);
                     }
-                    finally
+                    catch (Throwable t)
                     {
-                        commands.destroySut(sut);
-                        commands.destroyState(state);
+                        try
+                        {
+                            commands.destroySut(sut, t);
+                            commands.destroyState(state, t);
+                        }
+                        catch (Throwable t2)
+                        {
+                            t.addSuppressed(t2);
+                        }
+                        throw t;
                     }
                 }
                 catch (Throwable t)
@@ -477,6 +493,16 @@ public class Property
                 }
             }
         }
+
+        private <State, SystemUnderTest> void process(Command cmd, State state, SystemUnderTest sut, int id) throws Throwable
+        {
+            if (stepTimeout == null)
+            {
+                cmd.process(state, sut);
+                return;
+            }
+            TimeoutUtils.runBlocking(stepTimeout, "Stateful Step " + id, () -> cmd.process(state, sut));
+        }
     }
 
     public enum PreCheckResult { Ok, Ignore }
@@ -488,6 +514,112 @@ public class Property
         default void checkPostconditions(State state, Result expected,
                                          SystemUnderTest sut, Result actual) throws Throwable {}
         default String detailed(State state) {return this.toString();}
+        default void process(State state, SystemUnderTest sut) throws Throwable
+        {
+            checkPostconditions(state, apply(state),
+                                sut, run(sut));
+        }
+    }
+
+    public static <State, SystemUnderTest> MultistepCommand<State, SystemUnderTest> multistep(Command<State, SystemUnderTest, ?>... cmds)
+    {
+        return multistep(Arrays.asList(cmds));
+    }
+
+    public static <State, SystemUnderTest> MultistepCommand<State, SystemUnderTest> multistep(List<Command<State, SystemUnderTest, ?>> cmds)
+    {
+        List<Command<State, SystemUnderTest, ?>> result = new ArrayList<>(cmds.size());
+        for (Command<State, SystemUnderTest, ?> c : cmds)
+        {
+            if (c instanceof MultistepCommand) result.addAll(flatten((MultistepCommand<State, SystemUnderTest>) c));
+            else                               result.add(c);
+        }
+        return result::iterator;
+    }
+
+    private static <State, SystemUnderTest> Collection<? extends Command<State, SystemUnderTest, ?>> flatten(MultistepCommand<State, SystemUnderTest> mc)
+    {
+        List<Command<State, SystemUnderTest, ?>> result = new ArrayList<>();
+        for (Command<State, SystemUnderTest, ?> c : mc)
+        {
+            if (c instanceof MultistepCommand) result.addAll(flatten((MultistepCommand<State, SystemUnderTest>) c));
+            else                               result.add(c);
+        }
+        return result;
+    }
+
+    public interface MultistepCommand<State, SystemUnderTest> extends Command<State, SystemUnderTest, Object>, Iterable<Command<State, SystemUnderTest, ?>>
+    {
+        @Override
+        default PreCheckResult checkPreconditions(State state)
+        {
+            for (Command<State, SystemUnderTest, ?> cmd : this)
+            {
+                PreCheckResult result = cmd.checkPreconditions(state);
+                if (result != PreCheckResult.Ok) return result;
+            }
+            return PreCheckResult.Ok;
+        }
+
+        @Override
+        default Object apply(State state) throws Throwable
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        default Object run(SystemUnderTest sut) throws Throwable
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        default void checkPostconditions(State state, Object expected, SystemUnderTest sut, Object actual) throws Throwable
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        default String detailed(State state)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        default void process(State state, SystemUnderTest sut) throws Throwable
+        {
+            throw new UnsupportedOperationException();
+        }
+    }
+
+    public static <State, SystemUnderTest, Result> Command<State, SystemUnderTest, Result> ignoreCommand()
+    {
+        return new Command<>()
+        {
+            @Override
+            public PreCheckResult checkPreconditions(State state)
+            {
+                return PreCheckResult.Ignore;
+            }
+
+            @Override
+            public Result apply(State state) throws Throwable
+            {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public Result run(SystemUnderTest sut) throws Throwable
+            {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public String detailed(State state)
+            {
+                throw new UnsupportedOperationException();
+            }
+        };
     }
 
     public interface UnitCommand<State, SystemUnderTest> extends Command<State, SystemUnderTest, Void>
@@ -510,12 +642,276 @@ public class Property
         }
     }
 
+    public interface StateOnlyCommand<State> extends UnitCommand<State, Void>
+    {
+        @Override
+        default void runUnit(Void sut) throws Throwable {}
+    }
+
+    public static class SimpleCommand<State> implements StateOnlyCommand<State>
+    {
+        private final Function<State, String> name;
+        private final Consumer<State> fn;
+
+        public SimpleCommand(String name, Consumer<State> fn)
+        {
+            this.name = ignore -> name;
+            this.fn = fn;
+        }
+
+        public SimpleCommand(Function<State, String> name, Consumer<State> fn)
+        {
+            this.name = name;
+            this.fn = fn;
+        }
+
+        @Override
+        public String detailed(State state)
+        {
+            return name.apply(state);
+        }
+
+        @Override
+        public void applyUnit(State state)
+        {
+            fn.accept(state);
+        }
+    }
+
     public interface Commands<State, SystemUnderTest>
     {
         Gen<State> genInitialState() throws Throwable;
         SystemUnderTest createSut(State state) throws Throwable;
-        default void destroyState(State state) throws Throwable {}
-        default void destroySut(SystemUnderTest sut) throws Throwable {}
+        default void destroyState(State state, @Nullable Throwable cause) throws Throwable {}
+        default void destroySut(SystemUnderTest sut, @Nullable Throwable cause) throws Throwable {}
         Gen<Command<State, SystemUnderTest, ?>> commands(State state) throws Throwable;
+    }
+
+    public static <State, SystemUnderTest> CommandsBuilder<State, SystemUnderTest> commands(Supplier<Gen<State>> stateGen, Function<State, SystemUnderTest> sutFactory)
+    {
+        return new CommandsBuilder<>(stateGen, sutFactory);
+    }
+
+    public static <State> CommandsBuilder<State, Void> commands(Supplier<Gen<State>> stateGen)
+    {
+        return new CommandsBuilder<>(stateGen, ignore -> null);
+    }
+
+    public static class CommandsBuilder<State, SystemUnderTest>
+    {
+        public interface Setup<State, SystemUnderTest>
+        {
+            Command<State, SystemUnderTest, ?> setup(RandomSource rs, State state);
+        }
+        private final Supplier<Gen<State>> stateGen;
+        private final Function<State, SystemUnderTest> sutFactory;
+        private final Map<Setup<State, SystemUnderTest>, Integer> knownWeights = new LinkedHashMap<>();
+        @Nullable
+        private Set<Setup<State, SystemUnderTest>> unknownWeights = null;
+        private Gen.IntGen unknownWeightGen = Gens.ints().between(1, 10);
+        @Nullable
+        private FailingConsumer<State> preCommands = null;
+        @Nullable
+        private FailingBiConsumer<State, Throwable> destroyState = null;
+        @Nullable
+        private FailingBiConsumer<SystemUnderTest, Throwable> destroySut = null;
+
+        public CommandsBuilder(Supplier<Gen<State>> stateGen, Function<State, SystemUnderTest> sutFactory)
+        {
+            this.stateGen = stateGen;
+            this.sutFactory = sutFactory;
+        }
+
+        public CommandsBuilder<State, SystemUnderTest> preCommands(FailingConsumer<State> preCommands)
+        {
+            this.preCommands = preCommands;
+            return this;
+        }
+
+        public CommandsBuilder<State, SystemUnderTest> destroyState(FailingConsumer<State> destroyState)
+        {
+            return destroyState((success, failure) -> {
+                if (failure == null)
+                    destroyState.accept(success);
+            });
+        }
+
+        public CommandsBuilder<State, SystemUnderTest> destroyState(FailingBiConsumer<State, Throwable> destroyState)
+        {
+            this.destroyState = destroyState;
+            return this;
+        }
+
+        public CommandsBuilder<State, SystemUnderTest> destroySut(FailingConsumer<SystemUnderTest> destroySut)
+        {
+            return destroySut((success, failure) -> {
+                if (failure == null)
+                    destroySut.accept(success);
+            });
+        }
+
+        public CommandsBuilder<State, SystemUnderTest> destroySut(FailingBiConsumer<SystemUnderTest, Throwable> destroySut)
+        {
+            this.destroySut = destroySut;
+            return this;
+        }
+
+        public CommandsBuilder<State, SystemUnderTest> add(int weight, Command<State, SystemUnderTest, ?> cmd)
+        {
+            return add(weight, (i1, i2) -> cmd);
+        }
+
+        public CommandsBuilder<State, SystemUnderTest> add(int weight, Gen<Command<State, SystemUnderTest, ?>> cmd)
+        {
+            return add(weight, (rs, state) -> cmd.next(rs));
+        }
+
+        public CommandsBuilder<State, SystemUnderTest> add(int weight, Setup<State, SystemUnderTest> cmd)
+        {
+            knownWeights.put(cmd, weight);
+            return this;
+        }
+
+        public CommandsBuilder<State, SystemUnderTest> add(Command<State, SystemUnderTest, ?> cmd)
+        {
+            return add((i1, i2) -> cmd);
+        }
+
+        public CommandsBuilder<State, SystemUnderTest> add(Gen<Command<State, SystemUnderTest, ?>> cmd)
+        {
+            return add((rs, state) -> cmd.next(rs));
+        }
+
+        public CommandsBuilder<State, SystemUnderTest> add(Setup<State, SystemUnderTest> cmd)
+        {
+            if (unknownWeights == null)
+                unknownWeights = new LinkedHashSet<>();
+            unknownWeights.add(cmd);
+            return this;
+        }
+
+        public CommandsBuilder<State, SystemUnderTest> addIf(Predicate<State> predicate, Gen<Command<State, SystemUnderTest, ?>> cmd)
+        {
+            return add((rs, state) -> {
+                if (!predicate.test(state)) return ignoreCommand();
+                return cmd.next(rs);
+            });
+        }
+
+        public CommandsBuilder<State, SystemUnderTest> addIf(Predicate<State> predicate, Setup<State, SystemUnderTest> cmd)
+        {
+            return add((rs, state) -> {
+                if (!predicate.test(state)) return ignoreCommand();
+                return cmd.setup(rs, state);
+            });
+        }
+
+        public CommandsBuilder<State, SystemUnderTest> addAllIf(Predicate<State> predicate, Consumer<IfBuilder<State, SystemUnderTest>> sub)
+        {
+            sub.accept(new IfBuilder<>()
+            {
+                @Override
+                public IfBuilder<State, SystemUnderTest> add(Setup<State, SystemUnderTest> cmd)
+                {
+                    CommandsBuilder.this.addIf(predicate, cmd);
+                    return this;
+                }
+            });
+            return this;
+        }
+
+        public interface IfBuilder<State, SystemUnderTest>
+        {
+            IfBuilder<State, SystemUnderTest> add(Setup<State, SystemUnderTest> cmd);
+        }
+
+        public CommandsBuilder<State, SystemUnderTest> unknownWeight(Gen.IntGen unknownWeightGen)
+        {
+            this.unknownWeightGen = Objects.requireNonNull(unknownWeightGen);
+            return this;
+        }
+
+        public Commands<State, SystemUnderTest> build()
+        {
+            Gen<Setup<State, SystemUnderTest>> commandsGen;
+            if (unknownWeights == null)
+            {
+                commandsGen = Gens.pick(new LinkedHashMap<>(knownWeights));
+            }
+            else
+            {
+                class DynamicWeightsGen implements Gen<Setup<State, SystemUnderTest>>, Gens.Reset
+                {
+                    Gen<Setup<State, SystemUnderTest>> gen;
+                    @Override
+                    public Setup<State, SystemUnderTest> next(RandomSource rs)
+                    {
+                        if (gen == null)
+                        {
+                            // create random weights
+                            LinkedHashMap<Setup<State, SystemUnderTest>, Integer> clone = new LinkedHashMap<>(knownWeights);
+                            for (Setup<State, SystemUnderTest> s : unknownWeights)
+                                clone.put(s, unknownWeightGen.nextInt(rs));
+                            gen = Gens.pick(clone);
+                        }
+                        return gen.next(rs);
+                    }
+
+                    @Override
+                    public void reset()
+                    {
+                        gen = null;
+                    }
+                }
+                commandsGen = new DynamicWeightsGen();
+            }
+            return new Commands<>()
+            {
+                @Override
+                public Gen<State> genInitialState() throws Throwable
+                {
+                    return stateGen.get();
+                }
+
+                @Override
+                public SystemUnderTest createSut(State state) throws Throwable
+                {
+                    return sutFactory.apply(state);
+                }
+
+                @Override
+                public Gen<Command<State, SystemUnderTest, ?>> commands(State state) throws Throwable
+                {
+                    if (preCommands != null)
+                        preCommands.accept(state);
+                    return commandsGen.map((rs, setup) -> setup.setup(rs, state));
+                }
+
+                @Override
+                public void destroyState(State state, @Nullable Throwable cause) throws Throwable
+                {
+                    Gens.Reset.tryReset(commandsGen);
+                    if (destroyState != null)
+                        destroyState.accept(state, cause);
+                }
+
+                @Override
+                public void destroySut(SystemUnderTest sut, @Nullable Throwable cause) throws Throwable
+                {
+                    if (destroySut != null)
+                        destroySut.accept(sut, cause);
+                }
+            };
+        }
+
+        public interface FailingConsumer<T>
+        {
+            void accept(T value) throws Throwable;
+        }
+
+        public interface FailingBiConsumer<A, B>
+        {
+            void accept(A a, B b) throws Throwable;
+        }
     }
 }
