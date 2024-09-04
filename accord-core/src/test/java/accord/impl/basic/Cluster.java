@@ -893,7 +893,7 @@ public class Cluster implements Scheduler
             else
             {
                 CommandsForKey cfk = store.unsafeCommandsForKey().get(blockedOnKey).value();
-                blockedOn = cfk.nextWaitingToApply(command.txnId().kind().witnesses());
+                blockedOn = cfk.blockedOnTxnId(command.txnId(), command.executeAt());
                 blockedVia = Keys.of(blockedOnKey);
             }
         }

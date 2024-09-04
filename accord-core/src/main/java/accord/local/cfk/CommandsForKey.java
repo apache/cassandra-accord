@@ -319,7 +319,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                    && Arrays.equals(missing(), info.missing());
         }
 
-        TxnId plainTxnId()
+        public TxnId plainTxnId()
         {
             return new TxnId(this);
         }
@@ -787,12 +787,27 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         return redundantBefore.shardRedundantBefore();
     }
 
-    public TxnId nextWaitingToApply(Kinds kinds)
+    private TxnId nextWaitingToApply(Kinds kinds, @Nullable Timestamp untilExecuteAt)
     {
         int i = maxAppliedWriteByExecuteAt + 1;
-        while (i < committedByExecuteAt.length && (committedByExecuteAt[i].status != APPLIED || !kinds.test(committedByExecuteAt[i].kind())))
+        while (i < committedByExecuteAt.length && (committedByExecuteAt[i].status == APPLIED || !kinds.test(committedByExecuteAt[i].kind())))
+        {
+            if (untilExecuteAt != null && committedByExecuteAt[i].compareTo(untilExecuteAt) >= 0)
+                return null;
+
             ++i;
+        }
         return i >= committedByExecuteAt.length ? null : committedByExecuteAt[i];
+    }
+
+    public TxnId blockedOnTxnId(TxnId txnId, @Nullable Timestamp executeAt)
+    {
+        TxnInfo minUndecided = minUndecided();
+        if (minUndecided != null && minUndecided.compareTo(txnId) < 0)
+            return minUndecided.plainTxnId();
+
+        Kinds kinds = txnId.kind().witnesses();
+        return nextWaitingToApply(kinds, executeAt);
     }
 
     /**
@@ -1396,7 +1411,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         return null;
     }
 
-    TxnInfo minUndecided()
+    public TxnInfo minUndecided()
     {
         return minUndecidedById < 0 ? null : byId[minUndecidedById];
     }
