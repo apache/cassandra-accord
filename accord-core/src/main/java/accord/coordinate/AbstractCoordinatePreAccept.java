@@ -217,7 +217,7 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
                 tryFailure(CoordinationFailed.wrap(withEpochFailure));
                 return;
             }
-            TopologyMismatch mismatch = TopologyMismatch.checkForMismatch(node.topology().globalForEpoch(latestEpoch), txnId, route.homeKey(), keysOrRanges());
+            TopologyMismatch mismatch = node.agent().checkForMismatch(node.topology().globalForEpoch(latestEpoch), txnId, route.homeKey(), keysOrRanges());
             if (mismatch != null)
             {
                 initialRoundIsDone = true;
