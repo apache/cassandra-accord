@@ -19,20 +19,25 @@
 package accord.api;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import java.util.concurrent.TimeUnit;
 
 import accord.api.ProgressLog.BlockedUntil;
+import accord.coordinate.TopologyMismatch;
 import accord.local.Command;
 import accord.local.Node;
 import accord.local.SafeCommandStore;
 import accord.messages.ReplyContext;
 import accord.primitives.Ranges;
+import accord.primitives.Routables;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
+import accord.primitives.Unseekables;
+import accord.topology.Topology;
 
 /**
  * Facility for augmenting node behaviour at specific points
@@ -143,4 +148,16 @@ public interface Agent extends UncaughtExceptionListener
      * and re-query the local state.
      */
     long retryAwaitTimeout(Node node, SafeCommandStore safeStore, TxnId txnId, int retryCount, BlockedUntil retrying, TimeUnit units);
+
+    @Nullable
+    default TopologyMismatch checkForMismatch(Topology t, Unseekables<?> select)
+    {
+        return TopologyMismatch.checkForMismatch(t, select);
+    }
+
+    @Nullable
+    default TopologyMismatch checkForMismatch(Topology t, @Nullable TxnId txnId, RoutingKey homeKey, Routables<?> keysOrRanges)
+    {
+        return TopologyMismatch.checkForMismatch(t, txnId, homeKey, keysOrRanges);
+    }
 }

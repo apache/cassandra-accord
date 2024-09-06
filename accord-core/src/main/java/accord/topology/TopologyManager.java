@@ -654,7 +654,7 @@ public class TopologyManager
         Invariants.checkArgument(minEpoch <= maxEpoch);
         Epochs snapshot = epochs;
 
-        TopologyMismatch tm = TopologyMismatch.checkForMismatch(snapshot.get(maxEpoch).global(), select);
+        TopologyMismatch tm = agent.checkForMismatch(snapshot.get(maxEpoch).global(), select);
         if (tm != null)
             throw tm;
 
@@ -724,7 +724,7 @@ public class TopologyManager
 
         EpochState maxState = snapshot.get(maxEpoch);
         checkState(maxState != null, "Unable to find epoch %d; known epochs are %d -> %d", maxEpoch, snapshot.minEpoch(), snapshot.currentEpoch);
-        TopologyMismatch tm = TopologyMismatch.checkForMismatch(maxState.global(), select);
+        TopologyMismatch tm = agent.checkForMismatch(maxState.global(), select);
         if (tm != null)
             throw tm;
 
