@@ -21,6 +21,7 @@ package accord.utils;
 import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.NavigableMap;
@@ -30,7 +31,11 @@ import java.util.SortedMap;
 import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.function.BiFunction;
+import java.util.function.BinaryOperator;
+import java.util.function.Function;
 import java.util.function.IntFunction;
+import java.util.function.Predicate;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedMap;
@@ -149,5 +154,35 @@ public class Utils
             array[j] = array[k];
             array[k] = tmp;
         }
+    }
+
+    public static <A, B> List<B> map(Iterable<A> input,
+                                     Predicate<A> filter,
+                                     Function<? super A, ? extends B> mapper)
+    {
+        List<B> result = null;
+        for (A a : input)
+        {
+            if (filter.test(a))
+            {
+                if (result == null) result = new ArrayList<>();
+                result.add(mapper.apply(a));
+            }
+        }
+        return result == null ? Collections.emptyList() : result;
+    }
+
+    public static <A, B> B reduce(B zero,
+                                  Iterable<A> input,
+                                  Predicate<A> filter,
+                                  BiFunction<B, ? super A, B> reducer)
+    {
+        B result = zero;
+        for (A a : input)
+        {
+            if (filter.test(a))
+                result = reducer.apply(result, a);
+        }
+        return result;
     }
 }

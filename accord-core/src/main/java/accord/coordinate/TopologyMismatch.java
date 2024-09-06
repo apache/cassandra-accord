@@ -82,25 +82,25 @@ public class TopologyMismatch extends CoordinationFailed
     @Nullable
     public static TopologyMismatch checkForMismatch(Topology t, Unseekables<?> select)
     {
-        return t.ranges().containsAll(select) ? null : keysOrRanges(t, select);
-    }
-
-    public static TopologyMismatch keysOrRanges(Topology t, Unseekables<?> select)
-    {
-        return new TopologyMismatch(EnumSet.of(Reason.KEYS_OR_RANGES), t, select);
+        return t.ranges().containsAll(select)
+               && t.reduce(true, s -> select.intersects(s.range), (result, s) -> result & s.pendingRemoval)
+               ? null
+               : new TopologyMismatch(EnumSet.of(Reason.KEYS_OR_RANGES), t, select);
     }
 
     @Nullable
     public static TopologyMismatch checkForMismatch(Topology t, @Nullable TxnId txnId, RoutingKey homeKey, Routables<?> keysOrRanges)
     {
         EnumSet<TopologyMismatch.Reason> reasons = null;
-        if (!t.ranges().contains(homeKey))
+        if (!t.ranges().contains(homeKey)
+            || !t.reduce(true, s -> s.contains(homeKey), (result, s) -> result & s.pendingRemoval))
         {
             if (reasons == null)
                 reasons = EnumSet.noneOf(TopologyMismatch.Reason.class);
             reasons.add(TopologyMismatch.Reason.HOME_KEY);
         }
-        if (!t.ranges().containsAll(keysOrRanges))
+        if (!t.ranges().containsAll(keysOrRanges)
+            || !t.reduce(true, s -> keysOrRanges.intersects(s.range), (result, s) -> result & s.pendingRemoval))
         {
             if (reasons == null)
                 reasons = EnumSet.noneOf(TopologyMismatch.Reason.class);
