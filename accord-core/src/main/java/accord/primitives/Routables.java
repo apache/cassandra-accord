@@ -57,6 +57,10 @@ public interface Routables<K extends Routable> extends Iterable<K>
         return StreamSupport.stream(spliterator(), false);
     }
     boolean intersects(AbstractRanges ranges);
+    default boolean intersects(Range range)
+    {
+        return intersects(Ranges.single(range));
+    }
     boolean intersects(AbstractKeys<?> keys);
     default boolean intersects(Routables<?> routables)
     {
