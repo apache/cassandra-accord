@@ -708,6 +708,8 @@ public class Property
         private final Map<Setup<State, SystemUnderTest>, Integer> knownWeights = new LinkedHashMap<>();
         @Nullable
         private Set<Setup<State, SystemUnderTest>> unknownWeights = null;
+        @Nullable
+        private Map<Predicate<State>, List<Setup<State, SystemUnderTest>>> conditionalCommands = null;
         private Gen.IntGen unknownWeightGen = Gens.ints().between(1, 10);
         @Nullable
         private FailingConsumer<State> preCommands = null;
@@ -792,18 +794,15 @@ public class Property
 
         public CommandsBuilder<State, SystemUnderTest> addIf(Predicate<State> predicate, Gen<Command<State, SystemUnderTest, ?>> cmd)
         {
-            return add((rs, state) -> {
-                if (!predicate.test(state)) return ignoreCommand();
-                return cmd.next(rs);
-            });
+            return addIf(predicate, (rs, state) -> cmd.next(rs));
         }
 
         public CommandsBuilder<State, SystemUnderTest> addIf(Predicate<State> predicate, Setup<State, SystemUnderTest> cmd)
         {
-            return add((rs, state) -> {
-                if (!predicate.test(state)) return ignoreCommand();
-                return cmd.setup(rs, state);
-            });
+            if (conditionalCommands == null)
+                conditionalCommands = new LinkedHashMap<>();
+            conditionalCommands.computeIfAbsent(predicate, i -> new ArrayList<>()).add(cmd);
+            return this;
         }
 
         public CommandsBuilder<State, SystemUnderTest> addAllIf(Predicate<State> predicate, Consumer<IfBuilder<State, SystemUnderTest>> sub)
@@ -834,7 +833,7 @@ public class Property
         public Commands<State, SystemUnderTest> build()
         {
             Gen<Setup<State, SystemUnderTest>> commandsGen;
-            if (unknownWeights == null)
+            if (unknownWeights == null && conditionalCommands == null)
             {
                 commandsGen = Gens.pick(new LinkedHashMap<>(knownWeights));
             }
@@ -842,25 +841,52 @@ public class Property
             {
                 class DynamicWeightsGen implements Gen<Setup<State, SystemUnderTest>>, Gens.Reset
                 {
-                    Gen<Setup<State, SystemUnderTest>> gen;
+                    LinkedHashMap<Setup<State, SystemUnderTest>, Integer> weights;
+                    LinkedHashMap<Setup<State, SystemUnderTest>, Integer> conditionalWeights;
+                    Gen<Setup<State, SystemUnderTest>> nonConditional;
                     @Override
                     public Setup<State, SystemUnderTest> next(RandomSource rs)
                     {
-                        if (gen == null)
+                        if (weights == null)
                         {
                             // create random weights
-                            LinkedHashMap<Setup<State, SystemUnderTest>, Integer> clone = new LinkedHashMap<>(knownWeights);
-                            for (Setup<State, SystemUnderTest> s : unknownWeights)
-                                clone.put(s, unknownWeightGen.nextInt(rs));
-                            gen = Gens.pick(clone);
+                            weights = new LinkedHashMap<>(knownWeights);
+                            if (unknownWeights != null)
+                            {
+                                for (Setup<State, SystemUnderTest> s : unknownWeights)
+                                    weights.put(s, unknownWeightGen.nextInt(rs));
+                            }
+                            nonConditional = Gens.pick(weights);
+                            if (conditionalCommands != null)
+                            {
+                                conditionalWeights = new LinkedHashMap<>();
+                                for (List<Setup<State, SystemUnderTest>> commands : conditionalCommands.values())
+                                {
+                                    for (Setup<State, SystemUnderTest> c : commands)
+                                        conditionalWeights.put(c, unknownWeightGen.nextInt(rs));
+                                }
+                            }
                         }
-                        return gen.next(rs);
+                        if (conditionalWeights == null) return nonConditional.next(rs);
+                        return (r, s) -> {
+                            // need to figure out what conditions apply...
+                            LinkedHashMap<Setup<State, SystemUnderTest>, Integer> clone = new LinkedHashMap<>(weights);
+                            for (Map.Entry<Predicate<State>, List<Setup<State, SystemUnderTest>>> e : conditionalCommands.entrySet())
+                            {
+                                if (e.getKey().test(s))
+                                    e.getValue().forEach(c -> clone.put(c, conditionalWeights.get(c)));
+                            }
+                            Setup<State, SystemUnderTest> select = Gens.pick(clone).next(r);
+                            return select.setup(r, s);
+                        };
                     }
 
                     @Override
                     public void reset()
                     {
-                        gen = null;
+                        weights = null;
+                        nonConditional = null;
+                        conditionalWeights = null;
                     }
                 }
                 commandsGen = new DynamicWeightsGen();
