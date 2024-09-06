@@ -99,7 +99,7 @@ public class CoordinateSyncPoint<S extends Seekables<?, ?>> extends CoordinatePr
     {
         checkArgument(txnId.kind() == Kind.SyncPoint || txnId.kind() == ExclusiveSyncPoint);
         FullRoute<?> route = node.computeRoute(txnId, keysOrRanges);
-        TopologyMismatch mismatch = node.agent().checkForMismatch(node.topology().globalForEpoch(txnId.epoch()), txnId, route.homeKey(), keysOrRanges);
+        TopologyMismatch mismatch = TopologyMismatch.checkForMismatch(node.topology().globalForEpoch(txnId.epoch()), txnId, route.homeKey(), keysOrRanges);
         if (mismatch != null)
             return AsyncResults.failure(mismatch);
         CoordinateSyncPoint<S> coordinate = new CoordinateSyncPoint<>(node, txnId, node.agent().emptySystemTxn(txnId.kind(), keysOrRanges), route, adapter);

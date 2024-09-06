@@ -67,7 +67,7 @@ public class FetchMaxConflict extends AbstractCoordinatePreAccept<Timestamp, Get
         long epoch = node.epoch();
         FullRoute<?> route = node.computeRoute(epoch, keysOrRanges);
         // TODO (required): need to ensure we permanently fail any bootstrap that is now impossible and mark as stale
-        TopologyMismatch mismatch = node.agent().checkForMismatch(node.topology().globalForEpoch(epoch), null, route.homeKey(), keysOrRanges);
+        TopologyMismatch mismatch = TopologyMismatch.checkForMismatch(node.topology().globalForEpoch(epoch), null, route.homeKey(), keysOrRanges);
         if (mismatch != null)
             return AsyncResults.failure(mismatch);
         FetchMaxConflict coordinate = new FetchMaxConflict(node, route, keysOrRanges, epoch);
