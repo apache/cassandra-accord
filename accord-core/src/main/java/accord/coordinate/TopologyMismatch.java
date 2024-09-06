@@ -82,7 +82,12 @@ public class TopologyMismatch extends CoordinationFailed
     @Nullable
     public static TopologyMismatch checkForMismatch(Topology t, Unseekables<?> select)
     {
-        return t.ranges().containsAll(select) ? null : new TopologyMismatch(EnumSet.of(Reason.KEYS_OR_RANGES), t, select);
+        return t.ranges().containsAll(select) ? null : keysOrRanges(t, select);
+    }
+
+    public static TopologyMismatch keysOrRanges(Topology t, Unseekables<?> select)
+    {
+        return new TopologyMismatch(EnumSet.of(Reason.KEYS_OR_RANGES), t, select);
     }
 
     @Nullable
