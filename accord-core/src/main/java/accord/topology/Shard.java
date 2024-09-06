@@ -44,8 +44,9 @@ public class Shard
     public final int recoveryFastPathSize;
     public final int fastPathQuorumSize;
     public final int slowPathQuorumSize;
+    public final boolean pendingRemoval;
 
-    public Shard(Range range, SortedArrayList<Id> nodes, Set<Id> fastPathElectorate, Set<Id> joining)
+    public Shard(Range range, SortedArrayList<Id> nodes, Set<Id> fastPathElectorate, Set<Id> joining, boolean pendingRemoval)
     {
         this.range = range;
         this.nodes = nodes;
@@ -57,6 +58,12 @@ public class Shard
         this.recoveryFastPathSize = (maxFailures+1)/2;
         this.slowPathQuorumSize = slowPathQuorumSize(nodes.size());
         this.fastPathQuorumSize = fastPathQuorumSize(nodes.size(), e, maxFailures);
+        this.pendingRemoval = pendingRemoval;
+    }
+
+    public Shard(Range range, SortedArrayList<Id> nodes, Set<Id> fastPathElectorate, Set<Id> joining)
+    {
+        this(range, nodes, fastPathElectorate, joining, false);
     }
 
     public Shard(Range range, SortedArrayList<Id> nodes, Set<Id> fastPathElectorate)
