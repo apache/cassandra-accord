@@ -851,6 +851,17 @@ public class Commands
                               || (command.route() == null || Infer.safeToCleanup(safeStore, command, command.route(), command.executeAt()) || safeStore.isFullyPreBootstrapOrStale(command, command.route().participants()))
         , "Command %s could not be truncated", command);
 
+        Command result = purge(command, maybeFullRoute, cleanup);
+
+        safeCommand.update(safeStore, result);
+        safeStore.progressLog().clear(safeCommand.txnId());
+        if (notifyListeners)
+            safeStore.notifyListeners(safeCommand, command);
+
+        return result;
+    }
+    public static Command purge(Command command, @Nullable Unseekables<?> maybeFullRoute, Cleanup cleanup)
+    {
         Command result;
         switch (cleanup)
         {
@@ -878,10 +889,7 @@ public class Commands
                 break;
         }
 
-        safeCommand.update(safeStore, result);
-        safeStore.progressLog().clear(safeCommand.txnId());
-        if (notifyListeners)
-            safeStore.notifyListeners(safeCommand, command);
+
         return result;
     }
 
