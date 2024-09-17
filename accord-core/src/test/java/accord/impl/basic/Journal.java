@@ -270,7 +270,7 @@ public class Journal implements Runnable
                 if (command == last)
                     loading = false;
 
-                consumer.load(prev, command, !seen.contains(PreApplied) && command.hasBeen(PreApplied) && !command.is(Invalidated));
+                consumer.load(prev, command, !seen.contains(PreApplied) && command.hasBeen(PreApplied) && !command.is(Invalidated) && !command.is(Truncated));
                 prev = command;
             }
         }
