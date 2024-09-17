@@ -227,12 +227,6 @@ public class CommandsForKeyTest
         }
 
         @Override
-        public void notWaiting(SafeCommandStore safeStore, SafeCommand safeCommand, Key key)
-        {
-            notWaiting(safeStore, safeCommand.txnId(), key);
-        }
-
-        @Override
         public void waitingOn(SafeCommandStore safeStore, TxnInfo txn, Key key, SaveStatus waitingOnStatus, BlockedUntil blockedUntil, boolean notifyCfk)
         {
         }

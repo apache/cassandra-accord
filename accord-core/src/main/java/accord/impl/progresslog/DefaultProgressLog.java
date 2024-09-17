@@ -280,8 +280,8 @@ public class DefaultProgressLog implements ProgressLog, Runnable
 
     public void clear()
     {
-        for (TxnState state : BTree.<TxnState>iterable(stateMap))
-            unschedule(state);
+        timers.clear();
+        timerScheduling.clear();
 
         stateMap = BTree.empty();
         progressTokenMap = BTree.empty();
