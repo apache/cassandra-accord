@@ -220,31 +220,50 @@ public class Cluster implements Scheduler
             processNext(next);
     }
 
+    boolean hasNonRecurring()
+    {
+        boolean hasNonRecurring = false;
+        for (Pending p : pending)
+        {
+            if (!(p instanceof RecurringPendingRunnable))
+                continue;
+            RecurringPendingRunnable r = (RecurringPendingRunnable) p;
+            if (r.requeue.hasNonRecurring())
+            {
+                hasNonRecurring = true;
+                break;
+            }
+        }
+
+        return hasNonRecurring;
+    }
+
     public boolean processPending()
     {
         checkFailures.run();
-        if (recurring > 0 && pending.size() == recurring)
-        {
-            boolean hasNonRecurring = false;
-            for (Pending p : pending)
-            {
-                if (((RecurringPendingRunnable) p).requeue.hasNonRecurring())
-                {
-                    hasNonRecurring = true;
-                    break;
-                }
-            }
-            if (!hasNonRecurring)
-                return false;
-        }
+        // All remaining tasks are recurring
+        if (recurring > 0 && pending.size() == recurring && !hasNonRecurring())
+            return false;
 
-        Object next = pending.poll();
+        Pending next = pending.poll();
         if (next == null)
             return false;
 
         processNext(next);
 
         checkFailures.run();
+
+        // If drain was requested, run until we have no non-recurring tasks are available
+        if (next instanceof RecurringPendingRunnable && ((RecurringPendingRunnable) next).drainAfterRunning)
+        {
+            pending.drain(item -> {
+                processNext(item);
+                checkFailures.run();
+            });
+
+            return false;
+        }
+
         return true;
     }
 
@@ -288,7 +307,12 @@ public class Cluster implements Scheduler
     @Override
     public Scheduled recurring(Runnable run, long delay, TimeUnit units)
     {
-        RecurringPendingRunnable result = new RecurringPendingRunnable(pending, run, delay, units);
+        return recurring(run, delay, units, false);
+    }
+
+    private Scheduled recurring(Runnable run, long delay, TimeUnit units, boolean drainAfterRunning)
+    {
+        RecurringPendingRunnable result = new RecurringPendingRunnable(pending, run, delay, units, drainAfterRunning);
         ++recurring;
         result.onCancellation(() -> --recurring);
         pending.add(result, delay, units);
@@ -298,7 +322,7 @@ public class Cluster implements Scheduler
     @Override
     public Scheduled once(Runnable run, long delay, TimeUnit units)
     {
-        RecurringPendingRunnable result = new RecurringPendingRunnable(null, run, delay, units);
+        RecurringPendingRunnable result = new RecurringPendingRunnable(null, run, delay, units, false);
         pending.add(result, delay, units);
         return result;
     }
@@ -514,7 +538,7 @@ public class Cluster implements Scheduler
                     journal.reconstructAll(store::load, store.id());
                     journal.loadHistoricalTransactions(store::load, store.id());
                 }
-            }, 5, SECONDS);
+            }, 5, SECONDS, true);
 
             durabilityScheduling.forEach(CoordinateDurabilityScheduling::start);
             services.forEach(Service::start);

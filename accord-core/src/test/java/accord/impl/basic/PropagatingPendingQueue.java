@@ -21,6 +21,7 @@ package accord.impl.basic;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 public class PropagatingPendingQueue implements PendingQueue
 {
@@ -62,6 +63,12 @@ public class PropagatingPendingQueue implements PendingQueue
     {
         checkFailures();
         return wrapped.poll();
+    }
+
+    @Override
+    public void drain(Consumer<Pending> consumer)
+    {
+        wrapped.drain(consumer);
     }
 
     public void checkFailures()

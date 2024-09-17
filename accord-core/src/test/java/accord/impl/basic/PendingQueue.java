@@ -19,6 +19,7 @@
 package accord.impl.basic;
 
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 public interface PendingQueue extends Iterable<Pending>
 {
@@ -27,6 +28,7 @@ public interface PendingQueue extends Iterable<Pending>
     void add(Pending item, long delay, TimeUnit units);
     boolean remove(Pending item);
     Pending poll();
+    void drain(Consumer<Pending> consumer);
     int size();
     long nowInMillis();
 

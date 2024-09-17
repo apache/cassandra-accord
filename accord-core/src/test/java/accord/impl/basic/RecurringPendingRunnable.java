@@ -29,13 +29,15 @@ class RecurringPendingRunnable implements PendingRunnable, Scheduled
     final TimeUnit units;
     Runnable run;
     Runnable onCancellation;
+    final boolean drainAfterRunning;
 
-    RecurringPendingRunnable(PendingQueue requeue, Runnable run, long delay, TimeUnit units)
+    RecurringPendingRunnable(PendingQueue requeue, Runnable run, long delay, TimeUnit units, boolean drainAfterRunning)
     {
         this.requeue = requeue;
         this.run = run;
         this.delay = delay;
         this.units = units;
+        this.drainAfterRunning = drainAfterRunning;
     }
 
     @Override
@@ -44,9 +46,14 @@ class RecurringPendingRunnable implements PendingRunnable, Scheduled
         if (run != null)
         {
             run.run();
-            if (requeue != null) requeue.add(this, delay, units);
-            else run = null;
+            maybeRequeue();
         }
+    }
+
+    public void maybeRequeue()
+    {
+        if (requeue != null) requeue.add(this, delay, units);
+        else run = null;
     }
 
     @Override
