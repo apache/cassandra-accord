@@ -1386,7 +1386,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                                  safeStore.updateMaxConflicts(prev, next);
                                  safeStore.updateCommandsForKey(prev, next);
                                  safeStore.progressLog().update(safeStore, next.txnId(), prev, next);
-                                 if (next.is(Stable) || !next.is(PreApplied))
+                                 if (next.is(Stable) || next.is(PreApplied))
                                      Commands.maybeExecute(safeStore, safeStore.get(next.txnId(), next.route().homeKey()), true, true);
                              });
 
