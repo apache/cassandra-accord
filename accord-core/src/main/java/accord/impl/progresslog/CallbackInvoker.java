@@ -100,5 +100,11 @@ class CallbackInvoker<P, V> implements BiConsumer<V, Throwable>
     {
         return txnId.hashCode();
     }
+
+    @Override
+    public String toString()
+    {
+        return txnId + (isHome ? ":Home:" : ":Waiting:") + owner.commandStore;
+    }
 }
 

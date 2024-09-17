@@ -293,7 +293,6 @@ public class DefaultProgressLog implements ProgressLog, Runnable
 
         runBuffer = EMPTY_RUN_BUFFER;
         runBufferCount = 0;
-        nextInvokerId = 0;
     }
 
     private void clear(TxnState state)
