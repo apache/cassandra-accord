@@ -15,21 +15,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package accord.local;
 
-import javax.annotation.Nonnull;
-
 import accord.api.RoutingKey;
-import accord.primitives.AbstractRanges;
 import accord.primitives.Routables;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
-import accord.utils.ReducingIntervalMap;
-import accord.utils.ReducingRangeMap;
+import accord.utils.BTreeReducingRangeMap;
 
 // TODO (expected): track read/write conflicts separately
-public class MaxConflicts extends ReducingRangeMap<Timestamp>
+class MaxConflicts extends BTreeReducingRangeMap<Timestamp>
 {
     public static final MaxConflicts EMPTY = new MaxConflicts();
 
@@ -38,59 +33,32 @@ public class MaxConflicts extends ReducingRangeMap<Timestamp>
         super();
     }
 
-    private MaxConflicts(boolean inclusiveEnds, RoutingKey[] starts, Timestamp[] values)
+    private MaxConflicts(boolean inclusiveEnds, Object[] tree)
     {
-        super(inclusiveEnds, starts, values);
+        super(inclusiveEnds, tree);
     }
 
-    public Timestamp get(Seekables<?, ?> keysOrRanges)
-    {
-        return foldl(keysOrRanges, Timestamp::max, Timestamp.NONE);
-    }
-
-    public Timestamp get(Routables<?> keysOrRanges)
+    Timestamp get(Routables<?> keysOrRanges)
     {
         return foldl(keysOrRanges, Timestamp::max, Timestamp.NONE);
     }
 
-    MaxConflicts update(Seekables<?, ?> keysOrRanges, Timestamp maxConflict)
+    public MaxConflicts update(Seekables<?, ?> keysOrRanges, Timestamp maxConflict)
     {
-        return merge(this, create(keysOrRanges, maxConflict));
+        return update(this, keysOrRanges, maxConflict, Timestamp::max, MaxConflicts::new, Builder::new);
     }
 
-    public static MaxConflicts create(AbstractRanges ranges, @Nonnull Timestamp maxConflict)
-    {
-        if (ranges.isEmpty())
-            return MaxConflicts.EMPTY;
-
-        return create(ranges, maxConflict, MaxConflicts.Builder::new);
-    }
-
-    public static MaxConflicts create(Seekables<?, ?> keysOrRanges, @Nonnull Timestamp maxConflict)
-    {
-        if (keysOrRanges.isEmpty())
-            return MaxConflicts.EMPTY;
-
-        return create(keysOrRanges, maxConflict, Builder::new);
-    }
-
-    public static MaxConflicts merge(MaxConflicts a, MaxConflicts b)
-    {
-        return ReducingIntervalMap.merge(a, b, Timestamp::max, MaxConflicts.Builder::new);
-    }
-
-    static class Builder extends AbstractBoundariesBuilder<RoutingKey, Timestamp, MaxConflicts>
+    private static class Builder extends AbstractBoundariesBuilder<RoutingKey, Timestamp, MaxConflicts>
     {
         protected Builder(boolean inclusiveEnds, int capacity)
         {
             super(inclusiveEnds, capacity);
         }
 
-        @SuppressWarnings("unchecked")
         @Override
-        protected MaxConflicts buildInternal()
+        protected MaxConflicts buildInternal(Object[] tree)
         {
-            return new MaxConflicts(inclusiveEnds, starts.toArray(new RoutingKey[0]), values.toArray(new Timestamp[0]));
+            return new MaxConflicts(inclusiveEnds, tree);
         }
     }
 }

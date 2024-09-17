@@ -205,9 +205,21 @@ public abstract class AbstractRanges implements Iterable<Range>, Routables<Range
     }
 
     @Override
+    public final int find(Range find, SortedArrays.Search search)
+    {
+        return SortedArrays.binarySearch(ranges, 0, size(), find, Range::compareIntersecting, search);
+    }
+
+    @Override
     public final int findNext(int thisIndex, Range find, SortedArrays.Search search)
     {
         return SortedArrays.exponentialSearch(ranges, thisIndex, size(), find, Range::compareIntersecting, search);
+    }
+
+    @Override
+    public final int find(RoutableKey find, SortedArrays.Search search)
+    {
+        return SortedArrays.binarySearch(ranges, 0, size(), find, (k, r) -> -r.compareTo(k), search);
     }
 
     @Override

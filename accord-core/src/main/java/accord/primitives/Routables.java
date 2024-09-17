@@ -104,9 +104,19 @@ public interface Routables<K extends Routable> extends Iterable<K>
     long findNextIntersection(int thisIndex, Routables<K> with, int withIndex);
 
     /**
+     * Perform {@link SortedArrays#binarySearch} looking for {@code find} with behaviour of {@code search}
+     */
+    int find(Range find, SortedArrays.Search search);
+
+    /**
      * Perform {@link SortedArrays#exponentialSearch} from {@code thisIndex} looking for {@code find} with behaviour of {@code search}
      */
     int findNext(int thisIndex, Range find, SortedArrays.Search search);
+
+    /**
+     * Perform {@link SortedArrays#binarySearch} looking for {@code find} with behaviour of {@code search}
+     */
+    int find(RoutableKey find, SortedArrays.Search search);
 
     /**
      * Perform {@link SortedArrays#exponentialSearch} from {@code thisIndex} looking for {@code find} with behaviour of {@code search}
