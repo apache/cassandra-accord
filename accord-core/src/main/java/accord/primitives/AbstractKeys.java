@@ -118,9 +118,21 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
     }
 
     @Override
+    public final int find(RoutableKey key, SortedArrays.Search search)
+    {
+        return SortedArrays.binarySearch(keys, 0, keys.length, key, RoutableKey::compareTo, search);
+    }
+
+    @Override
     public final int findNext(int thisIndex, RoutableKey key, SortedArrays.Search search)
     {
         return SortedArrays.exponentialSearch(keys, thisIndex, keys.length, key, RoutableKey::compareTo, search);
+    }
+
+    @Override
+    public final int find(Range find, SortedArrays.Search search)
+    {
+        return SortedArrays.binarySearch(keys, 0, size(), find, Range::compareTo, search);
     }
 
     @Override

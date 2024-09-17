@@ -127,12 +127,13 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         if (values.length == 0)
             return accumulator;
 
-        int i = 0, j = keys.findNext(0, starts[0], FAST);
+        int i = 0, j = keys.find(starts[0], FAST);
         if (j < 0) j = -1 - j;
         else if (inclusiveEnds) ++j;
 
         while (j < keys.size())
         {
+            // TODO (desired): first search should be binarySearch
             i = exponentialSearch(starts, i, starts.length, keys.get(j));
             if (i < 0) i = -2 - i;
             else if (inclusiveEnds) --i;
@@ -161,26 +162,27 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         if (values.length == 0)
             return accumulator;
 
-        // TODO (desired): first searches should be binarySearch
-        int j = ranges.findNext(0, starts[0], FAST);
+        int j = ranges.find(starts[0], FAST);
         if (j < 0) j = -1 - j;
         else if (inclusiveEnds && ranges.get(j).end().equals(starts[0])) ++j;
 
         int i = 0;
         while (j < ranges.size())
         {
-            Range range = ranges.get(j);
-            RoutingKey start = range.start();
-            int nexti = exponentialSearch(starts, i, starts.length, start);
+            // TODO (desired): first search should be binarySearch
+            int nexti = exponentialSearch(starts, i, starts.length, ranges.get(j).start());
             if (nexti < 0) i = Math.max(i, -2 - nexti);
-            else if (nexti > i && !inclusiveStarts()) i = nexti - 1;
+            else if (nexti > i && inclusiveEnds) i = nexti - 1;
             else i = nexti;
 
             if (i >= values.length)
                 return accumulator;
 
             int toj, nextj = ranges.findNext(j, starts[i + 1], FAST);
-            if (nextj < 0) toj = nextj = -1 -nextj;
+            if (nextj < 0)
+            {
+                toj = nextj = -1 - nextj;
+            }
             else
             {
                 toj = nextj + 1;
@@ -215,7 +217,7 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         if (values.length == 0 || keys.isEmpty())
             return fold.apply(defaultValue, accumulator, p1, p2, 0, keys.size());
 
-        int i = 0, j = keys.findNext(0, starts[0], FAST);
+        int i = 0, j = keys.find(starts[0], FAST);
         if (j < 0) j = -1 - j;
         else if (inclusiveEnds) ++j;
 
@@ -224,6 +226,7 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
 
         while (j < keys.size())
         {
+            // TODO (desired): first search should be binarySearch
             i = exponentialSearch(starts, i, starts.length, keys.get(j));
             if (i < 0) i = -2 - i;
             else if (inclusiveEnds) --i;
@@ -256,8 +259,7 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         if (values.length == 0 || ranges.isEmpty())
             return fold.apply(defaultValue, accumulator, p1, p2, 0, ranges.size());
 
-        // TODO (desired): first searches should be binarySearch
-        int j = ranges.findNext(0, starts[0], FAST);
+        int j = ranges.find(starts[0], FAST);
         if (j < 0) j = -1 - j;
         else if (inclusiveEnds && ranges.get(j).end().equals(starts[0])) ++j;
 
@@ -267,18 +269,20 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         int i = 0;
         while (j < ranges.size())
         {
-            Range range = ranges.get(j);
-            RoutingKey start = range.start();
-            int nexti = exponentialSearch(starts, i, starts.length, start);
+            // TODO (desired): first search should be binarySearch
+            int nexti = exponentialSearch(starts, i, starts.length, ranges.get(j).start());
             if (nexti < 0) i = Math.max(i, -2 - nexti);
-            else if (nexti > i && !inclusiveStarts()) i = nexti - 1;
+            else if (nexti > i && inclusiveEnds) i = nexti - 1;
             else i = nexti;
 
             if (i >= values.length)
                 return fold.apply(defaultValue, accumulator, p1, p2, j, ranges.size());
 
             int toj, nextj = ranges.findNext(j, starts[i + 1], FAST);
-            if (nextj < 0) toj = nextj = -1 -nextj;
+            if (nextj < 0)
+            {
+                toj = nextj = -1 -nextj;
+            }
             else
             {
                 toj = nextj + 1;
