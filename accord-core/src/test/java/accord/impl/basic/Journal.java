@@ -417,7 +417,7 @@ public class Journal implements Runnable
                         case Accepted:
                         case PreCommitted:
                             if (saveStatus == SaveStatus.AcceptedInvalidate)
-                                current = Command.AcceptedInvalidateWithoutDefinition.acceptedInvalidate(attrs, Ballot.ZERO, Ballot.ZERO);
+                                current = Command.AcceptedInvalidateWithoutDefinition.acceptedInvalidate(attrs, promised, acceptedOrCommitted);
                             else
                                 current = Command.Accepted.accepted(attrs, saveStatus, executeAt, promised, acceptedOrCommitted);
                             break;
