@@ -27,7 +27,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.Set;
-import java.util.Stack;
 import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -244,37 +243,6 @@ public class Journal implements Runnable
         }
     }
 
-    private static class Reconstructed
-    {
-        final TxnId txnId;
-        List<Command> commands;
-
-        private Reconstructed(TxnId txnId)
-        {
-            this.txnId = txnId;
-        }
-
-        public boolean equals(Object o)
-        {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            Reconstructed that = (Reconstructed) o;
-            return Objects.equals(txnId, that.txnId);
-        }
-
-        @Override
-        public int hashCode()
-        {
-            return Objects.hash(txnId);
-        }
-
-        @Override
-        public String toString()
-        {
-            return txnId.toString();
-        }
-    }
-
     private void tryLoadOne(InMemoryCommandStore.Load consumer,
                             int commandStoreId,
                             TxnId txnId)
@@ -338,8 +306,6 @@ public class Journal implements Runnable
         Invariants.checkState(diffs != null && !diffs.isEmpty());
 
         List<Command> results = new ArrayList<>();
-
-        Set<SaveStatus> seen = new HashSet<>();
 
         TxnId txnId = null;
         Timestamp executeAt = null;

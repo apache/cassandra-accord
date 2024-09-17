@@ -95,10 +95,12 @@ import static accord.local.SaveStatus.Applying;
 import static accord.local.SaveStatus.Erased;
 import static accord.local.SaveStatus.ErasedOrInvalidOrVestigial;
 import static accord.local.SaveStatus.ReadyToExecute;
+import static accord.local.Status.AcceptedInvalidate;
 import static accord.local.Status.Applied;
 import static accord.local.Status.Committed;
 import static accord.local.Status.Definition.DefinitionKnown;
 import static accord.local.Status.Definition.DefinitionUnknown;
+import static accord.local.Status.Invalidated;
 import static accord.local.Status.KnownDeps.DepsCommitted;
 import static accord.local.Status.KnownDeps.DepsKnown;
 import static accord.local.Status.KnownDeps.DepsUnknown;
@@ -1382,13 +1384,11 @@ public abstract class InMemoryCommandStore extends CommandStore
         executeInContext(this,
                          context,
                          safeStore -> {
-                             safeStore.replay(() -> {
-                                 safeStore.updateMaxConflicts(prev, next);
-                                 safeStore.updateCommandsForKey(prev, next);
-                                 safeStore.progressLog().update(safeStore, next.txnId(), prev, next);
-                                 if (next.is(Stable) || next.is(PreApplied))
-                                     Commands.maybeExecute(safeStore, safeStore.get(next.txnId(), next.route().homeKey()), true, true);
-                             });
+                             safeStore.updateMaxConflicts(prev, next);
+                             safeStore.updateCommandsForKey(prev, next);
+                             safeStore.progressLog().update(safeStore, next.txnId(), prev, next);
+                             if (next.is(Stable) || next.is(PreApplied))
+                                 Commands.maybeExecute(safeStore, safeStore.get(next.txnId(), next.route().homeKey()), true, true);
 
                              return null;
                          });
