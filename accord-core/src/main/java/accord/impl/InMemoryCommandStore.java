@@ -1334,8 +1334,7 @@ public abstract class InMemoryCommandStore extends CommandStore
     public void clearForTesting()
     {
         Invariants.checkState(current == null);
-        for (TxnId txnId : commands.keySet())
-            progressLog.clear(txnId);
+        progressLog.clear();
         commands.clear();
         commandsByExecuteAt.clear();
         commandsForKey.clear();
@@ -1386,7 +1385,8 @@ public abstract class InMemoryCommandStore extends CommandStore
                              safeStore.replay(() -> {
                                  safeStore.updateMaxConflicts(prev, next);
                                  safeStore.updateCommandsForKey(prev, next);
-                                 if (next.route() != null)
+                                 safeStore.progressLog().update(safeStore, next.txnId(), prev, next);
+                                 if (next.is(Stable) || !next.is(PreApplied))
                                      Commands.maybeExecute(safeStore, safeStore.get(next.txnId(), next.route().homeKey()), true, true);
                              });
 

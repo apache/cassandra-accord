@@ -61,7 +61,7 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
 
     private void update(SafeCommandStore safeStore, @Nullable Command command, CommandsForKey prevCfk, CommandsForKeyUpdate updateCfk)
     {
-        update(safeStore, command, prevCfk, updateCfk, safeStore.replay() ? NotifySink.NoOpSink.INSTANCE : NotifySink.DefaultNotifySink.INSTANCE);
+        update(safeStore, command, prevCfk, updateCfk, NotifySink.DefaultNotifySink.INSTANCE);
     }
 
     private void update(SafeCommandStore safeStore, @Nullable Command command, CommandsForKey prevCfk, CommandsForKeyUpdate updateCfk, NotifySink notifySink)
