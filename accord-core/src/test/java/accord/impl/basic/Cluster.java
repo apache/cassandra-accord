@@ -502,14 +502,19 @@ public class Cluster implements Scheduler
 
             Scheduled restart = sinks.recurring(() -> {
                 Id node = random.pick(nodes);
+                ListStore listStore = (ListStore) nodeMap.get(node).commandStores().dataStore();
+                listStore.clear();
                 Journal journal = journalMap.get(node);
                 CommandStore[] stores = nodeMap.get(node).commandStores().all();
-                DelayedCommandStores.DelayedCommandStore store = (DelayedCommandStores.DelayedCommandStore) random.pick(stores);
                 trace.debug("Triggering journal cleanup.");
-                store.clearForTesting();
-                journal.reconstructAll(store::load, store.id());
-                journal.loadHistoricalTransactions(store::load, store.id());
-            }, 10, SECONDS);
+                for (CommandStore s : stores)
+                {
+                    DelayedCommandStores.DelayedCommandStore store = (DelayedCommandStores.DelayedCommandStore) s;                    trace.debug("Triggering journal cleanup.");
+                    store.clearForTesting();
+                    journal.reconstructAll(store::load, store.id());
+                    journal.loadHistoricalTransactions(store::load, store.id());
+                }
+            }, 5, SECONDS);
 
             durabilityScheduling.forEach(CoordinateDurabilityScheduling::start);
             services.forEach(Service::start);

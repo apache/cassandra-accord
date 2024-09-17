@@ -19,6 +19,7 @@
 package accord.impl;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -54,6 +55,7 @@ import accord.impl.progresslog.DefaultProgressLog;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.CommandStores.RangesForEpoch;
+import accord.local.Commands;
 import accord.local.KeyHistory;
 import accord.local.Node;
 import accord.local.NodeTimeService;
@@ -94,7 +96,21 @@ import static accord.local.SaveStatus.Erased;
 import static accord.local.SaveStatus.ErasedOrInvalidOrVestigial;
 import static accord.local.SaveStatus.ReadyToExecute;
 import static accord.local.Status.Applied;
+import static accord.local.Status.Committed;
+import static accord.local.Status.Definition.DefinitionKnown;
+import static accord.local.Status.Definition.DefinitionUnknown;
+import static accord.local.Status.KnownDeps.DepsCommitted;
+import static accord.local.Status.KnownDeps.DepsKnown;
+import static accord.local.Status.KnownDeps.DepsUnknown;
+import static accord.local.Status.KnownExecuteAt.ExecuteAtKnown;
+import static accord.local.Status.KnownRoute.Full;
 import static accord.local.Status.NotDefined;
+import static accord.local.Status.Outcome.Unknown;
+import static accord.local.Status.Phase.Accept;
+import static accord.local.Status.Phase.Commit;
+import static accord.local.Status.Phase.Execute;
+import static accord.local.Status.Phase.Persist;
+import static accord.local.Status.PreApplied;
 import static accord.local.Status.PreCommitted;
 import static accord.local.Status.Stable;
 import static accord.local.Status.Truncated;
@@ -1329,39 +1345,49 @@ public abstract class InMemoryCommandStore extends CommandStore
 
     public interface Load
     {
-        void load(Command prev, Command loading);
+        void load(Command prev, Command next);
     }
 
     @VisibleForTesting
-    public boolean load(Command prev, Command loading)
+    public boolean load(Command prev, Command next)
     {
-        GlobalCommand globalCommand = command(loading.txnId());
-        globalCommand.value(loading);
+        GlobalCommand globalCommand = command(next.txnId());
+        globalCommand.value(next);
+        if (next.executeAt() != null)
+            this.commandsByExecuteAt.put(next.executeAt(), globalCommand);
 
-        if (loading.executeAt() != null)
-            this.commandsByExecuteAt.put(loading.executeAt(), globalCommand);
-
-        PreLoadContext context = PreLoadContext.EMPTY_PRELOADCONTEXT;
-        if (CommandsForKey.manages(loading.txnId()))
+        PreLoadContext context;
+        if (CommandsForKey.manages(next.txnId()))
         {
-            Keys keys = (Keys) loading.keysOrRanges();
-            if (keys == null || loading.hasBeen(Status.Truncated)) keys = (Keys) prev.keysOrRanges();
+            Keys keys = (Keys) next.keysOrRanges();
+            if (keys == null || next.hasBeen(Status.Truncated)) keys = (Keys) prev.keysOrRanges();
             if (keys != null)
-                context = PreLoadContext.contextFor(loading.txnId(), keys, KeyHistory.COMMANDS);
+                context = PreLoadContext.contextFor(next.txnId(), keys, KeyHistory.COMMANDS);
+            else
+                context = PreLoadContext.contextFor(next.txnId());
         }
-        else if (!CommandsForKey.managesExecution(loading.txnId()) && loading.hasBeen(Status.Stable) && !loading.hasBeen(Status.Truncated) && !prev.hasBeen(Status.Stable))
+        else if (!CommandsForKey.managesExecution(next.txnId()) && next.hasBeen(Status.Stable) && !next.hasBeen(Status.Truncated) && !prev.hasBeen(Status.Stable))
         {
-            TxnId txnId = loading.txnId();
-            Keys keys = loading.asCommitted().waitingOn.keys;
+            TxnId txnId = next.txnId();
+            Keys keys = next.asCommitted().waitingOn.keys;
             if (!keys.isEmpty())
                 context = PreLoadContext.contextFor(txnId, keys, KeyHistory.COMMANDS);
+            else
+                context = PreLoadContext.contextFor(next.txnId());
+        }
+        else
+        {
+            context = PreLoadContext.contextFor(next.txnId());
         }
 
         executeInContext(this,
                          context,
                          safeStore -> {
                              safeStore.replay(() -> {
-                                 ((InMemorySafeStore) safeStore).update(prev, loading);
+                                 safeStore.updateMaxConflicts(prev, next);
+                                 safeStore.updateCommandsForKey(prev, next);
+                                 if (next.route() != null)
+                                     Commands.maybeExecute(safeStore, safeStore.get(next.txnId(), next.route().homeKey()), true, true);
                              });
 
                              return null;

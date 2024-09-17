@@ -238,16 +238,9 @@ public class Journal implements Runnable
         if (diffs == null)
             return;
 
-        Set<TxnId> loaded = new HashSet<>();
-        Stack<Reconstructed> stack = new Stack<>();
-        for (TxnId txnId : diffs.keySet())
+        for (TxnId txnId : new ArrayList<>(diffs.keySet()))
         {
-            if (loaded.contains(txnId))
-                continue;
-
-            stack.push(new Reconstructed(txnId));
-            while (!stack.isEmpty())
-                tryLoadOne(consumer, commandStoreId, loaded, stack);
+            tryLoadOne(consumer, commandStoreId, txnId);
         }
     }
 
@@ -284,70 +277,32 @@ public class Journal implements Runnable
 
     private void tryLoadOne(InMemoryCommandStore.Load consumer,
                             int commandStoreId,
-                            Set<TxnId> loadedOrSkipped,
-                            Stack<Reconstructed> stack)
+                            TxnId txnId)
     {
-        Reconstructed popped = stack.pop();
-        TxnId txnId = popped.txnId;
-        List<Diff> diffs = diffsPerCommandStore.get(commandStoreId).get(txnId);
-        if (diffs == null)
-        {
-            loadedOrSkipped.add(txnId);
-            return;
-        }
-
-        if (popped.commands == null)
-            popped.commands = reconstructEach(diffs);
-        List<Command> commands = popped.commands;
+        List<Command> commands = reconstructEach(commandStoreId, txnId);
         Invariants.checkState(!commands.isEmpty());
 
         Command last = commands.get(commands.size() - 1);
-        boolean changed = false;
-        if (last.partialDeps() != null && !loadedOrSkipped.containsAll(last.partialDeps().txnIds()))
-        {
-            for (TxnId dep : last.partialDeps().txnIds())
-            {
-                if (loadedOrSkipped.contains(dep))
-                    continue;
 
-                Reconstructed reconstructedDep = new Reconstructed(dep);
-                if (!stack.contains(reconstructedDep))
-                {
-                    if (!changed)
-                    {
-                        changed = true;
-                        stack.push(popped); // We will try loading again when deps are loaded
-                    }
-                    stack.push(reconstructedDep);
-                }
-                else
-                    logger.warn("Circular dependency: {} was already visited while descending the chain {}", dep, stack);
+        loading = true;
+        try
+        {
+            Command prev = null;
+            for (Command command : commands)
+            {
+                if (prev == null)
+                    prev = Command.NotDefined.uninitialised(command.txnId());
+
+                // Only last command is allowed to have side-effects
+                if (command == last)
+                    loading = false;
+                consumer.load(prev, command);
+                prev = command;
             }
         }
-
-        if (!changed)
+        finally
         {
-            loading = true;
-            try
-            {
-                Command prev = null;
-                for (Command command : commands)
-                {
-                    if (prev == null)
-                        prev = Command.NotDefined.uninitialised(command.txnId());
-
-                    // Only last command is allowed to have side-effects
-                    if (command == last)
-                        loading = false;
-                    consumer.load(prev, command);
-                    prev = command;
-                }
-            }
-            finally
-            {
-                loading = false;
-            }
-            loadedOrSkipped.add(txnId);
+            loading = false;
         }
     }
 
@@ -372,8 +327,9 @@ public class Journal implements Runnable
         return reconstruct(diffs, Reconstruct.Last).get(0);
     }
 
-    private List<Command> reconstructEach(List<Diff> diffs)
+    private List<Command> reconstructEach(int commandStoreId, TxnId txnId)
     {
+        List<Diff> diffs = this.diffsPerCommandStore.get(commandStoreId).get(txnId);
         return reconstruct(diffs, Reconstruct.Each);
     }
 
@@ -419,9 +375,6 @@ public class Journal implements Runnable
                 allowed.add(SaveStatus.TruncatedApplyWithOutcome);
 
                 saveStatus = diff.saveStatus.get();
-                if (seen.contains(saveStatus) && !allowed.contains(saveStatus))
-                    throw new IllegalStateException(String.format("Seen state %s more than once: %s.\n%s", saveStatus, seen, diffs));
-                seen.add(saveStatus);
             }
             if (diff.durability != null)
                 durability = diff.durability.get();

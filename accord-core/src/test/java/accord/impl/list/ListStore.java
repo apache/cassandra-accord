@@ -148,6 +148,16 @@ public class ListStore implements DataStore
     // when out of order epochs are detected, this holds the callbacks to try again
     private final List<Runnable> onRemovalDone = new ArrayList<>();
 
+
+    public void clear()
+    {
+        addedAts.clear();
+        removedAts.clear();
+        purgedAts.clear();
+        fetchCompletes.clear();
+        pendingRemoves.clear();
+        onRemovalDone.clear();
+    }
     // adding here to help trace burn test queries
     public final Node.Id node;
 
