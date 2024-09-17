@@ -206,6 +206,10 @@ public abstract class Command implements CommonAttributes
             this.route = route;
             this.additionalKeysOrRanges = additionalKeysOrRanges;
             this.promised = promised;
+            if (status == PreApplied || status == Applying)
+                new RuntimeException().printStackTrace();
+            System.out.println(this.toString());
+//            new RuntimeException(this.toString()).printStackTrace();
         }
 
         private AbstractCommand(CommonAttributes common, SaveStatus status, Ballot promised)
@@ -216,7 +220,11 @@ public abstract class Command implements CommonAttributes
             this.route = common.route();
             this.additionalKeysOrRanges = common.additionalKeysOrRanges();
             this.promised = promised;
-}
+            if (status == PreApplied || status == Applying)
+                new RuntimeException().printStackTrace();
+            System.out.println(this.toString());
+//            new RuntimeException(this.toString()).printStackTrace();
+        }
 
         @Override
         public boolean equals(Object o)

@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.Set;
+import java.util.Stack;
 import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -181,7 +182,7 @@ public class Journal implements Runnable
             {
                 TxnId txnId = e2.getKey();
                 List<Diff> diffs = e2.getValue();
-                Command command = reconstruct(diffs);
+                Command command = reconstruct(diffs, Reconstruct.Last).get(0);
                 // Truncate all but last
                 if (command.status() == Truncated)
                 {
@@ -225,6 +226,10 @@ public class Journal implements Runnable
         }
     }
 
+    // TODO (required): this might be a good first approximation, but maybe we need to make a better distinction between
+    // when we want to produce side-effects.
+    private boolean loading = false;
+
     public void reconstructAll(InMemoryCommandStore.Load consumer, int commandStoreId)
     {
         Map<TxnId, List<Diff>> diffs = diffsPerCommandStore.get(commandStoreId);
@@ -233,12 +238,123 @@ public class Journal implements Runnable
         if (diffs == null)
             return;
 
-        for (Map.Entry<TxnId, List<Diff>> e : diffs.entrySet())
+        Set<TxnId> loaded = new HashSet<>();
+        Stack<Reconstructed> stack = new Stack<>();
+        for (TxnId txnId : diffs.keySet())
         {
-            Command reconstructed = reconstruct(e.getValue());
-            consumer.load(Command.NotDefined.uninitialised(reconstructed.txnId()),
-                          reconstructed);
+            if (loaded.contains(txnId))
+                continue;
+
+            stack.push(new Reconstructed(txnId));
+            while (!stack.isEmpty())
+                tryLoadOne(consumer, commandStoreId, loaded, stack);
         }
+    }
+
+    private static class Reconstructed
+    {
+        final TxnId txnId;
+        List<Command> commands;
+
+        private Reconstructed(TxnId txnId)
+        {
+            this.txnId = txnId;
+        }
+
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            Reconstructed that = (Reconstructed) o;
+            return Objects.equals(txnId, that.txnId);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(txnId);
+        }
+
+        @Override
+        public String toString()
+        {
+            return txnId.toString();
+        }
+    }
+
+    private void tryLoadOne(InMemoryCommandStore.Load consumer,
+                            int commandStoreId,
+                            Set<TxnId> loadedOrSkipped,
+                            Stack<Reconstructed> stack)
+    {
+        Reconstructed popped = stack.pop();
+        TxnId txnId = popped.txnId;
+        List<Diff> diffs = diffsPerCommandStore.get(commandStoreId).get(txnId);
+        if (diffs == null)
+        {
+            loadedOrSkipped.add(txnId);
+            return;
+        }
+
+        if (popped.commands == null)
+            popped.commands = reconstructEach(diffs);
+        List<Command> commands = popped.commands;
+        Invariants.checkState(!commands.isEmpty());
+
+        Command last = commands.get(commands.size() - 1);
+        boolean changed = false;
+        if (last.partialDeps() != null && !loadedOrSkipped.containsAll(last.partialDeps().txnIds()))
+        {
+            for (TxnId dep : last.partialDeps().txnIds())
+            {
+                if (loadedOrSkipped.contains(dep))
+                    continue;
+
+                Reconstructed reconstructedDep = new Reconstructed(dep);
+                if (!stack.contains(reconstructedDep))
+                {
+                    if (!changed)
+                    {
+                        changed = true;
+                        stack.push(popped); // We will try loading again when deps are loaded
+                    }
+                    stack.push(reconstructedDep);
+                }
+                else
+                    logger.warn("Circular dependency: {} was already visited while descending the chain {}", dep, stack);
+            }
+        }
+
+        if (!changed)
+        {
+            loading = true;
+            try
+            {
+                Command prev = null;
+                for (Command command : commands)
+                {
+                    if (prev == null)
+                        prev = Command.NotDefined.uninitialised(command.txnId());
+
+                    // Only last command is allowed to have side-effects
+                    if (command == last)
+                        loading = false;
+                    consumer.load(prev, command);
+                    prev = command;
+                }
+            }
+            finally
+            {
+                loading = false;
+            }
+            loadedOrSkipped.add(txnId);
+        }
+    }
+
+    private enum Reconstruct
+    {
+        Each,
+        Last
     }
 
     public void loadHistoricalTransactions(Consumer<Deps> consumer, int commandStoreId)
@@ -253,12 +369,19 @@ public class Journal implements Runnable
     public Command reconstruct(int commandStoreId, TxnId txnId)
     {
         List<Diff> diffs = this.diffsPerCommandStore.get(commandStoreId).get(txnId);
-        return reconstruct(diffs);
+        return reconstruct(diffs, Reconstruct.Last).get(0);
     }
 
-    private Command reconstruct(List<Diff> diffs)
+    private List<Command> reconstructEach(List<Diff> diffs)
+    {
+        return reconstruct(diffs, Reconstruct.Each);
+    }
+
+    private List<Command> reconstruct(List<Diff> diffs, Reconstruct reconstruct)
     {
         Invariants.checkState(diffs != null && !diffs.isEmpty());
+
+        List<Command> results = new ArrayList<>();
 
         Set<SaveStatus> seen = new HashSet<>();
 
@@ -327,72 +450,86 @@ public class Journal implements Runnable
 
             if (!txnId.kind().awaitsOnlyDeps())
                 executesAtLeast = null;
-        }
 
-        switch (saveStatus.known.outcome)
-        {
-            case Erased:
-            case WasApply:
-                writes = null;
-                result = null;
-                break;
-        }
-
-        CommonAttributes.Mutable attrs = new CommonAttributes.Mutable(txnId);
-        if (partialTxn != null)
-            attrs.partialTxn(partialTxn);
-        if (durability != null)
-            attrs.durability(durability);
-        if (route != null)
-            attrs.route(route);
-
-        // TODO (desired): we can simplify this logic if, instead of diffing, we will infer the diff from the status
-        if (partialDeps != null &&
-            (saveStatus.known.deps != Status.KnownDeps.NoDeps &&
-             saveStatus.known.deps != Status.KnownDeps.DepsErased &&
-             saveStatus.known.deps != Status.KnownDeps.DepsUnknown))
-            attrs.partialDeps(partialDeps);
-        if (additionalKeysOrRanges != null)
-            attrs.additionalKeysOrRanges(additionalKeysOrRanges);
-        Invariants.checkState(saveStatus != null,
-                              "Save status is null after applying %s", diffs);
-
-        try
-        {
-            switch (saveStatus.status)
+            switch (saveStatus.known.outcome)
             {
-                case NotDefined:
-                    return saveStatus == SaveStatus.Uninitialised ? Command.NotDefined.uninitialised(attrs.txnId())
-                                                                  : Command.NotDefined.notDefined(attrs, promised);
-                case PreAccepted:
-                    return Command.PreAccepted.preAccepted(attrs, executeAt, promised);
-                case AcceptedInvalidate:
-                case Accepted:
-                case PreCommitted:
-                    if (saveStatus == SaveStatus.AcceptedInvalidateWithDefinition)
-                        return Command.Accepted.accepted(attrs, saveStatus, executeAt, promised, acceptedOrCommitted);
-                    else
-                        return Command.AcceptedInvalidateWithoutDefinition.acceptedInvalidate(attrs, Ballot.ZERO, Ballot.ZERO);
-                case Committed:
-                case Stable:
-                    return Command.Committed.committed(attrs, saveStatus, executeAt, promised, acceptedOrCommitted, waitingOn);
-                case PreApplied:
-                case Applied:
-                    return Command.Executed.executed(attrs, saveStatus, executeAt, promised, acceptedOrCommitted, waitingOn, writes, result);
-                case Invalidated:
-                case Truncated:
-                    return truncated(attrs, saveStatus, executeAt, executesAtLeast, writes, result);
-                default:
-                    throw new IllegalStateException("Do not know " + saveStatus.status + " " + saveStatus);
+                case Erased:
+                case WasApply:
+                    writes = null;
+                    result = null;
+                    break;
+            }
+
+            CommonAttributes.Mutable attrs = new CommonAttributes.Mutable(txnId);
+            if (partialTxn != null)
+                attrs.partialTxn(partialTxn);
+            if (durability != null)
+                attrs.durability(durability);
+            if (route != null)
+                attrs.route(route);
+
+            // TODO (desired): we can simplify this logic if, instead of diffing, we will infer the diff from the status
+            if (partialDeps != null &&
+                (saveStatus.known.deps != Status.KnownDeps.NoDeps &&
+                 saveStatus.known.deps != Status.KnownDeps.DepsErased &&
+                 saveStatus.known.deps != Status.KnownDeps.DepsUnknown))
+                attrs.partialDeps(partialDeps);
+            if (additionalKeysOrRanges != null)
+                attrs.additionalKeysOrRanges(additionalKeysOrRanges);
+            Invariants.checkState(saveStatus != null,
+                                  "Save status is null after applying %s", diffs);
+
+            try
+            {
+                if (reconstruct == Reconstruct.Each ||
+                    (reconstruct == Reconstruct.Last && i == diffs.size() - 1))
+                {
+                    Command current;
+                    switch (saveStatus.status)
+                    {
+                        case NotDefined:
+                            current = saveStatus == SaveStatus.Uninitialised ? Command.NotDefined.uninitialised(attrs.txnId())
+                                                                             : Command.NotDefined.notDefined(attrs, promised);
+                            break;
+                        case PreAccepted:
+                            current = Command.PreAccepted.preAccepted(attrs, executeAt, promised);
+                            break;
+                        case AcceptedInvalidate:
+                        case Accepted:
+                        case PreCommitted:
+                            if (saveStatus == SaveStatus.AcceptedInvalidateWithDefinition)
+                                current = Command.Accepted.accepted(attrs, saveStatus, executeAt, promised, acceptedOrCommitted);
+                            else
+                                current = Command.AcceptedInvalidateWithoutDefinition.acceptedInvalidate(attrs, Ballot.ZERO, Ballot.ZERO);
+                            break;
+                        case Committed:
+                        case Stable:
+                            current = Command.Committed.committed(attrs, saveStatus, executeAt, promised, acceptedOrCommitted, waitingOn);
+                            break;
+                        case PreApplied:
+                        case Applied:
+                            current = Command.Executed.executed(attrs, saveStatus, executeAt, promised, acceptedOrCommitted, waitingOn, writes, result);
+                            break;
+                        case Invalidated:
+                        case Truncated:
+                            current = truncated(attrs, saveStatus, executeAt, executesAtLeast, writes, result);
+                            break;
+                        default:
+                            throw new IllegalStateException("Do not know " + saveStatus.status + " " + saveStatus);
+                    }
+
+                    results.add(current);
+                }
+            }
+            catch (Throwable t)
+            {
+
+                throw new RuntimeException("Can not reconstruct from diff:\n" + diffs.stream().map(o -> o.toString())
+                                                                                     .collect(Collectors.joining("\n")),
+                                           t);
             }
         }
-        catch (Throwable t)
-        {
-
-            throw new RuntimeException("Can not reconstruct from diff:\n" + diffs.stream().map(o -> o.toString())
-                                                                                 .collect(Collectors.joining("\n")),
-                                       t);
-        }
+        return results;
     }
 
     private static Command.Truncated truncated(CommonAttributes.Mutable attrs, SaveStatus status, Timestamp executeAt, Timestamp executesAtLeast, Writes writes, Result result)
@@ -421,6 +558,9 @@ public class Journal implements Runnable
 
     public void onExecute(int commandStoreId, Command before, Command after, boolean isPrimary)
     {
+        if (loading || (before == null && after == null))
+            return;
+
         if (after.saveStatus() == SaveStatus.Erased)
         {
             diffsPerCommandStore.computeIfAbsent(commandStoreId, (k) -> new TreeMap<>())

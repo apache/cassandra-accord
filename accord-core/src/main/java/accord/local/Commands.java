@@ -960,6 +960,7 @@ public class Commands
 
         public NotifyWaitingOn(SafeCommand root)
         {
+            new RuntimeException("notify waiting on").printStackTrace();
             Invariants.checkArgument(root.current().hasBeen(Stable));
             this.waitingId = root.txnId();
         }
