@@ -1346,11 +1346,11 @@ public abstract class InMemoryCommandStore extends CommandStore
 
     public interface Load
     {
-        void load(Command prev, Command next);
+        void load(Command prev, Command next, boolean forceApply);
     }
 
     @VisibleForTesting
-    public boolean load(Command prev, Command next)
+    public boolean load(Command prev, Command next, boolean forceApply)
     {
         GlobalCommand globalCommand = command(next.txnId());
         globalCommand.value(next);
@@ -1389,7 +1389,8 @@ public abstract class InMemoryCommandStore extends CommandStore
                              safeStore.progressLog().update(safeStore, next.txnId(), prev, next);
                              if (next.is(Stable) || next.is(PreApplied))
                                  Commands.maybeExecute(safeStore, safeStore.get(next.txnId(), next.route().homeKey()), true, true);
-
+                             if (forceApply)
+                                 Commands.apply(safeStore, context, next.txnId()).begin(agent);
                              return null;
                          });
 

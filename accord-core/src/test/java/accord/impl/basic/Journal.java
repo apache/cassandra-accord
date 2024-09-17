@@ -63,6 +63,8 @@ import accord.utils.Invariants;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.agrona.collections.LongArrayList;
 
+import static accord.local.Status.Invalidated;
+import static accord.local.Status.PreApplied;
 import static accord.local.Status.Truncated;
 import static accord.utils.Invariants.illegalState;
 
@@ -256,15 +258,19 @@ public class Journal implements Runnable
         try
         {
             Command prev = null;
-            for (Command command : commands)
+            Set<Status> seen = new HashSet<>();
+            for (int i = 0; i < commands.size(); i++)
             {
+                Command command = commands.get(i);
+                seen.add(command.status());
                 if (prev == null)
                     prev = Command.NotDefined.uninitialised(command.txnId());
 
                 // Only last command is allowed to have side-effects
                 if (command == last)
                     loading = false;
-                consumer.load(prev, command);
+
+                consumer.load(prev, command, !seen.contains(PreApplied) && command.hasBeen(PreApplied) && !command.is(Invalidated));
                 prev = command;
             }
         }
