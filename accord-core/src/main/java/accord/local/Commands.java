@@ -564,7 +564,7 @@ public class Commands
         //  that was pre-bootstrap for some range (so redundant and we may have gone ahead of), but had to be executed locally
         //  for another range
         CommandStore unsafeStore = safeStore.commandStore();
-        // TODO: avoid allocating a timestamp here
+        // TODO (required): avoid allocating a timestamp here
         long t0 = safeStore.time().now();
         return command.writes().apply(safeStore, applyRanges(safeStore, command.executeAt()), command.partialTxn())
                .flatMap(unused -> unsafeStore.submit(context, ss -> {
@@ -654,12 +654,6 @@ public class Commands
                     //      but: if we later support transitive dependency elision this could be dangerous
                     logger.trace("{}: applying no-op", command.txnId());
                     safeCommand.applied(safeStore);
-                    if (command.txnId().kind() == ExclusiveSyncPoint)
-                    {
-                        Ranges ranges = safeStore.ranges().allAt(command.txnId().epoch());
-                        ranges = command.route().slice(ranges, Minimal).participants().toRanges();
-                        safeStore.commandStore().markExclusiveSyncPointLocallyApplied(safeStore, command.txnId(), ranges);
-                    }
                     safeStore.notifyListeners(safeCommand, command);
                     return true;
                 }

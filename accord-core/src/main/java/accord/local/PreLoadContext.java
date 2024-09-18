@@ -138,17 +138,17 @@ public interface PreLoadContext
     static PreLoadContext contextFor(TxnId primary, Collection<TxnId> additional, Seekables<?, ?> keys, KeyHistory keyHistory)
     {
         Invariants.checkState(!additional.contains(primary));
-        return new Impl(primary, additional, keys, keyHistory);
+        return new Standard(primary, additional, keys, keyHistory);
     }
 
-    static class Impl implements PreLoadContext
+    class Standard implements PreLoadContext
     {
         private final TxnId primary;
         private final Collection<TxnId> additional;
         private final Seekables<?, ?> keys;
         private final KeyHistory keyHistory;
 
-        public Impl(TxnId primary, Collection<TxnId> additional, Seekables<?, ?> keys, KeyHistory keyHistory)
+        public Standard(TxnId primary, Collection<TxnId> additional, Seekables<?, ?> keys, KeyHistory keyHistory)
         {
             this.primary = primary;
             this.additional = additional;
@@ -158,7 +158,7 @@ public interface PreLoadContext
 
         public String toString()
         {
-            return "Impl{" +
+            return "PreLoadContext{" +
                    "primary=" + primary +
                    ", additional=" + additional +
                    ", keys=" + keys +

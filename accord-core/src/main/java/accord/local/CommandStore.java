@@ -337,10 +337,7 @@ public abstract class CommandStore implements AgentExecutor
             return time.uniqueNow(txnId).asRejected();
 
         if (txnId.kind() == ExclusiveSyncPoint)
-        {
-            markExclusiveSyncPoint(safeStore, txnId, (Ranges)keys);
             return txnId;
-        }
 
         // TODO (expected): reject if any transaction exists with a higher timestamp OR a higher epoch
         //   this permits us to agree fast path decisions across epoch changes
