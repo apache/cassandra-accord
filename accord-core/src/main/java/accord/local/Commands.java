@@ -576,24 +576,6 @@ public class Commands
                }));
     }
 
-    public static AsyncChain<Void> applyFromReplay(SafeCommandStore safeStore, PreLoadContext context, TxnId txnId)
-    {
-        Command.Executed command = safeStore.get(txnId).current().asExecuted();
-        // TODO (required): make sure we are correctly handling (esp. C* side with validation logic) executing a transaction
-        //  that was pre-bootstrap for some range (so redundant and we may have gone ahead of), but had to be executed locally
-        //  for another range
-        CommandStore unsafeStore = safeStore.commandStore();
-        long t0 = safeStore.time().now();
-        return command.writes().apply(safeStore, applyRanges(safeStore, command.executeAt()), command.partialTxn())
-                      .flatMap(unused -> unsafeStore.submit(context, ss -> {
-                          Command cmd = ss.get(txnId).current();
-                          if (!cmd.hasBeen(Applied))
-                              ss.agent().metricsEventsListener().onApplied(cmd, t0);
-                          postApply(ss, txnId);
-                          return null;
-                      }));
-    }
-
     public static void apply(SafeCommandStore safeStore, Command command)
     {
         CommandStore unsafeStore = safeStore.commandStore();
@@ -903,8 +885,8 @@ public class Commands
 
             case TRUNCATE:
                 Invariants.checkState(command.saveStatus().compareTo(TruncatedApply) < 0);
-                if (!command.hasBeen(PreCommitted)) result = Command.Truncated.erasedOrInvalidOrVestigial(command);
-                else result = truncatedApply(command, Route.tryCastToFullRoute(maybeFullRoute));
+                Invariants.checkState(command.hasBeen(PreApplied));
+                result = truncatedApply(command, Route.tryCastToFullRoute(maybeFullRoute));
                 break;
 
             case ERASE:

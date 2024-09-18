@@ -104,14 +104,11 @@ public interface PreLoadContext
     default boolean isSubsetOf(PreLoadContext superset)
     {
         KeyHistory requiredHistory = keyHistory();
-        if (requiredHistory != KeyHistory.NONE)
-        {
-            if (requiredHistory != superset.keyHistory())
-                return false;
+        if (requiredHistory != KeyHistory.NONE && requiredHistory != superset.keyHistory())
+            return false;
 
-            if (superset.keys().domain() != keys().domain() || !superset.keys().containsAll(keys()))
-                return false;
-        }
+        if (superset.keys().domain() != keys().domain() || !superset.keys().containsAll(keys()))
+            return false;
 
         TxnId primaryId = primaryTxnId();
         Collection<TxnId> additionalIds = additionalTxnIds();
