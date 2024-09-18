@@ -525,9 +525,11 @@ public class Cluster implements Scheduler
             }, () -> random.nextInt(1, 10), SECONDS);
 
             Scheduled restart = sinks.recurring(() -> {
+                // Journal cleanup is a rough equivalent of a node restart.
                 trace.debug("Triggering journal cleanup.");
                 Id id = random.pick(nodes);
                 Node node = nodeMap.get(id);
+                CommandsForKey.disableLinearizabilityViolationsReporting();
                 NodeSink messaging = ((NodeSink)node.messageSink());
                 messaging.disable();
                 ListStore listStore = (ListStore) nodeMap.get(id).commandStores().dataStore();
@@ -543,6 +545,7 @@ public class Cluster implements Scheduler
                     journal.loadHistoricalTransactions(store::load, store.id());
                 }
                 sinks.processAllNonRecurring();
+                CommandsForKey.enableLinearizabilityViolationsReporting();
                 messaging.enable();
             }, () -> random.nextInt(1, 10), SECONDS);
 

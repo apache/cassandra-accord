@@ -193,6 +193,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 {
     private static final Logger logger = LoggerFactory.getLogger(CommandsForKey.class);
 
+    private static boolean reportLinearizabilityViolations = true;
     private static final boolean ELIDE_TRANSITIVE_DEPENDENCIES = true;
 
     public static final TxnInfo NO_INFO = new TxnInfo(TxnId.NONE, HISTORICAL, TxnId.NONE);
@@ -1572,7 +1573,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 
     private void checkBehindCommitForLinearizabilityViolation(TxnInfo newInfo, TxnInfo maxAppliedWrite)
     {
-        if (!isPreBootstrap(newInfo))
+        if (!isPreBootstrap(newInfo) && CommandsForKey.reportLinearizabilityViolations())
         {
             for (int i = maxAppliedWriteByExecuteAt ; i >= 0 ; --i)
             {
@@ -1692,5 +1693,20 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 }
             }
         }
+    }
+
+    public static boolean reportLinearizabilityViolations()
+    {
+        return reportLinearizabilityViolations;
+    }
+
+    public static void enableLinearizabilityViolationsReporting()
+    {
+        reportLinearizabilityViolations = true;
+    }
+
+    public static void disableLinearizabilityViolationsReporting()
+    {
+        reportLinearizabilityViolations = false;
     }
 }

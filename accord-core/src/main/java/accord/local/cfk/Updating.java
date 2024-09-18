@@ -53,6 +53,7 @@ import static accord.local.cfk.CommandsForKey.InternalStatus.TRANSITIVELY_KNOWN;
 import static accord.local.cfk.CommandsForKey.managesExecution;
 import static accord.local.cfk.CommandsForKey.Unmanaged.Pending.APPLY;
 import static accord.local.cfk.CommandsForKey.Unmanaged.Pending.COMMIT;
+import static accord.local.cfk.CommandsForKey.reportLinearizabilityViolations;
 import static accord.local.cfk.Pruning.loadPruned;
 import static accord.local.cfk.Pruning.loadingPrunedFor;
 import static accord.local.cfk.Utils.insertMissing;
@@ -609,7 +610,7 @@ class Updating
                 System.arraycopy(committedByExecuteAt, pos, result, pos + 1, committedByExecuteAt.length - pos);
 
                 int maxAppliedWriteByExecuteAt = cfk.maxAppliedWriteByExecuteAt;
-                if (pos <= maxAppliedWriteByExecuteAt)
+                if (reportLinearizabilityViolations() && pos <= maxAppliedWriteByExecuteAt)
                 {
                     if (pos < maxAppliedWriteByExecuteAt && !wasPruned && cfk.isPostBootstrap(newInfo))
                     {
@@ -673,7 +674,7 @@ class Updating
             TxnInfo[] committedByExecuteAt = cfk.committedByExecuteAt;
             for (int i = cfk.maxAppliedWriteByExecuteAt + 1; i < appliedPos ; ++i)
             {
-                if (committedByExecuteAt[i].status != APPLIED && appliedKind.witnesses(committedByExecuteAt[i]))
+                if (reportLinearizabilityViolations() && committedByExecuteAt[i].status != APPLIED && appliedKind.witnesses(committedByExecuteAt[i]))
                     logger.error("Linearizability violation on key {}: {} is committed to execute (at {}) before {} that should witness it but has already applied (at {})", cfk.key, committedByExecuteAt[i].plainTxnId(), committedByExecuteAt[i].plainExecuteAt(), applied.plainTxnId(), applied.plainExecuteAt());
             }
         }
