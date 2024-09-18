@@ -18,24 +18,18 @@
 
 package accord.impl.basic;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Queue;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import accord.api.Result;
 import accord.impl.InMemoryCommandStore;
@@ -44,12 +38,9 @@ import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.Commands;
 import accord.local.CommonAttributes;
-import accord.local.Node;
 import accord.local.SaveStatus;
 import accord.local.Status;
 import accord.messages.Message;
-import accord.messages.ReplyContext;
-import accord.messages.Request;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.PartialDeps;
@@ -61,112 +52,19 @@ import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.utils.Invariants;
 import org.agrona.collections.Long2ObjectHashMap;
-import org.agrona.collections.LongArrayList;
 
 import static accord.local.Status.Invalidated;
 import static accord.local.Status.PreApplied;
 import static accord.local.Status.Truncated;
 import static accord.utils.Invariants.illegalState;
 
-public class Journal implements Runnable
+public class Journal
 {
-    private static final Logger logger = LoggerFactory.getLogger(Journal.class);
-
-    private final Queue<RequestContext> unframedRequests = new ArrayDeque<>();
-    private final LongArrayList waitForEpochs = new LongArrayList();
-    private final Long2ObjectHashMap<ArrayList<RequestContext>> delayedRequests = new Long2ObjectHashMap<>();
-    // TODO (desired): partition by command store id
     private final Long2ObjectHashMap<Map<TxnId, List<Diff>>> diffsPerCommandStore = new Long2ObjectHashMap<>();
     private final Map<Integer, List<Deps>> historicalTransactions = new HashMap<>();
-    private Node node;
-    boolean isScheduled;
 
     public Journal()
     {
-    }
-
-    public void start(Node node)
-    {
-        this.node = node;
-    }
-
-    private void ensureScheduled()
-    {
-        if (isScheduled) return;
-        node.scheduler().once(this, 1, TimeUnit.MILLISECONDS);
-        isScheduled = true;
-    }
-
-    public void shutdown()
-    {
-        this.node = null;
-    }
-
-    public void handle(Request request, Node.Id from, ReplyContext replyContext)
-    {
-        ensureScheduled();
-        if (request.type() != null && request.type().hasSideEffects())
-        {
-            // enqueue
-            unframedRequests.add(new RequestContext(request, request.waitForEpoch(), () -> node.receive(request, from, replyContext)));
-            return;
-        }
-        node.receive(request, from, replyContext);
-    }
-
-    @Override
-    public void run()
-    {
-        isScheduled = false;
-        if (this.node == null)
-            return;
-        try
-        {
-            doRun();
-        }
-        catch (Throwable t)
-        {
-            node.agent().onUncaughtException(t);
-        }
-    }
-
-    private void doRun()
-    {
-        ArrayList<RequestContext> requests = null;
-        // check to see if any pending epochs are in
-        waitForEpochs.sort(null);
-        for (int i = 0; i < waitForEpochs.size(); i++)
-        {
-            long waitForEpoch = waitForEpochs.getLong(i);
-            if (!node.topology().hasEpoch(waitForEpoch))
-                break;
-            List<RequestContext> delayed = delayedRequests.remove(waitForEpoch);
-            if (null == requests) requests = new ArrayList<>(delayed.size());
-            requests.addAll(delayed);
-        }
-        waitForEpochs.removeIfLong(epoch -> !delayedRequests.containsKey(epoch));
-
-        // for anything queued, put into the pending epochs or schedule
-        RequestContext request;
-        while (null != (request = unframedRequests.poll()))
-        {
-            long waitForEpoch = request.waitForEpoch;
-            if (waitForEpoch != 0 && !node.topology().hasEpoch(waitForEpoch))
-            {
-                delayedRequests.computeIfAbsent(waitForEpoch, ignore -> new ArrayList<>()).add(request);
-                if (!waitForEpochs.containsLong(waitForEpoch))
-                    waitForEpochs.addLong(waitForEpoch);
-            }
-            else
-            {
-                if (null == requests) requests = new ArrayList<>();
-                requests.add(request);
-            }
-        }
-
-        // schedule
-        if (requests != null)
-            requests.forEach(Runnable::run);
     }
 
     public void purge(IntFunction<CommandStore> storeSupplier)
@@ -240,14 +138,10 @@ public class Journal implements Runnable
             return;
 
         for (TxnId txnId : new ArrayList<>(diffs.keySet()))
-        {
             tryLoadOne(consumer, commandStoreId, txnId);
-        }
     }
 
-    private void tryLoadOne(InMemoryCommandStore.Load consumer,
-                            int commandStoreId,
-                            TxnId txnId)
+    private void tryLoadOne(InMemoryCommandStore.Load consumer, int commandStoreId, TxnId txnId)
     {
         List<Command> commands = reconstructEach(commandStoreId, txnId);
         Invariants.checkState(!commands.isEmpty());

@@ -290,7 +290,8 @@ public class Cluster implements Scheduler
                     else callback.success(deliver.src, reply);
                 }
             }
-            else journalLookup.apply(deliver.dst).handle((Request) deliver.message, deliver.src, deliver);
+
+            else on.receive((Request) deliver.message, deliver.src, deliver);
         }
         else
         {
@@ -499,8 +500,6 @@ public class Cluster implements Scheduler
             updateDurabilityRate.run();
             schemaApply.onUpdate(topology);
 
-            // startup
-            journalMap.entrySet().forEach(e -> e.getValue().start(nodeMap.get(e.getKey())));
             AsyncResult<?> startup = AsyncChains.reduce(nodeMap.values().stream().map(Node::unsafeStart).collect(toList()), (a, b) -> null).beginAsResult();
             while (sinks.processPending());
             Assertions.assertTrue(startup.isDone());
@@ -584,7 +583,6 @@ public class Cluster implements Scheduler
         }
         finally
         {
-            journalMap.values().forEach(Journal::shutdown);
             nodeMap.values().forEach(Node::shutdown);
         }
     }
