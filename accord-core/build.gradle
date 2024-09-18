@@ -141,5 +141,6 @@ task allTestJar(type: Jar) {
     from { configurations.testCompileClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
     from { configurations.testRuntimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
     from { sourceSets.test.output }
+    jvmArgs '-Xmx4g'
     with jar
 }
