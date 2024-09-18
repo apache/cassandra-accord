@@ -55,8 +55,7 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
     public void update(SafeCommandStore safeStore, Command nextCommand)
     {
         CommandsForKey prevCfk = current();
-        CommandsForKeyUpdate cfkUpdate = prevCfk.update(nextCommand);
-        update(safeStore, nextCommand, prevCfk, cfkUpdate);
+        update(safeStore, nextCommand, prevCfk, prevCfk.update(nextCommand));
     }
 
     private void update(SafeCommandStore safeStore, @Nullable Command command, CommandsForKey prevCfk, CommandsForKeyUpdate updateCfk)
