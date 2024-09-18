@@ -154,11 +154,4 @@ final class TxnState extends HomeState
     {
         return txnId + ": " + toStateString();
     }
-
-    @Override
-    public boolean equals(Object that)
-    {
-        TxnState other = (TxnState) that;
-        return txnId.equals(other.txnId) && encodedState == other.encodedState;
-    }
 }
