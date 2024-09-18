@@ -157,14 +157,14 @@ public class Journal
             {
                 Command command = commands.get(i);
                 seen.add(command.status());
-                if (prev == null)
-                    prev = Command.NotDefined.uninitialised(command.txnId());
 
                 // Only last command is allowed to have side-effects
                 if (command == last)
+                {
                     loading = false;
-
-                consumer.load(prev, command, !seen.contains(PreApplied) && command.hasBeen(PreApplied) && !command.is(Invalidated) && !command.is(Truncated));
+                    prev = Command.NotDefined.uninitialised(command.txnId());
+                    consumer.load(prev, command, !seen.contains(PreApplied));
+                }
                 prev = command;
             }
         }

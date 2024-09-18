@@ -95,6 +95,7 @@ import static accord.local.SaveStatus.Erased;
 import static accord.local.SaveStatus.ErasedOrInvalidOrVestigial;
 import static accord.local.SaveStatus.ReadyToExecute;
 import static accord.local.Status.Applied;
+import static accord.local.Status.Invalidated;
 import static accord.local.Status.NotDefined;
 import static accord.local.Status.PreApplied;
 import static accord.local.Status.PreCommitted;
@@ -1341,43 +1342,49 @@ public abstract class InMemoryCommandStore extends CommandStore
         if (next.executeAt() != null)
             this.commandsByExecuteAt.put(next.executeAt(), globalCommand);
 
+        final TxnId txnId = next.txnId();
         PreLoadContext context;
-        if (CommandsForKey.manages(next.txnId()))
+        if (CommandsForKey.manages(txnId))
         {
             Keys keys = (Keys) next.keysOrRanges();
             if (keys == null || next.hasBeen(Status.Truncated)) keys = (Keys) prev.keysOrRanges();
             if (keys != null)
-                context = PreLoadContext.contextFor(next.txnId(), keys, KeyHistory.COMMANDS);
+                context = PreLoadContext.contextFor(txnId, keys, KeyHistory.COMMANDS);
             else
-                context = PreLoadContext.contextFor(next.txnId());
+                context = PreLoadContext.contextFor(txnId);
         }
-        else if (!CommandsForKey.managesExecution(next.txnId()) && next.hasBeen(Status.Stable) && !next.hasBeen(Status.Truncated) && !prev.hasBeen(Status.Stable))
+        else if (!CommandsForKey.managesExecution(txnId) && next.hasBeen(Status.Stable) && !next.hasBeen(Status.Truncated) && !prev.hasBeen(Status.Stable))
         {
-            TxnId txnId = next.txnId();
             Keys keys = next.asCommitted().waitingOn.keys;
             if (!keys.isEmpty())
                 context = PreLoadContext.contextFor(txnId, keys, KeyHistory.COMMANDS);
             else
-                context = PreLoadContext.contextFor(next.txnId());
+                context = PreLoadContext.contextFor(txnId);
         }
         else
         {
-            context = PreLoadContext.contextFor(next.txnId());
+            context = PreLoadContext.contextFor(txnId);
         }
 
+        next = next; // disqualifiy next from lambda
         executeInContext(this,
                          context,
                          safeStore -> {
-                             safeStore.updateMaxConflicts(prev, next);
-                             safeStore.updateCommandsForKey(prev, next);
-                             safeStore.updateExclusiveSyncPoint(prev, next);
-                             safeStore.progressLog().update(safeStore, next.txnId(), prev, next);
-                             if (next.is(Stable) || next.is(PreApplied))
-                                 Commands.maybeExecute(safeStore, safeStore.get(next.txnId(), next.route().homeKey()), true, true);
-                             if (forceApply)
-                                 Commands.apply(safeStore, context, next.txnId()).begin(agent);
+                             Command current = safeStore.unsafeGet(txnId).current();
+
+                             safeStore.updateMaxConflicts(prev, current);
+                             safeStore.updateCommandsForKey(prev, current);
+                             safeStore.updateExclusiveSyncPoint(prev, current);
+                             safeStore.progressLog().update(safeStore, txnId, prev, current);
+
+                             if (current.is(Stable) || current.is(PreApplied))
+                                 Commands.maybeExecute(safeStore, safeStore.get(txnId, current.route().homeKey()), true, true);
+
+                             if (current.hasBeen(PreApplied) && !current.is(Invalidated) && !current.is(Truncated))
+                                 Commands.apply(safeStore, context, txnId).begin(agent);
                              return null;
                          });
+
 
         return true;
     }
