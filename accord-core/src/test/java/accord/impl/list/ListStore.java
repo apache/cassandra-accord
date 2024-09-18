@@ -151,6 +151,7 @@ public class ListStore implements DataStore
 
     public void clear()
     {
+        data.clear();
         addedAts.clear();
         removedAts.clear();
         purgedAts.clear();
