@@ -80,7 +80,7 @@ public class NodeSink implements MessageSink
     {
         if (!enabled)
         {
-            logger.debug("Dropping message to {}, node sink is disabled", to);
+            logger.trace("Dropping message to {}, node sink is disabled", to);
             return;
         }
         maybeEnqueue(to, nextMessageId++, send, null);
@@ -91,7 +91,7 @@ public class NodeSink implements MessageSink
     {
         if (!enabled)
         {
-            logger.debug("Dropping message to {}, node sink is disabled", to);
+            logger.trace("Dropping message to {}, node sink is disabled", to);
             return;
         }
         long messageId = nextMessageId++;
@@ -115,7 +115,7 @@ public class NodeSink implements MessageSink
     {
         if (!enabled)
         {
-            logger.debug("Dropping response to {}, node sink is disabled", replyToNode);
+            logger.trace("Dropping response to {}, node sink is disabled", replyToNode);
             return;
         }
         maybeEnqueue(replyToNode, Packet.getMessageId(replyContext), reply, null);
@@ -184,7 +184,7 @@ public class NodeSink implements MessageSink
     {
         if (!enabled)
         {
-            logger.debug("Dropping response to {}, node sink is disabled", replyToNode);
+            logger.trace("Dropping response to {}, node sink is disabled", replyToNode);
             return;
         }
         reply(replyToNode, replyContext, new FailureReply(failure));

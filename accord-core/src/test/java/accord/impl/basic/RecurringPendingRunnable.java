@@ -19,24 +19,25 @@
 package accord.impl.basic;
 
 import java.util.concurrent.TimeUnit;
+import java.util.function.LongSupplier;
 
 import accord.api.Scheduler.Scheduled;
 
 class RecurringPendingRunnable implements PendingRunnable, Scheduled
 {
     final PendingQueue requeue;
-    final long delay;
+    final LongSupplier delay;
     final TimeUnit units;
     Runnable run;
     Runnable onCancellation;
 
-    RecurringPendingRunnable(PendingQueue requeue, Runnable run, long delay, TimeUnit units)
+    RecurringPendingRunnable(PendingQueue requeue, Runnable run, LongSupplier delay, TimeUnit units)
     {
         this.requeue = requeue;
         this.run = run;
         this.delay = delay;
         this.units = units;
-            }
+    }
 
     @Override
     public void run()
@@ -50,7 +51,7 @@ class RecurringPendingRunnable implements PendingRunnable, Scheduled
 
     public void maybeRequeue()
     {
-        if (requeue != null) requeue.add(this, delay, units);
+        if (requeue != null) requeue.add(this, delay.getAsLong(), units);
         else run = null;
     }
 

@@ -255,6 +255,14 @@ public class Cluster implements Scheduler
         return true;
     }
 
+    public void processAllNonRecurring()
+    {
+        pending.drain(item -> {
+            processNext(item);
+            checkFailures.run();
+        });
+    }
+
     private void processNext(Object next)
     {
         if (next instanceof Packet)
@@ -296,29 +304,24 @@ public class Cluster implements Scheduler
     @Override
     public Scheduled recurring(Runnable run, long delay, TimeUnit units)
     {
-        RecurringPendingRunnable result = new RecurringPendingRunnable(pending, run, delay, units);
-        ++recurring;
-        result.onCancellation(() -> --recurring);
-        pending.add(result, delay, units);
-        return result;
+        return recurring(run, () -> delay, units);
     }
 
     @Override
     public Scheduled once(Runnable run, long delay, TimeUnit units)
     {
-        RecurringPendingRunnable result = new RecurringPendingRunnable(null, run, delay, units);
+        RecurringPendingRunnable result = new RecurringPendingRunnable(null, run, () -> delay, units);
         pending.add(result, delay, units);
         return result;
     }
 
-    public Scheduled withRandomInterval(Runnable run, RandomSource random, int minDelay, int maxDelay, TimeUnit units)
+    public Scheduled recurring(Runnable run, LongSupplier delay, TimeUnit units)
     {
-        int delay =  random.nextInt(minDelay, maxDelay);
-        return once(() -> {
-            run.run();
-            withRandomInterval(run, random, minDelay, maxDelay, units);
-             },
-             delay, units);
+        RecurringPendingRunnable result = new RecurringPendingRunnable(pending, run, delay, units);
+        ++recurring;
+        result.onCancellation(() -> --recurring);
+        pending.add(result, delay.getAsLong(), units);
+        return result;
 
     }
 
@@ -507,7 +510,7 @@ public class Cluster implements Scheduler
 
             Scheduled reconfigure = sinks.recurring(configRandomizer::maybeUpdateTopology, 1, SECONDS);
 
-            Scheduled purge = sinks.withRandomInterval(() -> {
+            Scheduled purge = sinks.recurring(() -> {
                 trace.debug("Triggering purge.");
                 int numNodes = random.nextInt(1, nodeMap.size());
                 for (int i = 0; i < numNodes; i++)
@@ -519,9 +522,9 @@ public class Cluster implements Scheduler
                     CommandStore[] stores = nodeMap.get(node.id()).commandStores().all();
                     journal.purge((j) -> stores[j]);
                 }
-            }, random,1, 10, SECONDS);
+            }, () -> random.nextInt(1, 10), SECONDS);
 
-            Scheduled restart = sinks.withRandomInterval(() -> {
+            Scheduled restart = sinks.recurring(() -> {
                 trace.debug("Triggering journal cleanup.");
                 Id id = random.pick(nodes);
                 Node node = nodeMap.get(id);
@@ -539,14 +542,9 @@ public class Cluster implements Scheduler
                     journal.reconstructAll(store::load, store.id());
                     journal.loadHistoricalTransactions(store::load, store.id());
                 }
-                sinks.now(() -> {
-                    sinks.pending.drain(item -> {
-                        sinks.processNext(item);
-                        checkFailures.run();
-                    });
-                    messaging.enable();
-                });
-            }, random, 1, 10, SECONDS);
+                sinks.processAllNonRecurring();
+                messaging.enable();
+            }, () -> random.nextInt(1, 10), SECONDS);
 
             durabilityScheduling.forEach(CoordinateDurabilityScheduling::start);
             services.forEach(Service::start);
