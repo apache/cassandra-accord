@@ -22,6 +22,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.Function;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import accord.api.MessageSink;
 import accord.impl.basic.Cluster.Link;
 import accord.local.AgentExecutor;
@@ -41,6 +44,8 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 public class NodeSink implements MessageSink
 {
+    private static final Logger logger = LoggerFactory.getLogger(NodeSink.class);
+
     private static final boolean DEBUG = false;
     public enum Action { DELIVER, DROP, DELIVER_WITH_FAILURE, FAILURE }
 
@@ -51,7 +56,7 @@ public class NodeSink implements MessageSink
 
     int nextMessageId = 0;
     Map<Long, SafeCallback> callbacks = new LinkedHashMap<>();
-
+    private boolean enabled = true;
     public NodeSink(Id self, Function<Id, Node> lookup, Cluster parent, RandomSource random)
     {
         this.self = self;
@@ -60,15 +65,35 @@ public class NodeSink implements MessageSink
         this.random = random;
     }
 
+    public void enable()
+    {
+        enabled = true;
+    }
+
+    public void disable()
+    {
+        enabled = false;
+    }
+
     @Override
     public void send(Id to, Request send)
     {
+        if (!enabled)
+        {
+            logger.debug("Dropping message to {}, node sink is disabled", to);
+            return;
+        }
         maybeEnqueue(to, nextMessageId++, send, null);
     }
 
     @Override
     public void send(Id to, Request send, AgentExecutor executor, Callback callback)
     {
+        if (!enabled)
+        {
+            logger.debug("Dropping message to {}, node sink is disabled", to);
+            return;
+        }
         long messageId = nextMessageId++;
         SafeCallback sc = new SafeCallback(executor, callback);
         callbacks.put(messageId, sc);
@@ -88,6 +113,11 @@ public class NodeSink implements MessageSink
     @Override
     public void reply(Id replyToNode, ReplyContext replyContext, Reply reply)
     {
+        if (!enabled)
+        {
+            logger.debug("Dropping response to {}, node sink is disabled", replyToNode);
+            return;
+        }
         maybeEnqueue(replyToNode, Packet.getMessageId(replyContext), reply, null);
     }
 
@@ -150,8 +180,13 @@ public class NodeSink implements MessageSink
     }
 
     @Override
-    public void replyWithUnknownFailure(Id replyingToNode, ReplyContext replyContext, Throwable failure)
+    public void replyWithUnknownFailure(Id replyToNode, ReplyContext replyContext, Throwable failure)
     {
-        reply(replyingToNode, replyContext, new FailureReply(failure));
+        if (!enabled)
+        {
+            logger.debug("Dropping response to {}, node sink is disabled", replyToNode);
+            return;
+        }
+        reply(replyToNode, replyContext, new FailureReply(failure));
     }
 }

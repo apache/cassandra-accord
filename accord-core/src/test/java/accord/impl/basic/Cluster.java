@@ -252,18 +252,6 @@ public class Cluster implements Scheduler
         processNext(next);
 
         checkFailures.run();
-
-        // If drain was requested, run until we have no non-recurring tasks are available
-        if (next instanceof RecurringPendingRunnable && ((RecurringPendingRunnable) next).drainAfterRunning)
-        {
-            pending.drain(item -> {
-                processNext(item);
-                checkFailures.run();
-            });
-
-            return false;
-        }
-
         return true;
     }
 
@@ -308,12 +296,7 @@ public class Cluster implements Scheduler
     @Override
     public Scheduled recurring(Runnable run, long delay, TimeUnit units)
     {
-        return recurring(run, delay, units, false);
-    }
-
-    private Scheduled recurring(Runnable run, long delay, TimeUnit units, boolean drainAfterRunning)
-    {
-        RecurringPendingRunnable result = new RecurringPendingRunnable(pending, run, delay, units, drainAfterRunning);
+        RecurringPendingRunnable result = new RecurringPendingRunnable(pending, run, delay, units);
         ++recurring;
         result.onCancellation(() -> --recurring);
         pending.add(result, delay, units);
@@ -323,9 +306,20 @@ public class Cluster implements Scheduler
     @Override
     public Scheduled once(Runnable run, long delay, TimeUnit units)
     {
-        RecurringPendingRunnable result = new RecurringPendingRunnable(null, run, delay, units, false);
+        RecurringPendingRunnable result = new RecurringPendingRunnable(null, run, delay, units);
         pending.add(result, delay, units);
         return result;
+    }
+
+    public Scheduled withRandomInterval(Runnable run, RandomSource random, int minDelay, int maxDelay, TimeUnit units)
+    {
+        int delay =  random.nextInt(minDelay, maxDelay);
+        return once(() -> {
+            run.run();
+            withRandomInterval(run, random, minDelay, maxDelay, units);
+             },
+             delay, units);
+
     }
 
     public void onDone(Runnable run)
@@ -513,31 +507,46 @@ public class Cluster implements Scheduler
 
             Scheduled reconfigure = sinks.recurring(configRandomizer::maybeUpdateTopology, 1, SECONDS);
 
-            Scheduled purge = sinks.recurring(() -> {
+            Scheduled purge = sinks.withRandomInterval(() -> {
                 trace.debug("Triggering purge.");
-                for (Node node : nodeMap.values())
+                int numNodes = random.nextInt(1, nodeMap.size());
+                for (int i = 0; i < numNodes; i++)
                 {
+                    Id id = random.pick(nodes);
+                    Node node = nodeMap.get(id);
+
                     Journal journal = journalMap.get(node.id());
                     CommandStore[] stores = nodeMap.get(node.id()).commandStores().all();
-                    journal.purge((i) -> stores[i]);
+                    journal.purge((j) -> stores[j]);
                 }
-            }, 5, SECONDS);
+            }, random,1, 10, SECONDS);
 
-            Scheduled restart = sinks.recurring(() -> {
-                Id node = random.pick(nodes);
-                ListStore listStore = (ListStore) nodeMap.get(node).commandStores().dataStore();
-                listStore.clear();
-                Journal journal = journalMap.get(node);
-                CommandStore[] stores = nodeMap.get(node).commandStores().all();
+            Scheduled restart = sinks.withRandomInterval(() -> {
                 trace.debug("Triggering journal cleanup.");
+                Id id = random.pick(nodes);
+                Node node = nodeMap.get(id);
+                NodeSink messaging = ((NodeSink)node.messageSink());
+                messaging.disable();
+                ListStore listStore = (ListStore) nodeMap.get(id).commandStores().dataStore();
+                listStore.clear();
+
+                Journal journal = journalMap.get(id);
+                CommandStore[] stores = nodeMap.get(id).commandStores().all();
                 for (CommandStore s : stores)
                 {
-                    DelayedCommandStores.DelayedCommandStore store = (DelayedCommandStores.DelayedCommandStore) s;                    trace.debug("Triggering journal cleanup.");
+                    DelayedCommandStores.DelayedCommandStore store = (DelayedCommandStores.DelayedCommandStore) s;
                     store.clearForTesting();
                     journal.reconstructAll(store::load, store.id());
                     journal.loadHistoricalTransactions(store::load, store.id());
                 }
-            }, 5, SECONDS, true);
+                sinks.now(() -> {
+                    sinks.pending.drain(item -> {
+                        sinks.processNext(item);
+                        checkFailures.run();
+                    });
+                    messaging.enable();
+                });
+            }, random, 1, 10, SECONDS);
 
             durabilityScheduling.forEach(CoordinateDurabilityScheduling::start);
             services.forEach(Service::start);
