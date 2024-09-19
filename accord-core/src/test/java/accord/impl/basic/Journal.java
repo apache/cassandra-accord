@@ -398,26 +398,6 @@ public class Journal
         }
     }
 
-    private static class RequestContext implements Runnable
-    {
-        final long waitForEpoch;
-        final Message message;
-        final Runnable fn;
-
-        protected RequestContext(Message request, long waitForEpoch, Runnable fn)
-        {
-            this.waitForEpoch = waitForEpoch;
-            this.message = request;
-            this.fn = fn;
-        }
-
-        @Override
-        public void run()
-        {
-            fn.run();
-        }
-    }
-
     private static class Diff
     {
         public final NewValue<TxnId> txnId;
