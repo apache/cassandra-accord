@@ -1381,7 +1381,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                                  Commands.maybeExecute(safeStore, safeStore.get(txnId, current.route().homeKey()), true, true);
 
                              if (current.hasBeen(PreApplied) && !current.is(Invalidated) && !current.is(Truncated))
-                                 Commands.apply(safeStore, context, txnId).begin(agent);
+                                 Commands.apply(safeStore, current, context, txnId).begin(agent);
                              return null;
                          });
 
