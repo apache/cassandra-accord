@@ -29,8 +29,11 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import javax.annotation.Nonnull;
 
 import com.google.common.annotations.VisibleForTesting;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import accord.api.Agent;
 import accord.api.ConfigurationService.EpochReady;
@@ -39,6 +42,7 @@ import accord.api.Key;
 import accord.api.LocalListeners;
 import accord.api.ProgressLog;
 import accord.api.RoutingKey;
+import accord.api.Scheduler;
 import accord.local.CommandStore.EpochUpdateHolder;
 import accord.primitives.EpochSupplier;
 import accord.primitives.Participants;
@@ -56,13 +60,8 @@ import accord.utils.MapReduceConsume;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
-import javax.annotation.Nonnull;
-
 import org.agrona.collections.Hashing;
 import org.agrona.collections.Int2ObjectHashMap;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import static accord.api.ConfigurationService.EpochReady.done;
 import static accord.local.PreLoadContext.empty;
@@ -87,7 +86,8 @@ public abstract class CommandStores
                              RandomSource random,
                              ShardDistributor shardDistributor,
                              ProgressLog.Factory progressLogFactory,
-                             LocalListeners.Factory listenersFactory);
+                             LocalListeners.Factory listenersFactory,
+                             Scheduler scheduler);
     }
 
     private static class StoreSupplier
@@ -99,8 +99,9 @@ public abstract class CommandStores
         private final LocalListeners.Factory listenersFactory;
         private final CommandStore.Factory shardFactory;
         private final RandomSource random;
+        private final Scheduler scheduler;
 
-        StoreSupplier(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, CommandStore.Factory shardFactory)
+        StoreSupplier(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, CommandStore.Factory shardFactory, Scheduler scheduler)
         {
             this.time = time;
             this.agent = agent;
@@ -109,11 +110,12 @@ public abstract class CommandStores
             this.progressLogFactory = progressLogFactory;
             this.listenersFactory = listenersFactory;
             this.shardFactory = shardFactory;
+            this.scheduler = scheduler;
         }
 
         CommandStore create(int id, EpochUpdateHolder rangesForEpoch)
         {
-            return shardFactory.create(id, time, agent, this.store, progressLogFactory, listenersFactory, rangesForEpoch);
+            return shardFactory.create(id, time, agent, this.store, progressLogFactory, listenersFactory, rangesForEpoch, scheduler);
         }
     }
 
@@ -367,9 +369,9 @@ public abstract class CommandStores
     }
 
     public CommandStores(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor,
-                         ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, CommandStore.Factory shardFactory)
+                         ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, CommandStore.Factory shardFactory, Scheduler scheduler)
     {
-        this(new StoreSupplier(time, agent, store, random, progressLogFactory, listenersFactory, shardFactory), shardDistributor);
+        this(new StoreSupplier(time, agent, store, random, progressLogFactory, listenersFactory, shardFactory, scheduler), shardDistributor);
     }
 
     public Topology local()

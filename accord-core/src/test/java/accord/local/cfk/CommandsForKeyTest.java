@@ -47,10 +47,10 @@ import accord.api.Read;
 import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.api.Update;
-import accord.impl.IntKey;
 import accord.impl.DefaultLocalListeners;
 import accord.impl.DefaultLocalListeners.DefaultNotifySink;
 import accord.impl.DefaultRemoteListeners;
+import accord.impl.IntKey;
 import accord.local.Command;
 import accord.local.Command.AbstractCommand;
 import accord.local.CommandStore;
@@ -903,7 +903,17 @@ public class CommandsForKeyTest
 
         protected TestCommandStore(int pruneInterval, int pruneHlcDelta)
         {
-            super(0, null, null, null, ignore -> new ProgressLog.NoOpProgressLog(), ignore -> new DefaultLocalListeners(new DefaultRemoteListeners((a, b, c, d, e)->{}), DefaultNotifySink.INSTANCE), new EpochUpdateHolder());
+            super(0,
+                  null,
+                  null,
+                  null,
+                  ignore -> new ProgressLog.NoOpProgressLog(),
+                  ignore -> new DefaultLocalListeners(new DefaultRemoteListeners((a, b, c, d, e)->{}), DefaultNotifySink.INSTANCE),
+                  new EpochUpdateHolder(),
+                  (ignored0, ignored1) -> AsyncResults.SUCCESS_VOID,
+                  (ignored0, ignored1) -> AsyncResults.SUCCESS_VOID,
+                  (ignored0, ignored1) -> AsyncResults.SUCCESS_VOID,
+                  (ignored0, ignored1) -> AsyncResults.SUCCESS_VOID);
             this.pruneInterval = pruneInterval;
             this.pruneHlcDelta = pruneHlcDelta;
         }

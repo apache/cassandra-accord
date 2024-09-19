@@ -623,7 +623,7 @@ public class Commands
         if (command.status() != Stable && command.status() != PreApplied)
         {
             if (alwaysNotifyListeners)
-                safeStore.notifyListeners(safeCommand, command);
+                safeStore0.notifyListeners(safeCommand0, command);
             return false;
         }
 
@@ -631,10 +631,10 @@ public class Commands
         if (waitingOn.isWaiting())
         {
             if (alwaysNotifyListeners)
-                safeStore.notifyListeners(safeCommand, command);
+                safeStore0.notifyListeners(safeCommand0, command);
 
             if (notifyWaitingOn && waitingOn.isWaitingOnCommand())
-                new NotifyWaitingOn(safeCommand).accept(safeStore);
+                new NotifyWaitingOn(safeCommand0).accept(safeStore0);
             return false;
         }
 
@@ -647,23 +647,23 @@ public class Commands
                 // TODO (required): we can have dangling transactions in some cases when proposing in a future epoch but
                 //   later deciding on an earlier epoch. We should probably turn this into an erased vestigial command,
                 //   but we should tighten up our semantics there in general.
-                safeCommand.readyToExecute(safeStore);
+                safeCommand0.readyToExecute(safeStore0);
                 logger.trace("{}: set to ReadyToExecute", command.txnId());
-                safeStore.notifyListeners(safeCommand, command);
+                safeStore0.notifyListeners(safeCommand0, command);
                 return true;
 
             case PreApplied:
-                Ranges executeRanges = executeRanges(safeStore, command.executeAt());
+                Ranges executeRanges = executeRanges(safeStore0, command.executeAt());
                 Command.Executed executed = command.asExecuted();
                 boolean intersects = executed.writes().keys.intersects(executeRanges);
 
                 if (intersects)
                 {
                     // TODO (now): we should set applying within apply to avoid applying multiple times
-                    safeCommand.applying(safeStore);
-                    safeStore.notifyListeners(safeCommand, command);
+                    safeCommand0.applying(safeStore0);
+                    safeStore0.notifyListeners(safeCommand0, command);
                     logger.trace("{}: applying", command.txnId());
-                    apply(safeStore, executed);
+                    apply(safeStore0, executed);
                     return true;
                 }
                 else
@@ -671,8 +671,26 @@ public class Commands
                     // TODO (desirable, performance): This could be performed immediately upon Committed
                     //      but: if we later support transitive dependency elision this could be dangerous
                     logger.trace("{}: applying no-op", command.txnId());
-                    safeCommand.applied(safeStore);
-                    safeStore.notifyListeners(safeCommand, command);
+                    if (command.txnId().kind() == ExclusiveSyncPoint)
+                    {
+                        Ranges ranges = safeStore0.ranges().allAt(command.txnId().epoch());
+                        ranges = command.route().slice(ranges, Minimal).participants().toRanges();
+                        CommandStore commandStore = safeStore0.commandStore();
+                        safeCommand0.applying(safeStore0);
+                        safeStore0.notifyListeners(safeCommand0, command);
+                        commandStore.markExclusiveSyncPointLocallyApplied(commandStore, command.txnId(), ranges).flatMap(ignored ->
+                            commandStore.execute(PreLoadContext.contextFor(command.txnId()), safeStore1 -> {
+                                    SafeCommand safeCommand1 = safeStore1.get(command.txnId());
+                                    safeCommand1.applied(safeStore1);
+                                    safeStore1.notifyListeners(safeCommand1, command);
+                                })
+                        ).begin(commandStore.agent);
+                    }
+                    else
+                    {
+                        safeCommand0.applied(safeStore0);
+                        safeStore0.notifyListeners(safeCommand0, command);
+                    }
                     return true;
                 }
             default:

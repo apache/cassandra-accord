@@ -31,7 +31,6 @@ import java.util.function.Function;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
-
 import javax.annotation.Nullable;
 
 import org.junit.jupiter.api.Assertions;
@@ -65,6 +64,7 @@ import accord.utils.AccordGens;
 import accord.utils.RandomSource;
 import accord.utils.RandomTestRunner;
 import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncResults;
 import org.agrona.collections.IntHashSet;
 import org.agrona.collections.ObjectHashSet;
 
@@ -384,7 +384,18 @@ public class RemoteListenersTest
 
         protected TestCommandStore(int id)
         {
-            super(id, null, null, null, ignore -> new ProgressLog.NoOpProgressLog(), ignore -> new DefaultLocalListeners(new DefaultRemoteListeners((a, b, c, d, e)->{}), DefaultLocalListeners.DefaultNotifySink.INSTANCE), new EpochUpdateHolder());
+            super(id,
+                  null,
+                  null,
+                  null,
+                  ignore -> new ProgressLog.NoOpProgressLog(),
+                  ignore -> new DefaultLocalListeners(new DefaultRemoteListeners((a, b, c, d, e)->{}),
+                                                      DefaultLocalListeners.DefaultNotifySink.INSTANCE),
+                  new EpochUpdateHolder(),
+                  (ignored1, ignored2) -> AsyncResults.SUCCESS_VOID,
+                  (ignored1, ignored2) -> AsyncResults.SUCCESS_VOID,
+                  (ignored1, ignored2) -> AsyncResults.SUCCESS_VOID,
+                  (ignored1, ignored2) -> AsyncResults.SUCCESS_VOID);
             this.storeId = id;
         }
 

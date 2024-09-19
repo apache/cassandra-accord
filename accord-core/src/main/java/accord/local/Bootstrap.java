@@ -142,12 +142,12 @@ class Bootstrap
             // we fix here the ranges we use for the synthetic command, even though we may end up only finishing a subset
             // of these ranges as part of this attempt
             Ranges commitRanges = valid;
-            store.markBootstrapping(safeStore0, globalSyncId, valid);
-            CoordinateSyncPoint.exclusive(node, globalSyncId, commitRanges)
-               // ATM all known implementations store ranges in-memory, but this will not be true soon, so this will need to be addressed
-               .flatMap(syncPoint -> node.withEpoch(epoch, () -> store.submit(contextFor(localSyncId, syncPoint.waitFor.keyDeps.keys(), KeyHistory.COMMANDS), safeStore1 -> {
-                   if (valid.isEmpty()) // we've lost ownership of the range
-                       return AsyncResults.success(Ranges.EMPTY);
+            store.markBootstrapping(safeStore0.commandStore(), globalSyncId, valid).flatMap(ignore ->
+                CoordinateSyncPoint.exclusive(node, globalSyncId, commitRanges)
+                   // ATM all known implementations store ranges in-memory, but this will not be true soon, so this will need to be addressed
+                   .flatMap(syncPoint -> node.withEpoch(epoch, () -> store.submit(contextFor(localSyncId, syncPoint.waitFor.keyDeps.keys(), KeyHistory.COMMANDS), safeStore1 -> {
+                       if (valid.isEmpty()) // we've lost ownership of the range
+                           return AsyncResults.success(Ranges.EMPTY);
 
                    Commands.createBootstrapCompleteMarkerTransaction(safeStore1, localSyncId, valid);
                    safeStore1.commandStore().registerHistoricalTransactions(syncPoint.waitFor, safeStore1);
