@@ -42,19 +42,28 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
-
-import accord.api.LocalListeners;
-import accord.impl.progresslog.DefaultProgressLog;
-import accord.local.*;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.Key;
+import accord.api.LocalListeners;
 import accord.api.ProgressLog;
+import accord.api.Scheduler;
+import accord.impl.progresslog.DefaultProgressLog;
+import accord.local.Command;
+import accord.local.CommandStore;
 import accord.local.CommandStores.RangesForEpoch;
+import accord.local.KeyHistory;
+import accord.local.Node;
+import accord.local.NodeTimeService;
+import accord.local.PreLoadContext;
+import accord.local.RedundantStatus;
+import accord.local.SafeCommand;
+import accord.local.SafeCommandStore;
+import accord.local.SaveStatus;
+import accord.local.Status;
 import accord.local.cfk.CommandsForKey;
 import accord.primitives.AbstractKeys;
 import accord.primitives.Deps;
@@ -75,20 +84,22 @@ import accord.primitives.TxnId;
 import accord.utils.Invariants;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
+import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
 
 import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestDep.WITH;
-import static accord.local.SafeCommandStore.TestStatus.ANY_STATUS;
 import static accord.local.SafeCommandStore.TestStartedAt.STARTED_BEFORE;
+import static accord.local.SafeCommandStore.TestStatus.ANY_STATUS;
 import static accord.local.SaveStatus.Applying;
 import static accord.local.SaveStatus.Erased;
 import static accord.local.SaveStatus.ErasedOrInvalidOrVestigial;
 import static accord.local.SaveStatus.ReadyToExecute;
 import static accord.local.Status.Applied;
+import static accord.local.Status.NotDefined;
 import static accord.local.Status.PreCommitted;
 import static accord.local.Status.Stable;
 import static accord.local.Status.Truncated;
-import static accord.local.Status.NotDefined;
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.utils.Invariants.illegalState;
 import static java.lang.String.format;
@@ -110,9 +121,36 @@ public abstract class InMemoryCommandStore extends CommandStore
 
     private InMemorySafeStore current;
 
-    public InMemoryCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
+    // To simulate the delay in simulatedAsyncPersist
+    private final Scheduler scheduler;
+    private static <T> BiFunction<CommandStore, T, Object> simulatedAsyncPersistFactory(Scheduler scheduler)
     {
-        super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder);
+        return (commandStore, toPersist) -> simulatedAsyncPersist(scheduler, commandStore, toPersist);
+    }
+
+    private static <T> AsyncResult<?> simulatedAsyncPersist(Scheduler scheduler, CommandStore store, T toPersist)
+    {
+        AsyncResult.Settable<?> result = AsyncResults.settable();
+        scheduler.once(() -> result.trySuccess(null), 100, TimeUnit.MICROSECONDS);
+        return result;
+//        return AsyncResults.SUCCESS_VOID;
+    }
+
+    public InMemoryCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder, Scheduler scheduler)
+    {
+        super(id,
+              time,
+              agent,
+              store,
+              progressLogFactory,
+              listenersFactory,
+              epochUpdateHolder,
+              (result, callback, executor) -> ((AsyncResult<?>)result).withExecutor(executor).addCallback(callback).begin(agent),
+              simulatedAsyncPersistFactory(scheduler),
+              simulatedAsyncPersistFactory(scheduler),
+              simulatedAsyncPersistFactory(scheduler),
+              simulatedAsyncPersistFactory(scheduler));
+        this.scheduler = scheduler;
     }
 
     protected boolean canExposeUnloaded()
@@ -359,53 +397,59 @@ public abstract class InMemoryCommandStore extends CommandStore
     }
 
     @Override
-    public void markShardDurable(SafeCommandStore safeStore, TxnId syncId, Ranges ranges)
+    public AsyncChain<Void> markShardDurable(SafeCommandStore safeStore, TxnId syncId, Ranges ranges)
     {
-        super.markShardDurable(safeStore, syncId, ranges);
+        // We know it completes immediately for InMemoryCommandStore
+        AsyncChain<Void> markShardDurableChain = super.markShardDurable(safeStore, syncId, ranges);
+        markShardDurableChain = markShardDurableChain.map(ignored ->
+         {
+             if (!rangeCommands.containsKey(syncId))
+                 historicalRangeCommands.merge(syncId, ranges, Ranges::with);
 
-        if (!rangeCommands.containsKey(syncId))
-            historicalRangeCommands.merge(syncId, ranges, Ranges::with);
+             // TODO (now): apply on retrieval
+             historicalRangeCommands.entrySet().removeIf(next -> next.getKey().compareTo(syncId) < 0 && next.getValue().intersects(ranges));
+             rangeCommands.entrySet().removeIf(tx -> {
+                 if (tx.getKey().compareTo(syncId) >= 0)
+                     return false;
+                 Ranges newRanges = tx.getValue().ranges.without(ranges);
+                 if (!newRanges.isEmpty())
+                 {
+                     tx.getValue().ranges = newRanges;
+                     return false;
+                 }
+                 else
+                 {
+                     maxRedundant = Timestamp.nonNullOrMax(maxRedundant, tx.getValue().command.value().executeAt());
+                     return true;
+                 }
+             });
 
-        // TODO (now): apply on retrieval
-        historicalRangeCommands.entrySet().removeIf(next -> next.getKey().compareTo(syncId) < 0 && next.getValue().intersects(ranges));
-        rangeCommands.entrySet().removeIf(tx -> {
-            if (tx.getKey().compareTo(syncId) >= 0)
-                return false;
-            Ranges newRanges = tx.getValue().ranges.without(ranges);
-            if (!newRanges.isEmpty())
-            {
-                tx.getValue().ranges = newRanges;
-                return false;
-            }
-            else
-            {
-                maxRedundant = Timestamp.nonNullOrMax(maxRedundant, tx.getValue().command.value().executeAt());
-                return true;
-            }
-        });
+             // verify we're clearing the progress log
+             ((Node)time).scheduler().once(() -> {
+                 DefaultProgressLog progressLog = (DefaultProgressLog) this.progressLog;
+                 commands.headMap(syncId, false).forEach((id, cmd) -> {
+                     Command command = cmd.value();
+                     if (!command.hasBeen(PreCommitted)) return;
+                     if (!command.txnId().kind().isGloballyVisible()) return;
 
-        // verify we're clearing the progress log
-        ((Node)time).scheduler().once(() -> {
-            DefaultProgressLog progressLog = (DefaultProgressLog) this.progressLog;
-            commands.headMap(syncId, false).forEach((id, cmd) -> {
-                Command command = cmd.value();
-                if (!command.hasBeen(PreCommitted)) return;
-                if (!command.txnId().kind().isGloballyVisible()) return;
+                     Ranges allRanges = unsafeRangesForEpoch().allBetween(id.epoch(), command.executeAtOrTxnId().epoch());
+                     boolean done = command.hasBeen(Truncated);
+                     if (!done)
+                     {
+                         if (redundantBefore().status(cmd.txnId, command.executeAtOrTxnId(), command.route()) == RedundantStatus.PRE_BOOTSTRAP_OR_STALE)
+                             return;
 
-                Ranges allRanges = unsafeRangesForEpoch().allBetween(id.epoch(), command.executeAtOrTxnId().epoch());
-                boolean done = command.hasBeen(Truncated);
-                if (!done)
-                {
-                    if (redundantBefore().status(cmd.txnId, command.executeAtOrTxnId(), command.route()) == RedundantStatus.PRE_BOOTSTRAP_OR_STALE)
-                        return;
+                         Route<?> route = cmd.value().route().slice(allRanges);
+                         done = !route.isEmpty() && ranges.containsAll(route);
+                     }
 
-                    Route<?> route = cmd.value().route().slice(allRanges);
-                    done = !route.isEmpty() && ranges.containsAll(route);
-                }
+                     if (done) Invariants.checkState(progressLog.get(id) == null);
+                 });
+             }, 5L, TimeUnit.SECONDS);
+             return null;
+         }, this);
 
-                if (done) Invariants.checkState(progressLog.get(id) == null);
-            });
-        }, 5L, TimeUnit.SECONDS);
+        return markShardDurableChain;
     }
 
 
@@ -475,7 +519,8 @@ public abstract class InMemoryCommandStore extends CommandStore
     {
         if (current != null)
             throw illegalState("Another operation is in progress or it's store was not cleared");
-        current = createSafeStore(context, updateRangesForEpoch());
+        RangesForEpoch rangesForEpoch = updateRangesForEpoch();
+        current = createSafeStore(context, rangesForEpoch);
         return current;
     }
 
@@ -1055,9 +1100,9 @@ public abstract class InMemoryCommandStore extends CommandStore
         Runnable active = null;
         final Queue<Runnable> queue = new ConcurrentLinkedQueue<>();
 
-        public Synchronized(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
+        public Synchronized(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder, Scheduler scheduler)
         {
-            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder);
+            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder, scheduler);
         }
 
         private synchronized void maybeRun()
@@ -1147,9 +1192,9 @@ public abstract class InMemoryCommandStore extends CommandStore
         private Thread thread; // when run in the executor this will be non-null, null implies not running in this store
         private final ExecutorService executor;
 
-        public SingleThread(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
+        public SingleThread(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder, Scheduler scheduler)
         {
-            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder);
+            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder, scheduler);
             this.executor = Executors.newSingleThreadExecutor(r -> {
                 Thread thread = new Thread(r);
                 thread.setName(CommandStore.class.getSimpleName() + '[' + time.id() + ']');
@@ -1231,9 +1276,9 @@ public abstract class InMemoryCommandStore extends CommandStore
             }
         }
 
-        public Debug(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
+        public Debug(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder, Scheduler scheduler)
         {
-            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder);
+            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder, scheduler);
         }
 
         @Override

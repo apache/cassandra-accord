@@ -24,6 +24,7 @@ import java.util.function.Consumer;
 
 import org.junit.jupiter.api.Test;
 
+import accord.api.Agent;
 import accord.impl.PrefixedIntHashKey;
 import accord.impl.basic.Cluster;
 import accord.impl.basic.DelayedCommandStores.DelayedCommandStore;
@@ -43,9 +44,11 @@ import accord.utils.AccordGens;
 import accord.utils.Gen;
 import accord.utils.Gens;
 import accord.utils.Invariants;
+import accord.utils.async.AsyncResults;
 import org.assertj.core.api.Assertions;
 
 import static accord.local.PreLoadContext.contextFor;
+import static accord.utils.Invariants.checkState;
 import static accord.utils.Property.qt;
 
 class BootstrapLocalTxnTest
@@ -80,6 +83,7 @@ class BootstrapLocalTxnTest
                     SyncPoint<Ranges> syncPoint = new SyncPoint<>(globalSyncId, Deps.NONE, ranges, route);
                     Ranges valid = AccordGens.rangesInsideRanges(ranges, (rs2, r) -> rs2.nextInt(1, 4)).next(rs);
                     Invariants.checkArgument(syncPoint.keysOrRanges.containsAll(valid));
+                    Agent agent = store.agent;
                     store.execute(contextFor(localSyncId, syncPoint.waitFor.keyDeps.keys(), KeyHistory.COMMANDS), safe -> Commands.createBootstrapCompleteMarkerTransaction(safe, localSyncId, valid))
                          .flatMap(ignore -> store.execute(contextFor(localSyncId), safe -> validate.accept(safe.get(localSyncId, route.homeKey()).current())))
                          .flatMap(ignore -> store.execute(contextFor(localSyncId), safe -> Commands.markBootstrapComplete(safe, localSyncId, ranges)))
@@ -89,14 +93,14 @@ class BootstrapLocalTxnTest
                              Cleanup target = cleanupGen.next(rs);
                              if (target == Cleanup.NO)
                                  return Cleanup.NO;
-                             safe.commandStore().setRedundantBefore(RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, nextGlobalSyncId, nextGlobalSyncId, TxnId.NONE));
+                             checkState(safe.commandStore().mergeAndUpdateRedundantBefore(RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, nextGlobalSyncId, nextGlobalSyncId, TxnId.NONE)) == AsyncResults.SUCCESS_VOID);
                              switch (target)
                              {
                                  case ERASE:
-                                     safe.commandStore().setDurableBefore(DurableBefore.create(ranges, nextGlobalSyncId, nextGlobalSyncId));
+                                     checkState(safe.commandStore().mergeAndUpdateDurableBefore(DurableBefore.create(ranges, nextGlobalSyncId, nextGlobalSyncId)) == AsyncResults.SUCCESS_VOID);
                                      break;
                                  case TRUNCATE:
-                                     safe.commandStore().setDurableBefore(DurableBefore.create(ranges, nextGlobalSyncId, globalSyncId));
+                                     checkState(safe.commandStore().mergeAndUpdateDurableBefore(DurableBefore.create(ranges, nextGlobalSyncId, globalSyncId)) == AsyncResults.SUCCESS_VOID);
                                      break;
                                  case TRUNCATE_WITH_OUTCOME:
                                  case INVALIDATE:
