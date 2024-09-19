@@ -19,6 +19,7 @@
 package accord.impl.basic;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -40,7 +41,6 @@ import accord.local.Commands;
 import accord.local.CommonAttributes;
 import accord.local.SaveStatus;
 import accord.local.Status;
-import accord.messages.Message;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.PartialDeps;
@@ -99,6 +99,7 @@ public class Journal
                 {
                     case NO:
                         break;
+                    case INVALIDATE:
                     case TRUNCATE_WITH_OUTCOME:
                     case TRUNCATE:
                         Command purged = Commands.purge(command, command.route(), cleanup);
@@ -129,7 +130,7 @@ public class Journal
     // when we want to produce side-effects.
     private boolean loading = false;
 
-    public void reconstructAll(InMemoryCommandStore.Load consumer, int commandStoreId)
+    public void reconstructAll(InMemoryCommandStore.Loader loader, int commandStoreId)
     {
         Map<TxnId, List<Diff>> diffs = diffsPerCommandStore.get(commandStoreId);
 
@@ -137,36 +138,24 @@ public class Journal
         if (diffs == null)
             return;
 
+        List<Command> allCommands = new ArrayList<>();
         for (TxnId txnId : new ArrayList<>(diffs.keySet()))
-            tryLoadOne(consumer, commandStoreId, txnId);
-    }
-
-    private void tryLoadOne(InMemoryCommandStore.Load consumer, int commandStoreId, TxnId txnId)
-    {
-        List<Command> commands = reconstructEach(commandStoreId, txnId);
-        Invariants.checkState(!commands.isEmpty());
-
-        Command last = commands.get(commands.size() - 1);
+            allCommands.add(reconstruct(commandStoreId, txnId));
+        allCommands.sort(Comparator.comparing(c -> c.executeAt() == null ? c.txnId() : c.executeAt()));
 
         loading = true;
         try
         {
-            Command prev = null;
-            Set<Status> seen = new HashSet<>();
-            for (int i = 0; i < commands.size(); i++)
+            List<Command> filtered = new ArrayList<>();
+            for (Command command : allCommands)
             {
-                Command command = commands.get(i);
-                seen.add(command.status());
-
-                // Only last command is allowed to have side-effects
-                if (command == last)
-                {
-                    loading = false;
-                    prev = Command.NotDefined.uninitialised(command.txnId());
-                    consumer.load(prev, command, !seen.contains(PreApplied));
-                }
-                prev = command;
+                Command res = loader.load(command);
+                if (res != null)
+                    filtered.add(command);
             }
+
+            for (Command command : filtered)
+                loader.apply(command);
         }
         finally
         {

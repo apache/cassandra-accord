@@ -75,9 +75,7 @@ import static accord.local.Status.PreApplied;
 import static accord.local.Status.PreCommitted;
 import static accord.local.Status.Stable;
 import static accord.local.Status.Truncated;
-import static accord.primitives.Routables.Slice.Minimal;
 import static accord.primitives.Route.isFullRoute;
-import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static accord.utils.Invariants.illegalState;
 
 public class Commands
@@ -560,10 +558,6 @@ public class Commands
     public static AsyncChain<Void> apply(SafeCommandStore safeStore, PreLoadContext context, TxnId txnId)
     {
         Command.Executed command = safeStore.get(txnId).current().asExecuted();
-        return apply(safeStore, command, context, txnId);
-    }
-    public static AsyncChain<Void> apply(SafeCommandStore safeStore, Command command, PreLoadContext context, TxnId txnId)
-    {
         // TODO (required): make sure we are correctly handling (esp. C* side with validation logic) executing a transaction
         //  that was pre-bootstrap for some range (so redundant and we may have gone ahead of), but had to be executed locally
         //  for another range
@@ -578,6 +572,17 @@ public class Commands
                    postApply(ss, txnId);
                    return null;
                }));
+    }
+
+    public static AsyncChain<Void> applyWrites(SafeCommandStore safeStore, Command command)
+    {
+        Ranges executeRanges = executeRanges(safeStore, command.executeAt());
+        Command.Executed executed = command.asExecuted();
+        boolean intersects = executed.writes().keys.intersects(executeRanges);
+        if (intersects)
+            return command.writes().apply(safeStore, applyRanges(safeStore, command.executeAt()), command.partialTxn());
+        else
+            return AsyncChains.success(null);
     }
 
     public static void apply(SafeCommandStore safeStore, Command command)
@@ -602,7 +607,11 @@ public class Commands
 
     public static boolean maybeExecute(SafeCommandStore safeStore, SafeCommand safeCommand, boolean alwaysNotifyListeners, boolean notifyWaitingOn)
     {
-        final Command command = safeCommand.current();
+        return maybeExecute(safeStore, safeCommand, safeCommand.current(), alwaysNotifyListeners, notifyWaitingOn);
+    }
+
+    public static boolean maybeExecute(SafeCommandStore safeStore, SafeCommand safeCommand, Command command, boolean alwaysNotifyListeners, boolean notifyWaitingOn)
+    {
         if (logger.isTraceEnabled())
             logger.trace("{}: Maybe executing with status {}. Will notify listeners on noop: {}", command.txnId(), command.status(), alwaysNotifyListeners);
 

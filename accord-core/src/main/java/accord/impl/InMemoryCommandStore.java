@@ -51,6 +51,7 @@ import accord.api.Key;
 import accord.api.LocalListeners;
 import accord.api.ProgressLog;
 import accord.impl.progresslog.DefaultProgressLog;
+import accord.local.Cleanup;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.CommandStores.RangesForEpoch;
@@ -86,6 +87,7 @@ import accord.utils.Invariants;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 
+import static accord.local.Cleanup.NO;
 import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestDep.WITH;
 import static accord.local.SafeCommandStore.TestStartedAt.STARTED_BEFORE;
@@ -1324,71 +1326,75 @@ public abstract class InMemoryCommandStore extends CommandStore
         progressLog.clear();
         commands.clear();
         commandsByExecuteAt.clear();
+        timestampsForKey.clear();
         commandsForKey.clear();
         rangeCommands.clear();
         historicalRangeCommands.clear();
     }
 
-    public interface Load
+    public interface Loader
     {
-        void load(Command prev, Command next, boolean forceApply);
+        Command load(Command next);
+        void apply(Command next);
     }
 
-    @VisibleForTesting
-    public boolean load(Command prev, Command next, boolean forceApply)
+    public Loader loader()
     {
-        GlobalCommand globalCommand = command(next.txnId());
-        globalCommand.value(next);
-        if (next.executeAt() != null)
-            this.commandsByExecuteAt.put(next.executeAt(), globalCommand);
-
-        final TxnId txnId = next.txnId();
-        PreLoadContext context;
-        if (CommandsForKey.manages(txnId))
+        return new Loader()
         {
-            Keys keys = (Keys) next.keysOrRanges();
-            if (keys == null || next.hasBeen(Status.Truncated)) keys = (Keys) prev.keysOrRanges();
-            if (keys != null)
-                context = PreLoadContext.contextFor(txnId, keys, KeyHistory.COMMANDS);
-            else
-                context = PreLoadContext.contextFor(txnId);
-        }
-        else if (!CommandsForKey.managesExecution(txnId) && next.hasBeen(Status.Stable) && !next.hasBeen(Status.Truncated) && !prev.hasBeen(Status.Stable))
-        {
-            Keys keys = next.asCommitted().waitingOn.keys;
-            if (!keys.isEmpty())
-                context = PreLoadContext.contextFor(txnId, keys, KeyHistory.COMMANDS);
-            else
-                context = PreLoadContext.contextFor(txnId);
-        }
-        else
-        {
-            context = PreLoadContext.contextFor(txnId);
-        }
+            private PreLoadContext context(Command command, KeyHistory keyHistory)
+            {
+                TxnId txnId = command.txnId();
+                if (CommandsForKey.manages(txnId))
+                {
+                    Keys keys = (Keys) command.keysOrRanges();
+                    if (keys != null)
+                        return PreLoadContext.contextFor(txnId, keys, keyHistory);
+                }
+                else if (!CommandsForKey.managesExecution(txnId) && command.hasBeen(Status.Stable) && !command.hasBeen(Status.Truncated))
+                {
+                    Keys keys = command.asCommitted().waitingOn.keys;
+                    if (!keys.isEmpty())
+                        return PreLoadContext.contextFor(txnId, keys, keyHistory);
+                }
 
-        next = next; // disqualifiy next from lambda
-        executeInContext(this,
-                         context,
-                         safeStore -> {
-                             Command current = safeStore.unsafeGet(txnId).current();
+                return PreLoadContext.contextFor(txnId);
+            }
 
-                             safeStore.updateMaxConflicts(prev, current);
-                             safeStore.updateCommandsForKey(prev, current);
-                             safeStore.updateExclusiveSyncPoint(prev, current);
-                             safeStore.progressLog().update(safeStore, txnId, prev, current);
+            public Command load(Command command)
+            {
+                TxnId txnId = command.txnId();
 
-                             if (current.is(Stable) || current.is(PreApplied))
-                                 Commands.maybeExecute(safeStore, safeStore.get(txnId, current.route().homeKey()), true, true);
+                Cleanup cleanup = Cleanup.shouldCleanup(InMemoryCommandStore.this, command, null, command.route(), false);
 
-                             if (current.hasBeen(PreApplied) && !current.is(Invalidated) && !current.is(Truncated))
-                                 Commands.apply(safeStore, current, context, txnId).begin(agent);
-                             return null;
-                         });
+                if (command.saveStatus().compareTo(cleanup.appliesIfNot) < 0)
+                    command = Commands.purge(command, command.route(), cleanup);
 
+                Command finalCommand = command;
 
-        return true;
+                return executeInContext(InMemoryCommandStore.this,
+                                        context(command, KeyHistory.COMMANDS),
+                                        safeStore -> safeStore.unsafeGet(txnId).update(safeStore, finalCommand));
+            }
+
+            public void apply(Command command)
+            {
+                TxnId txnId = command.txnId();
+                PreLoadContext context = context(command, KeyHistory.TIMESTAMPS);
+                executeInContext(InMemoryCommandStore.this,
+                                 context,
+                                 safeStore -> {
+                                     SafeCommand safeCommand = safeStore.unsafeGet(txnId);
+                                     if (command.is(Stable) && !command.hasBeen(Applied))
+                                         Commands.maybeExecute(safeStore, safeCommand, true, true);
+                                     else if (command.hasBeen(PreApplied) && !command.is(Invalidated) && !command.is(Truncated))
+                                         Commands.applyWrites(safeStore, command).begin(agent);
+                                     return null;
+                                 });
+
+            }
+        };
     }
-
 
     @VisibleForTesting
     public void load(Deps loading)
