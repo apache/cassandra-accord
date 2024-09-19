@@ -37,6 +37,7 @@ import accord.api.DataStore;
 import accord.api.LocalListeners;
 import accord.api.ProgressLog;
 import accord.api.Result;
+import accord.api.Scheduler;
 import accord.impl.InMemoryCommandStore;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.InMemorySafeCommand;
@@ -103,15 +104,15 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         return false;
     }
 
-    private DelayedCommandStores(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, SimulatedDelayedExecutorService executorService, BooleanSupplier isLoadedCheck, Journal journal)
+    private DelayedCommandStores(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, SimulatedDelayedExecutorService executorService, BooleanSupplier isLoadedCheck, Journal journal, Scheduler scheduler)
     {
-        super(time, agent, store, random, shardDistributor, progressLogFactory, listenersFactory, DelayedCommandStore.factory(executorService, isLoadedCheck, journal));
+        super(time, agent, store, random, shardDistributor, progressLogFactory, listenersFactory, DelayedCommandStore.factory(executorService, isLoadedCheck, journal), scheduler);
     }
 
     public static CommandStores.Factory factory(PendingQueue pending, BooleanSupplier isLoadedCheck, Journal journal)
     {
-        return (time, agent, store, random, shardDistributor, progressLogFactory, listenersFactory) ->
-               new DelayedCommandStores(time, agent, store, random, shardDistributor, progressLogFactory, listenersFactory, new SimulatedDelayedExecutorService(pending, agent), isLoadedCheck, journal);
+        return (time, agent, store, random, shardDistributor, progressLogFactory, listenersFactory, scheduler) ->
+               new DelayedCommandStores(time, agent, store, random, shardDistributor, progressLogFactory, listenersFactory, new SimulatedDelayedExecutorService(pending, agent), isLoadedCheck, journal, scheduler);
     }
 
     @Override
@@ -157,9 +158,9 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         private final BooleanSupplier isLoadedCheck;
         private final Journal journal;
 
-        public DelayedCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder, SimulatedDelayedExecutorService executor, BooleanSupplier isLoadedCheck, Journal journal)
+        public DelayedCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder, SimulatedDelayedExecutorService executor, BooleanSupplier isLoadedCheck, Journal journal, Scheduler scheduler)
         {
-            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder);
+            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder, scheduler);
             this.executor = executor;
             this.isLoadedCheck = isLoadedCheck;
             this.journal = journal;
@@ -193,7 +194,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
 
         private static CommandStore.Factory factory(SimulatedDelayedExecutorService executor, BooleanSupplier isLoadedCheck, Journal journal)
         {
-            return (id, time, agent, store, progressLogFactory, listenersFactory, rangesForEpoch) -> new DelayedCommandStore(id, time, agent, store, progressLogFactory, listenersFactory, rangesForEpoch, executor, isLoadedCheck, journal);
+            return (id, time, agent, store, progressLogFactory, listenersFactory, rangesForEpoch, scheduler) -> new DelayedCommandStore(id, time, agent, store, progressLogFactory, listenersFactory, rangesForEpoch, executor, isLoadedCheck, journal, scheduler);
         }
 
         @Override

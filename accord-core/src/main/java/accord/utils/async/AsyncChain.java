@@ -21,6 +21,7 @@ package accord.utils.async;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.function.BiConsumer;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -46,6 +47,16 @@ public interface AsyncChain<V>
     default <T> AsyncChain<T> flatMap(Function<? super V, ? extends AsyncChain<T>> mapper, Executor executor)
     {
         return AsyncChains.flatMap(this, mapper, executor);
+    }
+
+    default <T> AsyncChain<T> map(Function<? super V, ? extends T> mapper, BooleanSupplier inExecutor, Executor executor)
+    {
+        return flatMap(input -> {
+            if (inExecutor.getAsBoolean())
+                return AsyncChains.success(mapper.apply(input));
+            else
+                return AsyncChains.ofCallable(executor, () -> mapper.apply(input));
+        });
     }
 
     /**
