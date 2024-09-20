@@ -87,8 +87,6 @@ import accord.utils.Invariants;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 
-import static accord.local.Cleanup.NO;
-import static accord.local.Cleanup.TRUNCATE;
 import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestDep.WITH;
 import static accord.local.SafeCommandStore.TestStartedAt.STARTED_BEFORE;
@@ -97,9 +95,7 @@ import static accord.local.SaveStatus.Applying;
 import static accord.local.SaveStatus.Erased;
 import static accord.local.SaveStatus.ErasedOrInvalidOrVestigial;
 import static accord.local.SaveStatus.ReadyToExecute;
-import static accord.local.SaveStatus.Uninitialised;
 import static accord.local.Status.Applied;
-import static accord.local.Status.Committed;
 import static accord.local.Status.Invalidated;
 import static accord.local.Status.NotDefined;
 import static accord.local.Status.PreApplied;

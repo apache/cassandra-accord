@@ -21,7 +21,6 @@ package accord.impl.basic;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 public class PropagatingPendingQueue implements PendingQueue

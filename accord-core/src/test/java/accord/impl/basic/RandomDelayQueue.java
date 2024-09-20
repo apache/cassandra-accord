@@ -18,18 +18,17 @@
 
 package accord.impl.basic;
 
-import accord.burn.random.FrequentLargeRange;
-import accord.utils.RandomSource;
-
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.PriorityQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+
+import accord.burn.random.FrequentLargeRange;
+import accord.utils.RandomSource;
 
 import static accord.utils.Invariants.illegalArgument;
 
