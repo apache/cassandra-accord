@@ -149,6 +149,39 @@ public class ListStore implements DataStore
     private final List<Runnable> onRemovalDone = new ArrayList<>();
 
 
+    private final NavigableMap<RoutableKey, Timestamped<int[]>> snapshot = new TreeMap<>();
+    private final List<ChangeAt> addedAtSnapshot = new ArrayList<>();
+    private final List<ChangeAt> removedAtSnapshot = new ArrayList<>();
+    private final List<PurgeAt> purgedAtSnapshot = new ArrayList<>();
+    private final List<FetchComplete> fetchCompleteSnapshot = new ArrayList<>();
+    private final LongArrayList pendingRemovesSnapshot = new LongArrayList();
+
+    public void snapshot()
+    {
+        snapshot.clear();
+        snapshot.putAll(data);
+        addedAtSnapshot.clear();
+        addedAtSnapshot.addAll(addedAts);
+        removedAtSnapshot.clear();
+        removedAtSnapshot.addAll(removedAts);
+        purgedAtSnapshot.clear();
+        purgedAtSnapshot.addAll(purgedAts);
+        fetchCompleteSnapshot.clear();
+        fetchCompleteSnapshot.addAll(fetchCompletes);
+        pendingRemovesSnapshot.clear();
+        pendingRemovesSnapshot.addAll(pendingRemoves);
+    }
+
+    public void restoreFromSnapshot()
+    {
+        data.putAll(snapshot);
+        addedAts.addAll(addedAtSnapshot);
+        removedAts.addAll(removedAtSnapshot);
+        purgedAts.addAll(purgedAtSnapshot);
+        fetchCompletes.addAll(fetchCompleteSnapshot);
+        pendingRemoves.addAll(pendingRemovesSnapshot);
+    }
+
     public void clear()
     {
         data.clear();
@@ -159,6 +192,7 @@ public class ListStore implements DataStore
         pendingRemoves.clear();
         onRemovalDone.clear();
     }
+
     // adding here to help trace burn test queries
     public final Node.Id node;
 

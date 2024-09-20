@@ -522,6 +522,7 @@ public abstract class CommandStore implements AgentExecutor
     // TODO (expected): we can immediately truncate dependencies locally once an exclusiveSyncPoint applies, we don't need to wait for the whole shard
     public void markShardDurable(SafeCommandStore safeStore, TxnId globalSyncId, Ranges ranges)
     {
+        store.snapshot();
         ranges = ranges.slice(safeStore.ranges().allUntil(globalSyncId.epoch()), Minimal);
         RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, globalSyncId, TxnId.NONE);
         setRedundantBefore(RedundantBefore.merge(redundantBefore, addRedundantBefore));

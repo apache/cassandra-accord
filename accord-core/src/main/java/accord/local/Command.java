@@ -340,7 +340,8 @@ public abstract class Command implements CommonAttributes
                         Invariants.checkState(result != null, "Result is null");
                         break;
                     case Invalidated:
-                        Invariants.checkState(validate.durability().isMaybeInvalidated());
+                        Invariants.checkState(validate.durability().isMaybeInvalidated(),
+                                              () -> String.format("%s is not invalidated", validate.durability()));
                     case Unknown:
                         Invariants.checkState(validate.durability() != Local);
                     case Erased:

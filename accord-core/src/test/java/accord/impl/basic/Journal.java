@@ -54,7 +54,6 @@ import accord.utils.Invariants;
 import org.agrona.collections.Long2ObjectHashMap;
 
 import static accord.local.Status.Invalidated;
-import static accord.local.Status.PreApplied;
 import static accord.local.Status.Truncated;
 import static accord.utils.Invariants.illegalState;
 
@@ -76,24 +75,13 @@ public class Journal
             CommandStore store = storeSupplier.apply(commandStoreId);
 
             Map<TxnId, List<Diff>> updates = new HashMap<>();
-            List<TxnId> erased = new ArrayList<>();
             for (Map.Entry<TxnId, List<Diff>> e2 : localJournal.entrySet())
             {
                 TxnId txnId = e2.getKey();
                 List<Diff> diffs = e2.getValue();
                 Command command = reconstruct(diffs, Reconstruct.Last).get(0);
-                // Truncate all but last
-                if (command.status() == Truncated)
-                {
-                    if (diffs.size() > 1)
-                    {
-                        List<Diff> arr = new ArrayList<>();
-                        arr.add(diff(null, command));
-                        updates.put(txnId, arr);
-                    }
-                    continue;
-                }
-
+                if (command.status() == Truncated || command.status() == Invalidated)
+                    continue; // Already truncated
                 Cleanup cleanup = Cleanup.shouldCleanup(store, command, null, command.route(), false);
                 switch (cleanup)
                 {
@@ -102,20 +90,13 @@ public class Journal
                     case INVALIDATE:
                     case TRUNCATE_WITH_OUTCOME:
                     case TRUNCATE:
-                        Command purged = Commands.purge(command, command.route(), cleanup);
+                    case ERASE:
+                        command = Commands.purge(command, command.route(), cleanup);
                         List<Diff> arr = new ArrayList<>();
-                        arr.add(diff(null, purged));
+                        arr.add(diff(null, command));
                         updates.put(txnId, arr);
                         break;
-                    case ERASE:
-                        erased.add(e2.getKey());
-                        break;
                 }
-            }
-
-            for (TxnId txnId : erased)
-            {
-                localJournal.remove(txnId);
             }
 
             for (Map.Entry<TxnId, List<Diff>> e2 : updates.entrySet())
@@ -146,16 +127,8 @@ public class Journal
         loading = true;
         try
         {
-            List<Command> filtered = new ArrayList<>();
             for (Command command : allCommands)
-            {
-                Command res = loader.load(command);
-                if (res != null)
-                    filtered.add(command);
-            }
-
-            for (Command command : filtered)
-                loader.apply(command);
+                loader.load(command);
         }
         finally
         {
@@ -256,9 +229,15 @@ public class Journal
             if (diff.result != null)
                 result = diff.result.get();
 
-            if (!txnId.kind().awaitsOnlyDeps())
-                executesAtLeast = null;
-
+            try
+            {
+                if (!txnId.kind().awaitsOnlyDeps())
+                    executesAtLeast = null;
+            }
+            catch (Throwable t)
+            {
+                t.printStackTrace();
+            }
             switch (saveStatus.known.outcome)
             {
                 case Erased:

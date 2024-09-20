@@ -575,8 +575,9 @@ public class BurnTest
     @Test
     public void testOne()
     {
-        //run(System.nanoTime());
-        run(2421956288746916l);
+//        run(System.nanoTime());
+        run(2462613241842416l);
+//        run(-7084439074214532427l);
     }
 
     private static void run(long seed)

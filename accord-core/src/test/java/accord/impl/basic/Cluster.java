@@ -510,23 +510,22 @@ public class Cluster implements Scheduler
 
             Scheduled reconfigure = sinks.recurring(configRandomizer::maybeUpdateTopology, 1, SECONDS);
 
-//            Scheduled purge = sinks.recurring(() -> {
-//                trace.debug("Triggering purge.");
-//                int numNodes = random.nextInt(1, nodeMap.size());
-//                for (int i = 0; i < numNodes; i++)
-//                {
-//                    Id id = random.pick(nodes);
-//                    Node node = nodeMap.get(id);
-//
-//                    Journal journal = journalMap.get(node.id());
-//                    CommandStore[] stores = nodeMap.get(node.id()).commandStores().all();
-//                    journal.purge((j) -> stores[j]);
-//                }
-//            }, () -> random.nextInt(1, 10), SECONDS);
+            Scheduled purge = sinks.recurring(() -> {
+                trace.debug("Triggering purge.");
+                int numNodes = random.nextInt(1, nodeMap.size());
+                for (int i = 0; i < numNodes; i++)
+                {
+                    Id id = random.pick(nodes);
+                    Node node = nodeMap.get(id);
+
+                    Journal journal = journalMap.get(node.id());
+                    CommandStore[] stores = nodeMap.get(node.id()).commandStores().all();
+                    journal.purge((j) -> stores[j]);
+                }
+            }, () -> random.nextInt(1, 10), SECONDS);
 
             Scheduled restart = sinks.recurring(() -> {
                 sinks.processAllNonRecurring();
-
                 // Journal cleanup is a rough equivalent of a node restart.
                 trace.debug("Triggering journal cleanup.");
                 Id id = random.pick(nodes);
@@ -536,6 +535,7 @@ public class Cluster implements Scheduler
                 messaging.disable();
                 ListStore listStore = (ListStore) nodeMap.get(id).commandStores().dataStore();
                 listStore.clear();
+                listStore.restoreFromSnapshot();
 
                 Journal journal = journalMap.get(id);
                 CommandStore[] stores = nodeMap.get(id).commandStores().all();
@@ -557,7 +557,7 @@ public class Cluster implements Scheduler
 
             noMoreWorkSignal.accept(() -> {
                 reconfigure.cancel();
-//                purge.cancel();
+                purge.cancel();
                 restart.cancel();
                 durabilityScheduling.forEach(CoordinateDurabilityScheduling::stop);
                 services.forEach(Service::close);

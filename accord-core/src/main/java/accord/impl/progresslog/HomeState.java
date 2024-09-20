@@ -131,7 +131,7 @@ abstract class HomeState extends WaitingState
     {
         Invariants.checkState(!isHomeDoneOrUninitialised());
         Command command = safeCommand.current();
-        Invariants.checkState(!safeStore.isTruncated(command), "Command %s is truncated", command);
+        Invariants.checkState(!safeStore.isTruncated(command), () -> String.format("Command %s is truncated", command));
 
         // TODO (expected): when invalidated, safer to maintain HomeState until known to be globally invalidated
         // TODO (now): validate that we clear HomeState when we receive a Durable reply, to replace the token check logic
