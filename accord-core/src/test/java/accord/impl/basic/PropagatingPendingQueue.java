@@ -22,6 +22,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 public class PropagatingPendingQueue implements PendingQueue
 {
@@ -66,9 +67,9 @@ public class PropagatingPendingQueue implements PendingQueue
     }
 
     @Override
-    public void drain(Consumer<Pending> consumer)
+    public List<Pending> drain(Predicate<Pending> toDrain)
     {
-        wrapped.drain(consumer);
+        return wrapped.drain(toDrain);
     }
 
     public void checkFailures()

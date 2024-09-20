@@ -1338,7 +1338,6 @@ public abstract class InMemoryCommandStore extends CommandStore
     public interface Loader
     {
         void load(Command next);
-//        void apply(Command next);
     }
 
     public Loader loader()

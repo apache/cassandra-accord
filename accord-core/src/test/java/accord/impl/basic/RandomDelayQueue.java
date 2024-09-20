@@ -28,6 +28,7 @@ import java.util.PriorityQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import static accord.utils.Invariants.illegalArgument;
@@ -157,13 +158,19 @@ public class RandomDelayQueue implements PendingQueue
     }
 
     @Override
-    public void drain(Consumer<Pending> consumer)
+    public List<Pending> drain(Predicate<Pending> toDrain)
     {
         List<Item> items = new ArrayList<>(queue);
         queue.clear();
-        recurring = 0;
+        List<Pending> ret = new ArrayList<>();
         for (Item item : items)
-            consumer.accept(item.item);
+        {
+            if (toDrain.test(item.item))
+                ret.add(item.item);
+            else
+                queue.add(item);
+        }
+        return ret;
     }
 
     @Override

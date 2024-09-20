@@ -56,7 +56,7 @@ public class NodeSink implements MessageSink
 
     int nextMessageId = 0;
     Map<Long, SafeCallback> callbacks = new LinkedHashMap<>();
-    private boolean enabled = true;
+
     public NodeSink(Id self, Function<Id, Node> lookup, Cluster parent, RandomSource random)
     {
         this.self = self;
@@ -65,35 +65,15 @@ public class NodeSink implements MessageSink
         this.random = random;
     }
 
-    public void enable()
-    {
-        enabled = true;
-    }
-
-    public void disable()
-    {
-        enabled = false;
-    }
-
     @Override
     public void send(Id to, Request send)
     {
-        if (!enabled)
-        {
-            logger.trace("Dropping message to {}, node sink is disabled", to);
-            return;
-        }
         maybeEnqueue(to, nextMessageId++, send, null);
     }
 
     @Override
     public void send(Id to, Request send, AgentExecutor executor, Callback callback)
     {
-        if (!enabled)
-        {
-            logger.trace("Dropping message to {}, node sink is disabled", to);
-            return;
-        }
         long messageId = nextMessageId++;
         SafeCallback sc = new SafeCallback(executor, callback);
         callbacks.put(messageId, sc);
@@ -113,11 +93,6 @@ public class NodeSink implements MessageSink
     @Override
     public void reply(Id replyToNode, ReplyContext replyContext, Reply reply)
     {
-        if (!enabled)
-        {
-            logger.trace("Dropping response to {}, node sink is disabled", replyToNode);
-            return;
-        }
         maybeEnqueue(replyToNode, Packet.getMessageId(replyContext), reply, null);
     }
 
@@ -182,11 +157,6 @@ public class NodeSink implements MessageSink
     @Override
     public void replyWithUnknownFailure(Id replyToNode, ReplyContext replyContext, Throwable failure)
     {
-        if (!enabled)
-        {
-            logger.trace("Dropping response to {}, node sink is disabled", replyToNode);
-            return;
-        }
         reply(replyToNode, replyContext, new FailureReply(failure));
     }
 }

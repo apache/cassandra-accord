@@ -143,11 +143,16 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
 
     public static class DelayedCommandStore extends InMemoryCommandStore
     {
-        private class DelayedTask<T> extends Task<T>
+        public class DelayedTask<T> extends Task<T>
         {
             private DelayedTask(Callable<T> fn)
             {
                 super(fn);
+            }
+
+            public DelayedCommandStore parent()
+            {
+                return DelayedCommandStore.this;
             }
 
             @Override

@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -30,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -255,12 +257,17 @@ public class Cluster implements Scheduler
         return true;
     }
 
-    public void processAllNonRecurring()
+    /**
+     * Drain tasks that match predicate.
+     *
+     * Returns whether any tasks were processed
+     */
+    public boolean drain(Predicate<Pending> process)
     {
-        pending.drain(item -> {
-            processNext(item);
-            checkFailures.run();
-        });
+        List<Pending> pending = this.pending.drain(process);
+        for (Pending p : pending)
+            processNext(p);
+        return !pending.isEmpty();
     }
 
     private void processNext(Object next)
@@ -525,20 +532,29 @@ public class Cluster implements Scheduler
             }, () -> random.nextInt(1, 10), SECONDS);
 
             Scheduled restart = sinks.recurring(() -> {
-                sinks.processAllNonRecurring();
-                // Journal cleanup is a rough equivalent of a node restart.
-                trace.debug("Triggering journal cleanup.");
                 Id id = random.pick(nodes);
                 Node node = nodeMap.get(id);
+                CommandStore[] stores = nodeMap.get(id).commandStores().all();
+                Set<CommandStore> nodeStores = new HashSet<>(Arrays.asList(stores));
+                Predicate<Pending> pred = item -> {
+                    if (item instanceof DelayedCommandStore.DelayedTask)
+                    {
+                        DelayedCommandStore.DelayedTask<?> task = (DelayedCommandStore.DelayedTask<?>) item;
+                        if (nodeStores.contains(task.parent()))
+                            return true;
+                    }
+                    return false;
+                };
+                sinks.drain(pred);
+                // Journal cleanup is a rough equivalent of a node restart.
+                trace.debug("Triggering journal cleanup.");
                 CommandsForKey.disableLinearizabilityViolationsReporting();
-                NodeSink messaging = ((NodeSink)node.messageSink());
-                messaging.disable();
                 ListStore listStore = (ListStore) nodeMap.get(id).commandStores().dataStore();
                 listStore.clear();
                 listStore.restoreFromSnapshot();
 
                 Journal journal = journalMap.get(id);
-                CommandStore[] stores = nodeMap.get(id).commandStores().all();
+
                 for (CommandStore s : stores)
                 {
                     DelayedCommandStores.DelayedCommandStore store = (DelayedCommandStores.DelayedCommandStore) s;
@@ -546,10 +562,9 @@ public class Cluster implements Scheduler
                     journal.reconstructAll(store.loader(), store.id());
                     journal.loadHistoricalTransactions(store::load, store.id());
                 }
-                sinks.processAllNonRecurring();
+                while (sinks.drain(pred));
                 CommandsForKey.enableLinearizabilityViolationsReporting();
                 trace.debug("Done with cleanup.");
-                messaging.enable();
             }, () -> random.nextInt(1, 10), SECONDS);
 
             durabilityScheduling.forEach(CoordinateDurabilityScheduling::start);
