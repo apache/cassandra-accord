@@ -558,11 +558,6 @@ public class Topology
         return nodeIds;
     }
 
-    public Set<Id> nonStaleNodes()
-    {
-        return Sets.filter(nodes(), id -> !staleIds.contains(id));
-    }
-
     public Ranges ranges()
     {
         return subsetOfRanges;
