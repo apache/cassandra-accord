@@ -1181,7 +1181,7 @@ public class Commands
     public static Command updateRouteOrParticipants(SafeCommandStore safeStore, SafeCommand safeCommand, Unseekables<?> participants)
     {
         Command current = safeCommand.current();
-        if (current.hasBeen(Invalidated))
+        if (current.hasBeen(Invalidated) || current.hasBeen(Truncated))
             return current;
 
         CommonAttributes updated = current;
