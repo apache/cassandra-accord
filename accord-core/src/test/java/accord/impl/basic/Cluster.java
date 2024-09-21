@@ -531,19 +531,10 @@ public class Cluster implements Scheduler
 
             Scheduled restart = sinks.recurring(() -> {
                 Id id = random.pick(nodes);
-                Node node = nodeMap.get(id);
                 CommandStore[] stores = nodeMap.get(id).commandStores().all();
-                Set<CommandStore> nodeStores = new HashSet<>(Arrays.asList(stores));
-                Predicate<Pending> pred = item -> {
-                    if (item instanceof DelayedCommandStore.DelayedTask)
-                    {
-                        DelayedCommandStore.DelayedTask<?> task = (DelayedCommandStore.DelayedTask<?>) item;
-                        if (nodeStores.contains(task.parent()))
-                            return true;
-                    }
-                    return false;
-                };
-                sinks.drain(pred);
+                Predicate<Pending> pred = getPendingPredicate(stores);
+                while (sinks.drain(pred));
+
                 // Journal cleanup is a rough equivalent of a node restart.
                 trace.debug("Triggering journal cleanup.");
                 CommandsForKey.disableLinearizabilityViolationsReporting();
@@ -552,7 +543,6 @@ public class Cluster implements Scheduler
                 listStore.restoreFromSnapshot();
 
                 Journal journal = journalMap.get(id);
-
                 for (CommandStore s : stores)
                 {
                     DelayedCommandStores.DelayedCommandStore store = (DelayedCommandStores.DelayedCommandStore) s;
@@ -611,6 +601,21 @@ public class Cluster implements Scheduler
         {
             nodeMap.values().forEach(Node::shutdown);
         }
+    }
+
+    private static Predicate<Pending> getPendingPredicate(CommandStore[] stores)
+    {
+        Set<CommandStore> nodeStores = new HashSet<>(Arrays.asList(stores));
+        Predicate<Pending> pred = item -> {
+            if (item instanceof DelayedCommandStore.DelayedTask)
+            {
+                DelayedCommandStore.DelayedTask<?> task = (DelayedCommandStore.DelayedTask<?>) item;
+                if (nodeStores.contains(task.parent()))
+                    return true;
+            }
+            return false;
+        };
+        return pred;
     }
 
     private interface Service extends AutoCloseable
