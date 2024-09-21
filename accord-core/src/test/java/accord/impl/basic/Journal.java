@@ -24,6 +24,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
@@ -59,7 +60,7 @@ import static accord.utils.Invariants.illegalState;
 
 public class Journal
 {
-    private final Long2ObjectHashMap<Map<TxnId, List<Diff>>> diffsPerCommandStore = new Long2ObjectHashMap<>();
+    private final Long2ObjectHashMap<NavigableMap<TxnId, List<Diff>>> diffsPerCommandStore = new Long2ObjectHashMap<>();
     private final Map<Integer, List<Deps>> historicalTransactions = new HashMap<>();
 
     public Journal()
@@ -68,7 +69,7 @@ public class Journal
 
     public void purge(IntFunction<CommandStore> storeSupplier)
     {
-        for (Map.Entry<Long, Map<TxnId, List<Diff>>> e : diffsPerCommandStore.entrySet())
+        for (Map.Entry<Long, NavigableMap<TxnId, List<Diff>>> e : diffsPerCommandStore.entrySet())
         {
             int commandStoreId = e.getKey().intValue();
             Map<TxnId, List<Diff>> localJournal = e.getValue();
