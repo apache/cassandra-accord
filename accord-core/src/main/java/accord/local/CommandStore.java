@@ -511,6 +511,7 @@ public abstract class CommandStore implements AgentExecutor
 
     final void markBootstrapping(SafeCommandStore safeStore, TxnId globalSyncId, Ranges ranges)
     {
+        store.snapshot();
         setBootstrapBeganAt(bootstrap(globalSyncId, ranges, bootstrapBeganAt));
         RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, globalSyncId);
         setRedundantBefore(RedundantBefore.merge(redundantBefore, addRedundantBefore));
@@ -540,6 +541,7 @@ public abstract class CommandStore implements AgentExecutor
     //      also: we no longer expect epochs that are losing a range to be marked stale, make sure logic reflects this
     public void markShardStale(SafeCommandStore safeStore, Timestamp staleSince, Ranges ranges, boolean isSincePrecise)
     {
+        store.snapshot();
         Timestamp staleUntilAtLeast = staleSince;
         if (isSincePrecise)
         {

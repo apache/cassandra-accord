@@ -190,7 +190,6 @@ public class ListStore implements DataStore
         purgedAts.clear();
         fetchCompletes.clear();
         pendingRemoves.clear();
-        onRemovalDone.clear();
     }
 
     // adding here to help trace burn test queries

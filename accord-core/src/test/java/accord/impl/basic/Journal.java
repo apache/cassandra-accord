@@ -55,6 +55,7 @@ import accord.utils.Invariants;
 import org.agrona.collections.Long2ObjectHashMap;
 
 import static accord.local.Status.Invalidated;
+import static accord.local.Status.PreApplied;
 import static accord.local.Status.Truncated;
 import static accord.utils.Invariants.illegalState;
 
@@ -100,11 +101,7 @@ public class Journal
                 }
             }
 
-            for (Map.Entry<TxnId, List<Diff>> e2 : updates.entrySet())
-            {
-                localJournal.remove(e2.getKey());
-                localJournal.put(e2.getKey(), e2.getValue());
-            }
+            localJournal.putAll(updates);
         }
     }
 
@@ -120,16 +117,21 @@ public class Journal
         if (diffs == null)
             return;
 
-        List<Command> allCommands = new ArrayList<>();
-        for (TxnId txnId : new ArrayList<>(diffs.keySet()))
-            allCommands.add(reconstruct(commandStoreId, txnId));
-        allCommands.sort(Comparator.comparing(c -> c.executeAt() == null ? c.txnId() : c.executeAt()));
-
         loading = true;
         try
         {
-            for (Command command : allCommands)
+            List<Command> toApply = new ArrayList<>();
+            for (TxnId txnId : diffs.keySet())
+            {
+                Command command = reconstruct(commandStoreId, txnId);
+                if (command.hasBeen(PreApplied))
+                    toApply.add(command);
                 loader.load(command);
+            }
+
+            toApply.sort(Comparator.comparing(Command::executeAt));
+            for (Command command : toApply)
+                loader.apply(command);
         }
         finally
         {
@@ -156,12 +158,6 @@ public class Journal
     {
         List<Diff> diffs = this.diffsPerCommandStore.get(commandStoreId).get(txnId);
         return reconstruct(diffs, Reconstruct.Last).get(0);
-    }
-
-    private List<Command> reconstructEach(int commandStoreId, TxnId txnId)
-    {
-        List<Diff> diffs = this.diffsPerCommandStore.get(commandStoreId).get(txnId);
-        return reconstruct(diffs, Reconstruct.Each);
     }
 
     private List<Command> reconstruct(List<Diff> diffs, Reconstruct reconstruct)

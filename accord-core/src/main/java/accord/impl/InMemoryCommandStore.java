@@ -1334,6 +1334,7 @@ public abstract class InMemoryCommandStore extends CommandStore
     public interface Loader
     {
         void load(Command next);
+        void apply(Command next);
     }
 
     public Loader loader()
@@ -1363,48 +1364,49 @@ public abstract class InMemoryCommandStore extends CommandStore
             {
                 TxnId txnId = command.txnId();
 
-                {
-                    Command finalCommand = command;
-                    command = executeInContext(InMemoryCommandStore.this,
-                                               context(command, KeyHistory.COMMANDS),
-                                               safeStore -> {
-                                                   Command local = finalCommand;
-                                                   if (local.status() != Truncated && local.status() != Invalidated)
-                                                   {
-                                                       Cleanup cleanup = Cleanup.shouldCleanup(InMemoryCommandStore.this, local, null, local.route(), false);
-                                                       switch (cleanup)
-                                                       {
-                                                           case NO:
-                                                               break;
-                                                           case INVALIDATE:
-                                                           case TRUNCATE_WITH_OUTCOME:
-                                                           case TRUNCATE:
-                                                           case ERASE:
-                                                               local = Commands.purge(local, local.route(), cleanup);
-                                                       }
-                                                   }
+                executeInContext(InMemoryCommandStore.this,
+                                 context(command, KeyHistory.COMMANDS),
+                                 safeStore -> {
+                                     Command local = command;
+                                     if (local.status() != Truncated && local.status() != Invalidated)
+                                     {
+                                         Cleanup cleanup = Cleanup.shouldCleanup(InMemoryCommandStore.this, local, null, local.route(), false);
+                                         switch (cleanup)
+                                         {
+                                             case NO:
+                                                 break;
+                                             case INVALIDATE:
+                                             case TRUNCATE_WITH_OUTCOME:
+                                             case TRUNCATE:
+                                             case ERASE:
+                                                 local = Commands.purge(local, local.route(), cleanup);
+                                         }
+                                     }
 
-                                                   local = safeStore.unsafeGet(txnId).update(safeStore, local);
-                                                   if (local.status() == Truncated)
-                                                       safeStore.progressLog().clear(local.txnId());
-                                                   return local;
-                                               });
-                }
+                                     local = safeStore.unsafeGet(txnId).update(safeStore, local);
+                                     if (local.status() == Truncated)
+                                         safeStore.progressLog().clear(local.txnId());
+                                     return local;
+                                 });
 
-                if (command != null)
-                {
-                    Command finalCommand = command;
-                    executeInContext(InMemoryCommandStore.this,
-                                     context(command, KeyHistory.TIMESTAMPS),
-                                     safeStore -> {
-                                         SafeCommand safeCommand = safeStore.unsafeGet(txnId);
-                                         if (finalCommand.is(Stable) && !finalCommand.hasBeen(Applied))
-                                             Commands.maybeExecute(safeStore, safeCommand, true, true);
-                                         else if (finalCommand.hasBeen(PreApplied) && !finalCommand.is(Invalidated) && !finalCommand.is(Truncated))
-                                             Commands.applyWrites(safeStore, finalCommand).begin(agent);
-                                         return null;
-                                     });
-                }
+
+            }
+
+            public void apply(Command command)
+            {
+                TxnId txnId = command.txnId();
+
+                executeInContext(InMemoryCommandStore.this,
+                                 context(command, KeyHistory.TIMESTAMPS),
+                                 safeStore -> {
+                                     SafeCommand safeCommand = safeStore.unsafeGet(txnId);
+                                     Command local = safeCommand.current();
+                                     if (local.is(Stable) && !local.hasBeen(Applied))
+                                         Commands.maybeExecute(safeStore, safeCommand, local, true, true);
+                                     else if (local.hasBeen(PreApplied) && !local.is(Invalidated) && !local.is(Truncated))
+                                         Commands.applyWrites(safeStore, local).begin(agent);
+                                     return null;
+                                 });
             }
         };
     }
