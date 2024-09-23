@@ -66,7 +66,10 @@ public class ListFetchCoordinator extends AbstractFetchCoordinator
         persisting.add(commandStore.execute(PreLoadContext.empty(), safeStore -> {
             listData.forEach((key, value) -> listStore.data.merge(key, value, Timestamped::merge));
         }).addCallback((ignore, fail) -> {
-            if (fail == null) success(from, received);
+            if (fail == null) {
+                success(from, received);
+                listStore.snapshot();
+            }
             else fail(from, received, fail);
         }).beginAsResult());
     }

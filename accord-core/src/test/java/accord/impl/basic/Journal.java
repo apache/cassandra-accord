@@ -451,7 +451,7 @@ public class Journal
         @Override
         public String toString()
         {
-            StringBuilder builder = new StringBuilder("SavedDiff{");
+            StringBuilder builder = new StringBuilder("Diff{");
             if (txnId != null)
                 builder.append("txnId = ").append(txnId).append(" ");
             if (executeAt != null)
