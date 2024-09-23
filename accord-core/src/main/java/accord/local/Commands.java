@@ -574,13 +574,18 @@ public class Commands
                }));
     }
 
-    public static AsyncChain<Void> applyWrites(SafeCommandStore safeStore, Command command)
+    public static AsyncChain<Void> applyWrites(SafeCommandStore safeStore, PreLoadContext context, Command command)
     {
+        CommandStore unsafeStore = safeStore.commandStore();
         Ranges executeRanges = executeRanges(safeStore, command.executeAt());
         Command.Executed executed = command.asExecuted();
         boolean intersects = executed.writes().keys.intersects(executeRanges);
         if (intersects)
-            return command.writes().apply(safeStore, applyRanges(safeStore, command.executeAt()), command.partialTxn());
+            return command.writes().apply(safeStore, applyRanges(safeStore, command.executeAt()), command.partialTxn())
+                          .flatMap(unused -> unsafeStore.submit(context, ss -> {
+                              postApply(ss, command.txnId());
+                              return null;
+                          }));
         else
             return AsyncChains.success(null);
     }

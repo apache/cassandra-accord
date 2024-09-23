@@ -536,7 +536,7 @@ public class Cluster implements Scheduler
                 while (sinks.drain(pred));
 
                 // Journal cleanup is a rough equivalent of a node restart.
-                trace.debug("Triggering journal cleanup.");
+                trace.debug("Triggering journal cleanup for node " + id);
                 CommandsForKey.disableLinearizabilityViolationsReporting();
                 ListStore listStore = (ListStore) nodeMap.get(id).commandStores().dataStore();
                 listStore.clear();
@@ -606,7 +606,7 @@ public class Cluster implements Scheduler
     private static Predicate<Pending> getPendingPredicate(CommandStore[] stores)
     {
         Set<CommandStore> nodeStores = new HashSet<>(Arrays.asList(stores));
-        Predicate<Pending> pred = item -> {
+        return item -> {
             if (item instanceof DelayedCommandStore.DelayedTask)
             {
                 DelayedCommandStore.DelayedTask<?> task = (DelayedCommandStore.DelayedTask<?>) item;
@@ -615,7 +615,6 @@ public class Cluster implements Scheduler
             }
             return false;
         };
-        return pred;
     }
 
     private interface Service extends AutoCloseable

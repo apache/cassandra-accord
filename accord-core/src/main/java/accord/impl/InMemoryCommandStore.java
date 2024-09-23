@@ -520,7 +520,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         catch (Throwable t)
         {
             if (isDirectCall) logger.error("Uncaught exception", t);
-            throw t;
+            throw new RuntimeException("Caught exception in command store " + this, t);
         }
         finally
         {
@@ -1396,15 +1396,16 @@ public abstract class InMemoryCommandStore extends CommandStore
             {
                 TxnId txnId = command.txnId();
 
+                PreLoadContext context = context(command, KeyHistory.TIMESTAMPS);
                 executeInContext(InMemoryCommandStore.this,
-                                 context(command, KeyHistory.TIMESTAMPS),
+                                 context,
                                  safeStore -> {
                                      SafeCommand safeCommand = safeStore.unsafeGet(txnId);
                                      Command local = safeCommand.current();
                                      if (local.is(Stable) && !local.hasBeen(Applied))
                                          Commands.maybeExecute(safeStore, safeCommand, local, true, true);
                                      else if (local.hasBeen(PreApplied) && !local.is(Invalidated) && !local.is(Truncated))
-                                         Commands.applyWrites(safeStore, local).begin(agent);
+                                         Commands.applyWrites(safeStore, context, local).begin(agent);
                                      return null;
                                  });
             }
