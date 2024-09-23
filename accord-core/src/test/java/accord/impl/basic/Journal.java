@@ -40,6 +40,7 @@ import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.Commands;
 import accord.local.CommonAttributes;
+import accord.local.Node;
 import accord.local.SaveStatus;
 import accord.local.Status;
 import accord.primitives.Ballot;
@@ -64,8 +65,11 @@ public class Journal
     private final Long2ObjectHashMap<NavigableMap<TxnId, List<Diff>>> diffsPerCommandStore = new Long2ObjectHashMap<>();
     private final Map<Integer, List<Deps>> historicalTransactions = new HashMap<>();
 
-    public Journal()
+    private final Node.Id id;
+
+    public Journal(Node.Id id)
     {
+        this.id = id;
     }
 
     public void purge(IntFunction<CommandStore> storeSupplier)
