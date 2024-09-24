@@ -1344,17 +1344,22 @@ public abstract class InMemoryCommandStore extends CommandStore
             private PreLoadContext context(Command command, KeyHistory keyHistory)
             {
                 TxnId txnId = command.txnId();
+                Keys keys = null;
+                List<TxnId> deps = null;
                 if (CommandsForKey.manages(txnId))
-                {
-                    Keys keys = (Keys) command.keysOrRanges();
-                    if (keys != null)
-                        return PreLoadContext.contextFor(txnId, keys, keyHistory);
-                }
+                    keys = (Keys) command.keysOrRanges();
                 else if (!CommandsForKey.managesExecution(txnId) && command.hasBeen(Status.Stable) && !command.hasBeen(Status.Truncated))
+                    keys = command.asCommitted().waitingOn.keys;
+
+                if (command.partialDeps() != null)
+                    deps = command.partialDeps().txnIds();
+
+                if (keys != null)
                 {
-                    Keys keys = command.asCommitted().waitingOn.keys;
-                    if (!keys.isEmpty())
-                        return PreLoadContext.contextFor(txnId, keys, keyHistory);
+                    if (deps != null)
+                        return PreLoadContext.contextFor(txnId, deps, keys, keyHistory);
+
+                    return PreLoadContext.contextFor(txnId, keys, keyHistory);
                 }
 
                 return PreLoadContext.contextFor(txnId);
@@ -1404,7 +1409,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                                      Command local = safeCommand.current();
                                      if (local.is(Stable) && !local.hasBeen(Applied))
                                          Commands.maybeExecute(safeStore, safeCommand, local, true, true);
-                                     else if (local.hasBeen(PreApplied) && !local.is(Invalidated) && !local.is(Truncated))
+                                     else if (local.saveStatus().compareTo(Applying) >= 0 && !local.is(Invalidated) && !local.is(Truncated))
                                          Commands.applyWrites(safeStore, context, local).begin(agent);
                                      return null;
                                  });

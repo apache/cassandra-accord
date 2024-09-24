@@ -134,7 +134,7 @@ public class Journal
             for (TxnId txnId : diffs.keySet())
             {
                 Command command = reconstruct(commandStoreId, txnId);
-                if (command.hasBeen(PreApplied) && !command.is(Invalidated) && !command.is(Truncated))
+                if (command.saveStatus().compareTo(SaveStatus.Applying) >= 0 && !command.is(Invalidated) && !command.is(Truncated))
                     toApply.add(command);
                 loader.load(command);
             }
