@@ -81,6 +81,7 @@ public class Journal
             CommandStore store = storeSupplier.apply(commandStoreId);
 
             Map<TxnId, List<Diff>> updates = new HashMap<>();
+            List<TxnId> removals = new ArrayList<>();
             for (Map.Entry<TxnId, List<Diff>> e2 : localJournal.entrySet())
             {
                 TxnId txnId = e2.getKey();
@@ -96,15 +97,20 @@ public class Journal
                     case INVALIDATE:
                     case TRUNCATE_WITH_OUTCOME:
                     case TRUNCATE:
-                    case ERASE:
                         command = Commands.purge(command, command.route(), cleanup);
+                        Invariants.checkState(command.saveStatus() != SaveStatus.Uninitialised);
                         List<Diff> arr = new ArrayList<>();
                         arr.add(diff(null, command));
                         updates.put(txnId, arr);
                         break;
+                    case ERASE:
+                        removals.add(txnId);
+                        break;
                 }
             }
 
+            for (TxnId removal : removals)
+                localJournal.remove(removal);
             localJournal.putAll(updates);
         }
     }
