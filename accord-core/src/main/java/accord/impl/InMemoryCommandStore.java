@@ -1344,20 +1344,14 @@ public abstract class InMemoryCommandStore extends CommandStore
             {
                 TxnId txnId = command.txnId();
                 Keys keys = null;
-                List<TxnId> deps = null;
+
                 if (CommandsForKey.manages(txnId))
                     keys = (Keys) command.keysOrRanges();
                 else if (!CommandsForKey.managesExecution(txnId) && command.hasBeen(Status.Stable) && !command.hasBeen(Status.Truncated))
                     keys = command.asCommitted().waitingOn.keys;
 
-                if (command.partialDeps() != null)
-                    deps = command.partialDeps().txnIds();
-
                 if (keys != null)
                 {
-                    if (deps != null)
-                        return PreLoadContext.contextFor(txnId, deps, keys, keyHistory);
-
                     return PreLoadContext.contextFor(txnId, keys, keyHistory);
                 }
 
