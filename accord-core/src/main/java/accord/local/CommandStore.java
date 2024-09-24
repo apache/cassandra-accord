@@ -18,30 +18,6 @@
 
 package accord.local;
 
-import accord.api.LocalListeners;
-import accord.api.ProgressLog;
-import accord.api.DataStore;
-import accord.api.VisibleForImplementationTesting;
-import accord.coordinate.CollectCalculatedDeps;
-import accord.local.Command.WaitingOn;
-
-import javax.annotation.Nullable;
-import accord.api.Agent;
-
-import accord.local.CommandStores.RangesForEpoch;
-import accord.primitives.Deps;
-import accord.primitives.KeyDeps;
-import accord.primitives.Keys;
-import accord.primitives.Range;
-import accord.primitives.Routables;
-import accord.utils.async.AsyncChain;
-
-import accord.api.ConfigurationService.EpochReady;
-import accord.utils.DeterministicIdentitySet;
-import accord.utils.Invariants;
-import accord.utils.ReducingRangeMap;
-import accord.utils.async.AsyncResult;
-
 import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.Collections;
 import java.util.HashMap;
@@ -75,6 +51,7 @@ import accord.api.VisibleForImplementationTesting;
 import accord.coordinate.CollectCalculatedDeps;
 import accord.local.Command.WaitingOn;
 import accord.local.CommandStores.RangesForEpoch;
+import accord.primitives.Deps;
 import accord.primitives.FullRoute;
 import accord.primitives.KeyDeps;
 import accord.primitives.Keys;
@@ -212,10 +189,10 @@ public abstract class CommandStore implements AgentExecutor
     private final Set<Bootstrap> bootstraps = Collections.synchronizedSet(new DeterministicIdentitySet<>());
     @Nullable private ReducingRangeMap<Timestamp> rejectBefore;
 
-    private final PersistentField<DurableBefore, DurableBefore> durableBeforePersistentField;
-    private final PersistentField<RedundantBefore, RedundantBefore> redundantBeforePersistentField;
-    private final PersistentField<BootstrapSyncPoint, NavigableMap<TxnId, Ranges>> bootstrapBeganAtPersistentField;
-    private final PersistentField<NavigableMap<Timestamp, Ranges>, NavigableMap<Timestamp, Ranges>> safeToReadPersistentField;
+    protected final PersistentField<DurableBefore, DurableBefore> durableBeforePersistentField;
+    protected final PersistentField<RedundantBefore, RedundantBefore> redundantBeforePersistentField;
+    protected final PersistentField<BootstrapSyncPoint, NavigableMap<TxnId, Ranges>> bootstrapBeganAtPersistentField;
+    protected final PersistentField<NavigableMap<Timestamp, Ranges>, NavigableMap<Timestamp, Ranges>> safeToReadPersistentField;
 
     protected CommandStore(int id,
                            NodeTimeService time,
@@ -335,7 +312,7 @@ public abstract class CommandStore implements AgentExecutor
     }
 
     // For implementations to use after persistence
-    protected final void setRedundantBefore(RedundantBefore newRedundantBefore)
+    protected void setRedundantBefore(RedundantBefore newRedundantBefore)
     {
         redundantBefore = newRedundantBefore;
     }
@@ -914,6 +891,8 @@ public abstract class CommandStore implements AgentExecutor
         }
 
         AsyncResult<?> persist(CommandStore store, T toPersist);
+
+        default T restore() { return  null; };
     }
 
     // A helper class for implementing fields that needs to be asynchronously persisted and concurrent updates
@@ -943,6 +922,12 @@ public abstract class CommandStore implements AgentExecutor
             this.merge = merge;
             this.persister = persist;
             this.set = set;
+        }
+
+        public void clearAndRestore()
+        {
+            pendingValue = null;
+            set.accept(persister.restore());
         }
 
         public AsyncResult<?> mergeAndUpdate(@Nonnull I inputValue, @Nullable Timestamp gcBefore, @Nullable Ranges updatedRanges, boolean remergeAfterPersistence)

@@ -42,6 +42,7 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableSortedMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,16 +51,19 @@ import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.LocalListeners;
 import accord.api.ProgressLog;
+import accord.api.Scheduler;
 import accord.impl.progresslog.DefaultProgressLog;
 import accord.local.Cleanup;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.CommandStores.RangesForEpoch;
 import accord.local.Commands;
+import accord.local.DurableBefore;
 import accord.local.KeyHistory;
 import accord.local.Node;
 import accord.local.NodeTimeService;
 import accord.local.PreLoadContext;
+import accord.local.RedundantBefore;
 import accord.local.RedundantStatus;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
@@ -127,16 +131,36 @@ public abstract class InMemoryCommandStore extends CommandStore
 
     // To simulate the delay in simulatedAsyncPersist
     private final Scheduler scheduler;
-    private static <T> FieldPersister<T> simulatedAsyncPersistFactory(Scheduler scheduler)
-    {
-        return (commandStore, toPersist) -> simulatedAsyncPersist(scheduler, commandStore, toPersist);
-    }
 
-    private static <T> AsyncResult<?> simulatedAsyncPersist(Scheduler scheduler, CommandStore store, T toPersist)
+    private static final class SimulatedFieldPersister<T> implements FieldPersister<T>
     {
-        AsyncResult.Settable<?> result = AsyncResults.settable();
-        scheduler.once(() -> result.trySuccess(null), 100, TimeUnit.MICROSECONDS);
-        return result;
+        private T lastValue;
+        private final Scheduler scheduler;
+        private final Node node;
+        private final int id;
+        public SimulatedFieldPersister(Scheduler scheduler, T defaultValue, Node node, int id)
+        {
+            this.scheduler = scheduler;
+            this.lastValue = defaultValue;
+            this.node = node;
+            this.id = id;
+        }
+
+        public AsyncResult<?> persist(CommandStore store, T toPersist)
+        {
+            System.out.println("Persisting for " + node.id() + "-store-" + id);
+            AsyncResult.Settable<?> result = AsyncResults.settable();
+            scheduler.once(() -> {
+                lastValue = toPersist;
+                result.trySuccess(null);
+            }, 100, TimeUnit.MICROSECONDS);
+            return result;
+        }
+
+        public T restore()
+        {
+            return lastValue;
+        }
     }
 
     public InMemoryCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder, Scheduler scheduler)
@@ -148,10 +172,10 @@ public abstract class InMemoryCommandStore extends CommandStore
               progressLogFactory,
               listenersFactory,
               epochUpdateHolder,
-              simulatedAsyncPersistFactory(scheduler),
-              simulatedAsyncPersistFactory(scheduler),
-              simulatedAsyncPersistFactory(scheduler),
-              simulatedAsyncPersistFactory(scheduler));
+              new SimulatedFieldPersister<>(scheduler, DurableBefore.EMPTY, (Node) time, id),
+              new SimulatedFieldPersister<>(scheduler, RedundantBefore.EMPTY, (Node) time, id),
+              new SimulatedFieldPersister<>(scheduler, ImmutableSortedMap.of(TxnId.NONE, Ranges.EMPTY), (Node) time, id),
+              new SimulatedFieldPersister<>(scheduler, ImmutableSortedMap.of(TxnId.NONE, Ranges.EMPTY), (Node) time, id));
         this.scheduler = scheduler;
     }
 
@@ -1358,6 +1382,16 @@ public abstract class InMemoryCommandStore extends CommandStore
         commandsForKey.clear();
         rangeCommands.clear();
         historicalRangeCommands.clear();
+
+        durableBeforePersistentField.clearAndRestore();
+        redundantBeforePersistentField.clearAndRestore();
+        bootstrapBeganAtPersistentField.clearAndRestore();
+        safeToReadPersistentField.clearAndRestore();
+    }
+
+    protected void setRedundantBefore(RedundantBefore newRedundantBefore)
+    {
+        super.setRedundantBefore(newRedundantBefore);
     }
 
     public interface Loader

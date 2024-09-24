@@ -143,22 +143,22 @@ class Bootstrap
             // of these ranges as part of this attempt
             Ranges commitRanges = valid;
             store.markBootstrapping(safeStore0.commandStore(), globalSyncId, valid).flatMap(ignore ->
-                CoordinateSyncPoint.exclusive(node, globalSyncId, commitRanges)
-                   // ATM all known implementations store ranges in-memory, but this will not be true soon, so this will need to be addressed
-                   .flatMap(syncPoint -> node.withEpoch(epoch, () -> store.submit(contextFor(localSyncId, syncPoint.waitFor.keyDeps.keys(), KeyHistory.COMMANDS), safeStore1 -> {
-                       if (valid.isEmpty()) // we've lost ownership of the range
-                           return AsyncResults.success(Ranges.EMPTY);
+            CoordinateSyncPoint.exclusive(node, globalSyncId, commitRanges)
+                               // ATM all known implementations store ranges in-memory, but this will not be true soon, so this will need to be addressed
+                               .flatMap(syncPoint -> node.withEpoch(epoch, () -> store.submit(contextFor(localSyncId, syncPoint.waitFor.keyDeps.keys(), KeyHistory.COMMANDS), safeStore1 -> {
+                                   if (valid.isEmpty()) // we've lost ownership of the range
+                                       return AsyncResults.success(Ranges.EMPTY);
 
-                   Commands.createBootstrapCompleteMarkerTransaction(safeStore1, localSyncId, valid);
-                   safeStore1.commandStore().registerHistoricalTransactions(syncPoint.waitFor, safeStore1);
-                   return fetch = safeStore1.dataStore().fetch(node, safeStore1, valid, syncPoint, this);
-               })))
-               .flatMap(i -> i)
-               .flatMap(ranges -> store.execute(contextFor(localSyncId), safeStore -> {
-                   if (!ranges.isEmpty())
-                       Commands.markBootstrapComplete(safeStore, localSyncId, ranges);
-               }))
-               .begin(this);
+                                   Commands.createBootstrapCompleteMarkerTransaction(safeStore1, localSyncId, valid);
+                                   safeStore1.commandStore().registerHistoricalTransactions(syncPoint.waitFor, safeStore1);
+                                   return fetch = safeStore1.dataStore().fetch(node, safeStore1, valid, syncPoint, this);
+                               })))
+                               .flatMap(i -> i)
+                               .flatMap(ranges -> store.execute(contextFor(localSyncId), safeStore -> {
+                                   if (!ranges.isEmpty())
+                                       Commands.markBootstrapComplete(safeStore, localSyncId, ranges);
+                               })))
+                 .begin(this);
         }
 
         // we no longer want to fetch these ranges (perhaps we no longer own them)

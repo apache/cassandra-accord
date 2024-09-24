@@ -75,7 +75,9 @@ import static accord.local.Status.PreApplied;
 import static accord.local.Status.PreCommitted;
 import static accord.local.Status.Stable;
 import static accord.local.Status.Truncated;
+import static accord.primitives.Routables.Slice.Minimal;
 import static accord.primitives.Route.isFullRoute;
+import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static accord.utils.Invariants.illegalState;
 
 public class Commands
@@ -615,7 +617,7 @@ public class Commands
         return maybeExecute(safeStore, safeCommand, safeCommand.current(), alwaysNotifyListeners, notifyWaitingOn);
     }
 
-    public static boolean maybeExecute(SafeCommandStore safeStore, SafeCommand safeCommand, Command command, boolean alwaysNotifyListeners, boolean notifyWaitingOn)
+    public static boolean maybeExecute(SafeCommandStore safeStore0, SafeCommand safeCommand0, Command command, boolean alwaysNotifyListeners, boolean notifyWaitingOn)
     {
         if (logger.isTraceEnabled())
             logger.trace("{}: Maybe executing with status {}. Will notify listeners on noop: {}", command.txnId(), command.status(), alwaysNotifyListeners);
