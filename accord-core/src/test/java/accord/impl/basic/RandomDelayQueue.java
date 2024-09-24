@@ -161,13 +161,18 @@ public class RandomDelayQueue implements PendingQueue
     {
         List<Item> items = new ArrayList<>(queue);
         queue.clear();
+        recurring = 0;
         List<Pending> ret = new ArrayList<>();
         for (Item item : items)
         {
             if (toDrain.test(item.item))
                 ret.add(item.item);
             else
+            {
                 queue.add(item);
+                if (item.item instanceof RecurringPendingRunnable)
+                    ++recurring;
+            }
         }
         return ret;
     }
