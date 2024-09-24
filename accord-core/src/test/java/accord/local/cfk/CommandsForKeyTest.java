@@ -604,8 +604,10 @@ public class CommandsForKeyTest
             final float pruneChance = rnd.nextFloat() * (rnd.nextBoolean() ? 0.1f : 0.01f);
             final int pruneHlcDelta = 1 << rnd.nextInt(10);
             final int pruneInterval = 1 << rnd.nextInt(5);
+            final int maxConflictsHlcDelta = 1 << rnd.nextInt(10);
+            final int maxConflictsPruneInterval = 1 << rnd.nextInt(5);
             final Canon canon = new Canon(rnd);
-            TestCommandStore commandStore = new TestCommandStore(pruneInterval, pruneHlcDelta);
+            TestCommandStore commandStore = new TestCommandStore(pruneInterval, pruneHlcDelta, maxConflictsHlcDelta, maxConflictsPruneInterval);
             TestSafeCommandsForKey safeCfk = new TestSafeCommandsForKey(new CommandsForKey(KEY));
             TestSafeStore safeStore = new TestSafeStore(canon, commandStore, safeCfk);
             int c = 0;
@@ -910,14 +912,16 @@ public class CommandsForKeyTest
             }
         }
 
-        final int pruneInterval, pruneHlcDelta;
+        final int pruneInterval, pruneHlcDelta, maxConflictsHlcDelta, maxConflictsPruneInterval;
         final ArrayDeque<Task> queue = new ArrayDeque<>();
 
-        protected TestCommandStore(int pruneInterval, int pruneHlcDelta)
+        protected TestCommandStore(int pruneInterval, int pruneHlcDelta, int maxConflictsHlcDelta, int maxConflictsPruneInterval)
         {
             super(0, null, null, null, ignore -> new ProgressLog.NoOpProgressLog(), ignore -> new DefaultLocalListeners(new DefaultRemoteListeners((a, b, c, d, e)->{}), DefaultNotifySink.INSTANCE), new EpochUpdateHolder());
             this.pruneInterval = pruneInterval;
             this.pruneHlcDelta = pruneHlcDelta;
+            this.maxConflictsHlcDelta = maxConflictsHlcDelta;
+            this.maxConflictsPruneInterval = maxConflictsPruneInterval;
         }
 
         @Override
@@ -1019,6 +1023,18 @@ public class CommandsForKeyTest
         public int cfkPruneInterval()
         {
             return pruneInterval;
+        }
+
+        @Override
+        public long maxConflictsHlcPruneDelta()
+        {
+            return maxConflictsHlcDelta;
+        }
+
+        @Override
+        public long maxConflictsPruneInterval()
+        {
+            return maxConflictsPruneInterval;
         }
 
         @Override

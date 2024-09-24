@@ -57,6 +57,9 @@ import java.util.function.Supplier;
 
 import com.google.common.collect.ImmutableSortedMap;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import accord.primitives.FullRoute;
 import accord.primitives.Participants;
 import accord.primitives.RangeDeps;
@@ -82,6 +85,7 @@ import static accord.utils.Invariants.illegalState;
  */
 public abstract class CommandStore implements AgentExecutor
 {
+    private static final Logger logger = LoggerFactory.getLogger(CommandStore.class);
     static class EpochUpdate
     {
         final RangesForEpoch newRangesForEpoch;
@@ -157,6 +161,7 @@ public abstract class CommandStore implements AgentExecutor
     // TODO (expected): store this only once per node
     private DurableBefore durableBefore = DurableBefore.EMPTY;
     private MaxConflicts maxConflicts = MaxConflicts.EMPTY;
+    private int maxConflictsUpdates = 0;
     protected RangesForEpoch rangesForEpoch;
 
     /**
@@ -282,6 +287,8 @@ public abstract class CommandStore implements AgentExecutor
         this.maxConflicts = maxConflicts;
     }
 
+    protected int dumpCounter = 0;
+
     protected void updateMaxConflicts(Command prev, Command updated)
     {
         Timestamp executeAt = updated.executeAt();
@@ -290,7 +297,39 @@ public abstract class CommandStore implements AgentExecutor
         if (keysOrRanges == null) return;
         if (prev != null && prev.executeAt() != null && prev.executeAt().compareTo(executeAt) >= 0) return;
 
-        setMaxConflicts(maxConflicts.update(keysOrRanges, executeAt));
+
+        MaxConflicts updatedMaxConflicts = maxConflicts.update(keysOrRanges, executeAt);
+        if (++maxConflictsUpdates >= agent.maxConflictsPruneInterval())
+        {
+            int initialSize = updatedMaxConflicts.size();
+            MaxConflicts initialConflicts = updatedMaxConflicts;
+            long pruneHlc = executeAt.hlc() - agent.maxConflictsHlcPruneDelta();
+            Timestamp pruneBefore = pruneHlc > 0 ? Timestamp.fromValues(executeAt.epoch(), pruneHlc, executeAt.node) : null;
+            Ranges ranges = rangesForEpoch.all();
+            if (pruneBefore != null)
+                updatedMaxConflicts = updatedMaxConflicts.update(ranges, pruneBefore);
+
+            int prunedSize = updatedMaxConflicts.size();
+            if (initialSize > 100 && prunedSize == initialSize)
+            {
+                logger.info("Ineffective prune for {}. Initial size: {}, pruned size: {}, executeAt: {}, pruneBefore: {}", ranges, initialSize, prunedSize, executeAt, pruneBefore);
+                if (dumpCounter == 0)
+                {
+                    logger.info("initial MaxConflicts dump: {}", initialConflicts);
+                    logger.info("pruned MaxConflicts dump: {}", updatedMaxConflicts);
+                }
+                dumpCounter++;
+                dumpCounter %= 100;
+            }
+            else if (prunedSize != initialSize)
+            {
+                logger.info("Successfully pruned {} to {}", initialSize, prunedSize);
+            }
+
+
+            maxConflictsUpdates = 0;
+        }
+        setMaxConflicts(updatedMaxConflicts);
     }
 
     /**
