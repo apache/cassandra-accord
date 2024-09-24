@@ -126,9 +126,21 @@ public class ListAgent implements Agent
     }
 
     @Override
+    public long maxConflictsPruneInterval()
+    {
+        return 0;
+    }
+
+    @Override
     public int cfkPruneInterval()
     {
         return 1;
+    }
+
+    @Override
+    public long maxConflictsHlcPruneDelta()
+    {
+        return 50;
     }
 
     @Override

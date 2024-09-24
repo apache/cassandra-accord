@@ -23,6 +23,7 @@ import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.utils.BTreeReducingRangeMap;
 
+
 // TODO (expected): track read/write conflicts separately
 class MaxConflicts extends BTreeReducingRangeMap<Timestamp>
 {
