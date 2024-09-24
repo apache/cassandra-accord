@@ -18,41 +18,45 @@
 
 package accord.impl;
 
-import accord.api.LocalListeners;
-import accord.local.*;
 import accord.api.Agent;
 import accord.api.DataStore;
+import accord.api.LocalListeners;
 import accord.api.ProgressLog;
+import accord.api.Scheduler;
+import accord.local.CommandStore;
+import accord.local.CommandStores;
+import accord.local.NodeTimeService;
+import accord.local.ShardDistributor;
 import accord.utils.RandomSource;
 
 public class InMemoryCommandStores
 {
     public static class Synchronized extends CommandStores
     {
-        public Synchronized(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory)
+        public Synchronized(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, Scheduler scheduler)
         {
-            super(time, agent, store, random, shardDistributor, progressLogFactory, listenersFactory, InMemoryCommandStore.Synchronized::new);
+            super(time, agent, store, random, shardDistributor, progressLogFactory, listenersFactory, InMemoryCommandStore.Synchronized::new, scheduler);
         }
     }
 
     public static class SingleThread extends CommandStores
     {
-        public SingleThread(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory)
+        public SingleThread(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, Scheduler scheduler)
         {
-            super(time, agent, store, random, shardDistributor, progressLogFactory, listenersFactory, InMemoryCommandStore.SingleThread::new);
+            super(time, agent, store, random, shardDistributor, progressLogFactory, listenersFactory, InMemoryCommandStore.SingleThread::new, scheduler);
         }
 
-        public SingleThread(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, CommandStore.Factory shardFactory)
+        public SingleThread(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, CommandStore.Factory shardFactory, Scheduler scheduler)
         {
-            super(time, agent, store, random, shardDistributor, progressLogFactory, listenersFactory, shardFactory);
+            super(time, agent, store, random, shardDistributor, progressLogFactory, listenersFactory, shardFactory, scheduler);
         }
     }
 
     public static class Debug extends InMemoryCommandStores.SingleThread
     {
-        public Debug(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory)
+        public Debug(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, Scheduler scheduler)
         {
-            super(time, agent, store, random, shardDistributor, progressLogFactory, listenersFactory, InMemoryCommandStore.Debug::new);
+            super(time, agent, store, random, shardDistributor, progressLogFactory, listenersFactory, InMemoryCommandStore.Debug::new, scheduler);
         }
     }
 }

@@ -24,6 +24,7 @@ import java.util.function.Consumer;
 
 import org.junit.jupiter.api.Test;
 
+import accord.api.Agent;
 import accord.impl.PrefixedIntHashKey;
 import accord.impl.basic.Cluster;
 import accord.impl.basic.DelayedCommandStores.DelayedCommandStore;
@@ -43,6 +44,8 @@ import accord.utils.AccordGens;
 import accord.utils.Gen;
 import accord.utils.Gens;
 import accord.utils.Invariants;
+import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
 import org.assertj.core.api.Assertions;
 
 import static accord.local.PreLoadContext.contextFor;
@@ -67,7 +70,7 @@ class BootstrapLocalTxnTest
                 for (int storeId : on.commandStores().ids())
                 {
                     DelayedCommandStore store = (DelayedCommandStore) on.commandStores().forId(storeId);
-                    // this is a bit redudent but here to make the test easier to maintain.  Pre/Post execute we validate each command to make sure everything is fine
+                    // this is a bit redundent but here to make the test easier to maintain.  Pre/Post execute we validate each command to make sure everything is fine
                     // but that logic could be changed and this test has a dependency on validation the command... so to make this dependency explicit
                     // the test will call the validation logic within the test even though it will be called again in the background...
                     Consumer<Command> validate = store::validateRead;
@@ -80,23 +83,24 @@ class BootstrapLocalTxnTest
                     SyncPoint<Ranges> syncPoint = new SyncPoint<>(globalSyncId, Deps.NONE, ranges, route);
                     Ranges valid = AccordGens.rangesInsideRanges(ranges, (rs2, r) -> rs2.nextInt(1, 4)).next(rs);
                     Invariants.checkArgument(syncPoint.keysOrRanges.containsAll(valid));
+                    Agent agent = store.agent;
                     store.execute(contextFor(localSyncId, syncPoint.waitFor.keyDeps.keys(), KeyHistory.COMMANDS), safe -> Commands.createBootstrapCompleteMarkerTransaction(safe, localSyncId, valid))
                          .flatMap(ignore -> store.execute(contextFor(localSyncId), safe -> validate.accept(safe.get(localSyncId, route.homeKey()).current())))
                          .flatMap(ignore -> store.execute(contextFor(localSyncId), safe -> Commands.markBootstrapComplete(safe, localSyncId, ranges)))
                          .flatMap(ignore -> store.execute(contextFor(localSyncId), safe -> validate.accept(safe.get(localSyncId, route.homeKey()).current())))
                          // cleanup txn
-                         .flatMap(ignore -> store.submit(PreLoadContext.empty(), safe -> {
+                         .withExecutor(store).flatMap(ignore -> {
                              Cleanup target = cleanupGen.next(rs);
                              if (target == Cleanup.NO)
-                                 return Cleanup.NO;
-                             safe.commandStore().setRedundantBefore(RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, nextGlobalSyncId, nextGlobalSyncId, TxnId.NONE));
+                                 return AsyncResults.success(Cleanup.NO);
+                             AsyncResult<?> result = store.mergeAndUpdateRedundantBefore(RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, nextGlobalSyncId, nextGlobalSyncId, TxnId.NONE), nextGlobalSyncId, ranges);
                              switch (target)
                              {
                                  case ERASE:
-                                     safe.commandStore().setDurableBefore(DurableBefore.create(ranges, nextGlobalSyncId, nextGlobalSyncId));
+                                     result = result.flatMap(ignored -> store.mergeAndUpdateDurableBefore(DurableBefore.create(ranges, nextGlobalSyncId, nextGlobalSyncId)).beginAsResult()).beginAsResult();
                                      break;
                                  case TRUNCATE:
-                                     safe.commandStore().setDurableBefore(DurableBefore.create(ranges, nextGlobalSyncId, globalSyncId));
+                                     result = result.flatMap(ignored -> store.mergeAndUpdateDurableBefore(DurableBefore.create(ranges, nextGlobalSyncId, globalSyncId)).beginAsResult()).beginAsResult();
                                      break;
                                  case TRUNCATE_WITH_OUTCOME:
                                  case INVALIDATE:
@@ -105,8 +109,8 @@ class BootstrapLocalTxnTest
                                  default:
                                      throw new UnsupportedOperationException(target.name());
                              }
-                             return target;
-                         }))
+                             return result.map(ignored -> target);
+                         })
                          // validateRead is called implicitly _on command completion_
                          .flatMap(target -> store.execute(contextFor(localSyncId), safe -> {
                              SafeCommand cmd = safe.get(localSyncId, route.homeKey());
