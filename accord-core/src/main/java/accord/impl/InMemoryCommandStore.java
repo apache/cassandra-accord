@@ -98,7 +98,6 @@ import static accord.local.SaveStatus.ReadyToExecute;
 import static accord.local.Status.Applied;
 import static accord.local.Status.Invalidated;
 import static accord.local.Status.NotDefined;
-import static accord.local.Status.PreApplied;
 import static accord.local.Status.PreCommitted;
 import static accord.local.Status.Stable;
 import static accord.local.Status.Truncated;
