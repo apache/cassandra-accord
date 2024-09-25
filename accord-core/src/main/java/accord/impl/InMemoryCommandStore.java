@@ -1323,6 +1323,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         commandsForKey.clear();
         rangeCommands.clear();
         historicalRangeCommands.clear();
+        unsafeSetRejectBefore(new ReducingRangeMap<>());
     }
 
     public interface Loader

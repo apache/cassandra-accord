@@ -41,13 +41,8 @@ import accord.coordinate.Timeout;
 import accord.coordinate.TopologyMismatch;
 import accord.coordinate.tracking.AllTracker;
 import accord.coordinate.tracking.RequestStatus;
-import accord.impl.InMemoryCommandStore;
 import accord.impl.basic.SimulatedFault;
-import accord.local.CommandStore;
-import accord.local.CommandStores.RangesForEpoch;
-import accord.local.DurableBefore;
 import accord.local.Node;
-import accord.local.RedundantBefore;
 import accord.local.SafeCommandStore;
 import accord.messages.Callback;
 import accord.messages.ReadData;
@@ -64,7 +59,6 @@ import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.utils.Invariants;
 import accord.utils.RandomSource;
-import accord.utils.ReducingRangeMap;
 import accord.utils.Timestamped;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
@@ -242,7 +236,6 @@ public class ListStore implements DataStore
         purgedAts.addAll(snapshot.purgedAts);
         fetchCompletes.addAll(snapshot.fetchCompletes);
         pendingRemoves.addAll(snapshot.pendingRemoves);
-        InMemoryCommandStore commandStore = (InMemoryCommandStore) CommandStore.current();
     }
 
     public void clear()

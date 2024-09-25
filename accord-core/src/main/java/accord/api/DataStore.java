@@ -114,5 +114,4 @@ public interface DataStore
 
     FetchResult fetch(Node node, SafeCommandStore safeStore, Ranges ranges, SyncPoint syncPoint, FetchRanges callback);
     AsyncResult<Void> snapshot(Ranges ranges, TxnId before);
-    default void restoreFromSnapshot() {};
 }
