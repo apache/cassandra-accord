@@ -30,6 +30,7 @@ import accord.local.Node.Id;
 import accord.messages.Callback;
 import accord.primitives.FullRoute;
 import accord.primitives.Seekables;
+import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
@@ -217,7 +218,9 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
                 tryFailure(CoordinationFailed.wrap(withEpochFailure));
                 return;
             }
-            TopologyMismatch mismatch = TopologyMismatch.checkForMismatch(node.topology().globalForEpoch(latestEpoch), txnId, route.homeKey(), keysOrRanges());
+            TopologyMismatch mismatch = txnId.kind() == Txn.Kind.ExclusiveSyncPoint
+                                        ? TopologyMismatch.checkForMismatch(node.topology().globalForEpoch(latestEpoch), txnId, route.homeKey(), keysOrRanges())
+                                        : TopologyMismatch.checkForMismatchOrPendingRemoval(node.topology().globalForEpoch(latestEpoch), txnId, route.homeKey(), keysOrRanges());
             if (mismatch != null)
             {
                 initialRoundIsDone = true;
