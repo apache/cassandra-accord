@@ -33,6 +33,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSortedMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,7 +43,6 @@ import accord.api.ConfigurationService.EpochReady;
 import accord.api.DataStore;
 import accord.api.LocalListeners;
 import accord.api.ProgressLog;
-import accord.api.VisibleForImplementationTesting;
 import accord.coordinate.CollectCalculatedDeps;
 import accord.local.Command.WaitingOn;
 import accord.local.CommandStores.RangesForEpoch;
@@ -217,9 +217,9 @@ public abstract class CommandStore implements AgentExecutor
 
         update = epochUpdateHolder.getAndSet(null);
         if (!update.addGlobalRanges.isEmpty())
-            setDurableBefore(DurableBefore.merge(durableBefore, DurableBefore.create(update.addGlobalRanges, TxnId.NONE, TxnId.NONE)));
+            upsertDurableBefore(DurableBefore.create(update.addGlobalRanges, TxnId.NONE, TxnId.NONE));
         if (update.addRedundantBefore.size() > 0)
-            setRedundantBefore(RedundantBefore.merge(redundantBefore, update.addRedundantBefore));
+            upsertRedundantBefore(update.addRedundantBefore);
         if (update.newRangesForEpoch != null)
             rangesForEpoch = update.newRangesForEpoch;
         return rangesForEpoch;
@@ -228,6 +228,11 @@ public abstract class CommandStore implements AgentExecutor
     public RangesForEpoch unsafeRangesForEpoch()
     {
         return rangesForEpoch;
+    }
+
+    protected void unsafeSetRangesForEpoch(RangesForEpoch newRangesForEpoch)
+    {
+        rangesForEpoch = newRangesForEpoch;
     }
 
     public abstract boolean inStore();
@@ -246,29 +251,14 @@ public abstract class CommandStore implements AgentExecutor
     protected abstract void registerHistoricalTransactions(Deps deps, SafeCommandStore safeStore);
 
     // implementations are expected to override this for persistence
-    protected void setRejectBefore(ReducingRangeMap<Timestamp> newRejectBefore)
-    {
-        this.rejectBefore = newRejectBefore;
-    }
-
-    protected final void setBootstrapBeganAt(NavigableMap<TxnId, Ranges> newBootstrapBeganAt)
-    {
-        this.bootstrapBeganAt = newBootstrapBeganAt;
-    }
-
-    public DurableBefore durableBefore()
-    {
-        return durableBefore;
-    }
-
-    public final void upsertDurableBefore(DurableBefore addDurableBefore)
+    public void upsertDurableBefore(DurableBefore addDurableBefore)
     {
         durableBefore = DurableBefore.merge(durableBefore, addDurableBefore);
     }
 
-    protected final void setDurableBefore(DurableBefore newDurableBefore)
+    protected void unsafeSetRejectBefore(ReducingRangeMap<Timestamp> newRejectBefore)
     {
-        durableBefore = newDurableBefore;
+        this.rejectBefore = newRejectBefore;
     }
 
     protected void upsertRedundantBefore(RedundantBefore addRedundantBefore)
@@ -276,9 +266,27 @@ public abstract class CommandStore implements AgentExecutor
         redundantBefore = RedundantBefore.merge(redundantBefore, addRedundantBefore);
     }
 
-    protected void setRedundantBefore(RedundantBefore newRedundantBefore)
+    protected void unsafeSetDurableBefore(DurableBefore newDurableBefore)
+    {
+        durableBefore = newDurableBefore;
+    }
+
+    protected void unsafeSetRedundantBefore(RedundantBefore newRedundantBefore)
     {
         redundantBefore = newRedundantBefore;
+    }
+
+    /**
+     * This method may be invoked on a non-CommandStore thread
+     */
+    protected synchronized void unsafeSetSafeToRead(NavigableMap<Timestamp, Ranges> newSafeToRead)
+    {
+        this.safeToRead = newSafeToRead;
+    }
+
+    protected void unsafeSetBootstrapBeganAt(NavigableMap<TxnId, Ranges> newBootstrapBeganAt)
+    {
+        this.bootstrapBeganAt = newBootstrapBeganAt;
     }
 
     /**
@@ -300,21 +308,13 @@ public abstract class CommandStore implements AgentExecutor
         setMaxConflicts(maxConflicts.update(keysOrRanges, executeAt));
     }
 
-    /**
-     * This method may be invoked on a non-CommandStore thread
-     */
-    protected final synchronized void setSafeToRead(NavigableMap<Timestamp, Ranges> newSafeToRead)
-    {
-        this.safeToRead = newSafeToRead;
-    }
-
     public final void markExclusiveSyncPoint(SafeCommandStore safeStore, TxnId txnId, Ranges ranges)
     {
         // TODO (desired): narrow ranges to those that are owned
         Invariants.checkArgument(txnId.kind() == ExclusiveSyncPoint);
         ReducingRangeMap<Timestamp> newRejectBefore = rejectBefore != null ? rejectBefore : new ReducingRangeMap<>();
         newRejectBefore = ReducingRangeMap.add(newRejectBefore, ranges, txnId, Timestamp::max);
-        setRejectBefore(newRejectBefore);
+        unsafeSetRejectBefore(newRejectBefore);
     }
 
     public final void markExclusiveSyncPointLocallyApplied(SafeCommandStore safeStore, TxnId txnId, Ranges ranges)
@@ -322,7 +322,7 @@ public abstract class CommandStore implements AgentExecutor
         // TODO (desired): narrow ranges to those that are owned
         Invariants.checkArgument(txnId.kind() == ExclusiveSyncPoint);
         RedundantBefore newRedundantBefore = RedundantBefore.merge(redundantBefore, RedundantBefore.create(ranges, txnId, TxnId.NONE, TxnId.NONE, TxnId.NONE));
-        setRedundantBefore(newRedundantBefore);
+        unsafeSetRedundantBefore(newRedundantBefore);
         updatedRedundantBefore(safeStore, txnId, ranges);
     }
 
@@ -515,7 +515,7 @@ public abstract class CommandStore implements AgentExecutor
 
     final void markBootstrapping(SafeCommandStore safeStore, TxnId globalSyncId, Ranges ranges)
     {
-        setBootstrapBeganAt(bootstrap(globalSyncId, ranges, bootstrapBeganAt));
+        unsafeSetBootstrapBeganAt(bootstrap(globalSyncId, ranges, bootstrapBeganAt));
         RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, TxnId.NONE, globalSyncId);
         upsertRedundantBefore(addRedundantBefore);
         upsertDurableBefore(DurableBefore.create(ranges, TxnId.NONE, TxnId.NONE));
@@ -532,7 +532,7 @@ public abstract class CommandStore implements AgentExecutor
         upsertDurableBefore(addDurableBefore);
         updatedRedundantBefore(safeStore, globalSyncId, slicedRanges);
         safeStore = safeStore; // make unusable in lambda
-        safeStore.dataStore().snapshot(slicedRanges).begin((success, fail) -> {
+        safeStore.dataStore().snapshot(slicedRanges, globalSyncId).begin((success, fail) -> {
             if (fail != null)
             {
                 logger.error("Unsuccessful dataStore snapshot; unable to update GC markers", fail);
@@ -569,7 +569,7 @@ public abstract class CommandStore implements AgentExecutor
         agent.onStale(staleSince, ranges);
 
         RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE, staleUntilAtLeast);
-        setRedundantBefore(RedundantBefore.merge(redundantBefore, addRedundantBefore));
+        upsertRedundantBefore(addRedundantBefore);
         // find which ranges need to bootstrap, subtracting those already in progress that cover the id
 
         markUnsafeToRead(ranges);
@@ -614,10 +614,15 @@ public abstract class CommandStore implements AgentExecutor
         return redundantBefore;
     }
 
-    @VisibleForImplementationTesting
+    public DurableBefore durableBefore()
+    {
+        return durableBefore;
+    }
+
+    @VisibleForTesting
     public final NavigableMap<TxnId, Ranges> bootstrapBeganAt() { return bootstrapBeganAt; }
 
-    @VisibleForImplementationTesting
+    @VisibleForTesting
     public NavigableMap<Timestamp, Ranges> safeToRead() { return safeToRead; }
 
     public final boolean isRejectedIfNotPreAccepted(TxnId txnId, Unseekables<?> participants)
@@ -771,25 +776,13 @@ public abstract class CommandStore implements AgentExecutor
     final synchronized void markUnsafeToRead(Ranges ranges)
     {
         if (safeToRead.values().stream().anyMatch(r -> r.intersects(ranges)))
-            setSafeToRead(purgeHistory(safeToRead, ranges));
+            unsafeSetSafeToRead(purgeHistory(safeToRead, ranges));
     }
 
     final synchronized void markSafeToRead(Timestamp forBootstrapAt, Timestamp at, Ranges ranges)
     {
         Ranges validatedSafeToRead = redundantBefore.validateSafeToRead(forBootstrapAt, ranges);
-        setSafeToRead(purgeAndInsert(safeToRead, at, validatedSafeToRead));
-    }
-
-    protected static class BootstrapSyncPoint
-    {
-        final TxnId syncTxnId;
-        final Ranges ranges;
-
-        protected BootstrapSyncPoint(TxnId syncTxnId, Ranges ranges)
-        {
-            this.syncTxnId = syncTxnId;
-            this.ranges = ranges;
-        }
+        unsafeSetSafeToRead(purgeAndInsert(safeToRead, at, validatedSafeToRead));
     }
 
     protected static ImmutableSortedMap<TxnId, Ranges> bootstrap(TxnId at, Ranges ranges, NavigableMap<TxnId, Ranges> bootstrappedAt)

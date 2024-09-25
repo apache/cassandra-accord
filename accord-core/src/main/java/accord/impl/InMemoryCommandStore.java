@@ -56,10 +56,12 @@ import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.CommandStores.RangesForEpoch;
 import accord.local.Commands;
+import accord.local.DurableBefore;
 import accord.local.KeyHistory;
 import accord.local.Node;
 import accord.local.NodeTimeService;
 import accord.local.PreLoadContext;
+import accord.local.RedundantBefore;
 import accord.local.RedundantStatus;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
@@ -84,6 +86,7 @@ import accord.primitives.Timestamp;
 import accord.primitives.Txn.Kind.Kinds;
 import accord.primitives.TxnId;
 import accord.utils.Invariants;
+import accord.utils.ReducingRangeMap;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 
@@ -426,15 +429,6 @@ public abstract class InMemoryCommandStore extends CommandStore
                                                 Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKeys)
     {
         return new InMemorySafeStore(this, ranges, context, commands, timestampsForKey, commandsForKeys);
-    }
-
-    private void loadCommandsForKey(RoutableKey key,
-                                    KeyHistory keyHistory,
-                                    Map<RoutableKey, InMemorySafeTimestampsForKey> timestampsForKey,
-                                    Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKey)
-    {
-        commandsForKey.put(key, commandsForKey((Key) key).createSafeReference());
-        timestampsForKey.put(key, timestampsForKey((Key) key).createSafeReference());
     }
 
     protected void validateRead(Command current) {}
@@ -1465,5 +1459,41 @@ public abstract class InMemoryCommandStore extends CommandStore
 
             historicalRangeCommands.merge(txnId, ranges.slice(allRanges), Ranges::with);
         });
+    }
+
+    @Override
+    public void unsafeSetRangesForEpoch(RangesForEpoch newRangesForEpoch)
+    {
+        super.unsafeSetRangesForEpoch(newRangesForEpoch);
+    }
+
+    @Override
+    public void unsafeSetDurableBefore(DurableBefore newDurableBefore)
+    {
+        super.unsafeSetDurableBefore(newDurableBefore);
+    }
+
+    @Override
+    public void unsafeSetRedundantBefore(RedundantBefore newRedundantBefore)
+    {
+        super.unsafeSetRedundantBefore(newRedundantBefore);
+    }
+
+    @Override
+    public void unsafeSetRejectBefore(ReducingRangeMap<Timestamp> newRejectBefore)
+    {
+        super.unsafeSetRejectBefore(newRejectBefore);
+    }
+
+    @Override
+    public void unsafeSetSafeToRead(NavigableMap<Timestamp, Ranges> newSafeToRead)
+    {
+        super.unsafeSetSafeToRead(newSafeToRead);
+    }
+
+    @Override
+    public void unsafeSetBootstrapBeganAt(NavigableMap<TxnId, Ranges> newBootstrapBeganAt)
+    {
+        super.unsafeSetBootstrapBeganAt(newBootstrapBeganAt);
     }
 }

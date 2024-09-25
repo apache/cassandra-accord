@@ -33,9 +33,11 @@ import accord.primitives.Seekable;
 import accord.primitives.Seekables;
 import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
+import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
 public class MockStore implements DataStore
@@ -148,5 +150,11 @@ public class MockStore implements DataStore
         callback.starting(ranges).started(Timestamp.NONE);
         callback.fetched(ranges);
         return new ImmediateFetchFuture(ranges);
+    }
+
+    @Override
+    public AsyncResult<Void> snapshot(Ranges ranges, TxnId before)
+    {
+        return AsyncResults.success(null);
     }
 }

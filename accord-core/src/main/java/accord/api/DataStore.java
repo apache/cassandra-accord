@@ -25,6 +25,7 @@ import accord.local.SafeCommandStore;
 import accord.primitives.Ranges;
 import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
@@ -112,6 +113,6 @@ public interface DataStore
     }
 
     FetchResult fetch(Node node, SafeCommandStore safeStore, Ranges ranges, SyncPoint syncPoint, FetchRanges callback);
-    default AsyncResult<Void> snapshot(Ranges ranges) { return AsyncResults.success(null); };
+    AsyncResult<Void> snapshot(Ranges ranges, TxnId before);
     default void restoreFromSnapshot() {};
 }
