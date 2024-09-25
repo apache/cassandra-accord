@@ -1573,12 +1573,12 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 
     private void checkBehindCommitForLinearizabilityViolation(TxnInfo newInfo, TxnInfo maxAppliedWrite)
     {
-        if (!isPreBootstrap(newInfo) && CommandsForKey.reportLinearizabilityViolations())
+        if (!isPreBootstrap(newInfo))
         {
             for (int i = maxAppliedWriteByExecuteAt ; i >= 0 ; --i)
             {
                 TxnInfo txn = committedByExecuteAt[i];
-                if (newInfo == txn)
+                if (newInfo == txn && CommandsForKey.reportLinearizabilityViolations())
                 {
                     // we haven't found anything pre-bootstrap that follows this command, so log a linearizability violation
                     // TODO (expected): this should be a rate-limited logger; need to integrate with Cassandra

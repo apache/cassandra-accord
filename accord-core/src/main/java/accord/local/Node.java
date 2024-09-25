@@ -192,7 +192,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         this.now = new AtomicReference<>(Timestamp.fromValues(topology.epoch(), nowSupplier.getAsLong(), id));
         this.agent = agent;
         this.random = random;
-        this.commandStores = factory.create(this, agent, dataSupplier.get(), random.fork(), shardDistributor, progressLogFactory.apply(this), localListenersFactory.apply(this), scheduler);
+        this.commandStores = factory.create(this, agent, dataSupplier.get(), random.fork(), shardDistributor, progressLogFactory.apply(this), localListenersFactory.apply(this));
         // TODO review these leak a reference to an object that hasn't finished construction, possibly to other threads
         configService.registerListener(this);
     }

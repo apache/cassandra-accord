@@ -610,13 +610,13 @@ class Updating
                 System.arraycopy(committedByExecuteAt, pos, result, pos + 1, committedByExecuteAt.length - pos);
 
                 int maxAppliedWriteByExecuteAt = cfk.maxAppliedWriteByExecuteAt;
-                if (reportLinearizabilityViolations() && pos <= maxAppliedWriteByExecuteAt)
+                if (pos <= maxAppliedWriteByExecuteAt)
                 {
                     if (pos < maxAppliedWriteByExecuteAt && !wasPruned && cfk.isPostBootstrap(newInfo))
                     {
                         for (int i = pos; i <= maxAppliedWriteByExecuteAt; ++i)
                         {
-                            if (committedByExecuteAt[pos].kind().witnesses(newInfo))
+                            if (committedByExecuteAt[pos].kind().witnesses(newInfo) && reportLinearizabilityViolations())
                                 logger.error("Linearizability violation on key {}: {} is committed to execute (at {}) before {} that should witness it but has already applied (at {})", cfk.key, newInfo.plainTxnId(), newInfo.plainExecuteAt(), committedByExecuteAt[i].plainTxnId(), committedByExecuteAt[i].plainExecuteAt());
                         }
                     }
@@ -674,7 +674,7 @@ class Updating
             TxnInfo[] committedByExecuteAt = cfk.committedByExecuteAt;
             for (int i = cfk.maxAppliedWriteByExecuteAt + 1; i < appliedPos ; ++i)
             {
-                if (reportLinearizabilityViolations() && committedByExecuteAt[i].status != APPLIED && appliedKind.witnesses(committedByExecuteAt[i]))
+                if (committedByExecuteAt[i].status != APPLIED && appliedKind.witnesses(committedByExecuteAt[i]) && reportLinearizabilityViolations())
                     logger.error("Linearizability violation on key {}: {} is committed to execute (at {}) before {} that should witness it but has already applied (at {})", cfk.key, committedByExecuteAt[i].plainTxnId(), committedByExecuteAt[i].plainExecuteAt(), applied.plainTxnId(), applied.plainExecuteAt());
             }
         }

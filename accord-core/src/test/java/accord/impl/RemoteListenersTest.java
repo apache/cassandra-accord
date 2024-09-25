@@ -64,7 +64,6 @@ import accord.utils.AccordGens;
 import accord.utils.RandomSource;
 import accord.utils.RandomTestRunner;
 import accord.utils.async.AsyncChain;
-import accord.utils.async.AsyncResults;
 import org.agrona.collections.IntHashSet;
 import org.agrona.collections.ObjectHashSet;
 
@@ -391,11 +390,7 @@ public class RemoteListenersTest
                   ignore -> new ProgressLog.NoOpProgressLog(),
                   ignore -> new DefaultLocalListeners(new DefaultRemoteListeners((a, b, c, d, e)->{}),
                                                       DefaultLocalListeners.DefaultNotifySink.INSTANCE),
-                  new EpochUpdateHolder(),
-                  (ignored1, ignored2) -> AsyncResults.SUCCESS_VOID,
-                  (ignored1, ignored2) -> AsyncResults.SUCCESS_VOID,
-                  (ignored1, ignored2) -> AsyncResults.SUCCESS_VOID,
-                  (ignored1, ignored2) -> AsyncResults.SUCCESS_VOID);
+                  new EpochUpdateHolder());
             this.storeId = id;
         }
 

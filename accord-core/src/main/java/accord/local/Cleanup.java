@@ -98,7 +98,6 @@ public enum Cleanup
                              commandStore.redundantBefore(), commandStore.durableBefore(), enforceInvariants);
     }
 
-
     public static Cleanup shouldCleanup(TxnId txnId, Status status, Durability durability, EpochSupplier toEpoch, Route<?> route, RedundantBefore redundantBefore, DurableBefore durableBefore)
     {
         return shouldCleanup(txnId, status, durability, toEpoch, route, redundantBefore, durableBefore, true);
@@ -135,7 +134,7 @@ public enum Cleanup
                 //      - we can impose additional validations here IF we receive an epoch upper bound
                 //      - we should be more robust to the presence/absence of executeAt
                 //      - be cognisant of future epochs that participated only for PreAccept/Accept, but where txn was not committed to execute in the epoch (this is why we provide null toEpoch here)
-                illegalState(String.format("Command %s that is being loaded is not owned by this shard on route %s. Redundant before: %s", txnId, route, redundantBefore));
+                illegalState("Command %s that is being loaded is not owned by this shard on route %s. Redundant before: %s", txnId, route, redundantBefore);
             }
         }
         switch (redundant)

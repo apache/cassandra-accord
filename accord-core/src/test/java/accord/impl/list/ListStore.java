@@ -18,8 +18,10 @@
 
 package accord.impl.list;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -30,6 +32,7 @@ import java.util.stream.Collectors;
 
 import accord.api.DataStore;
 import accord.api.Key;
+import accord.api.Scheduler;
 import accord.coordinate.CoordinateSyncPoint;
 import accord.coordinate.ExecuteSyncPoint.SyncPointErased;
 import accord.coordinate.Invalidated;
@@ -54,9 +57,12 @@ import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import accord.topology.Topology;
+import accord.utils.Invariants;
+import accord.utils.RandomSource;
 import accord.utils.Timestamped;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
+import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.collections.LongArrayList;
@@ -136,6 +142,9 @@ public class ListStore implements DataStore
 
     static final Timestamped<int[]> EMPTY = new Timestamped<>(Timestamp.NONE, new int[0], Arrays::toString);
     final NavigableMap<RoutableKey, Timestamped<int[]>> data = new TreeMap<>();
+    final Scheduler scheduler;
+    final RandomSource random;
+
     private final List<ChangeAt> addedAts = new ArrayList<>();
     private final List<ChangeAt> removedAts = new ArrayList<>();
     private final List<PurgeAt> purgedAts = new ArrayList<>();
@@ -148,38 +157,82 @@ public class ListStore implements DataStore
     // when out of order epochs are detected, this holds the callbacks to try again
     private final List<Runnable> onRemovalDone = new ArrayList<>();
 
-
-    private final NavigableMap<RoutableKey, Timestamped<int[]>> snapshot = new TreeMap<>();
-    private final List<ChangeAt> addedAtSnapshot = new ArrayList<>();
-    private final List<ChangeAt> removedAtSnapshot = new ArrayList<>();
-    private final List<PurgeAt> purgedAtSnapshot = new ArrayList<>();
-    private final List<FetchComplete> fetchCompleteSnapshot = new ArrayList<>();
-    private final LongArrayList pendingRemovesSnapshot = new LongArrayList();
-
-    public void snapshot()
+    private static final class Snapshot
     {
-        snapshot.clear();
-        snapshot.putAll(data);
-        addedAtSnapshot.clear();
-        addedAtSnapshot.addAll(addedAts);
-        removedAtSnapshot.clear();
-        removedAtSnapshot.addAll(removedAts);
-        purgedAtSnapshot.clear();
-        purgedAtSnapshot.addAll(purgedAts);
-        fetchCompleteSnapshot.clear();
-        fetchCompleteSnapshot.addAll(fetchCompletes);
-        pendingRemovesSnapshot.clear();
-        pendingRemovesSnapshot.addAll(pendingRemoves);
+        private final NavigableMap<RoutableKey, Timestamped<int[]>> data;
+        private final List<ChangeAt> addedAts;
+        private final List<ChangeAt> removedAts;
+        private final List<PurgeAt> purgedAts;
+        private final List<FetchComplete> fetchCompletes;
+        private final LongArrayList pendingRemoves;
+
+        private Snapshot(NavigableMap<RoutableKey, Timestamped<int[]>> data, List<ChangeAt> addedAts, List<ChangeAt> removedAts, List<PurgeAt> purgedAts, List<FetchComplete> fetchCompletes, LongArrayList pendingRemoves)
+        {
+            this.data = new TreeMap<>(data);
+            this.addedAts = new ArrayList<>(addedAts);
+            this.removedAts = new ArrayList<>(removedAts);
+            this.purgedAts = new ArrayList<>(purgedAts);
+            this.fetchCompletes = new ArrayList<>(fetchCompletes);
+            this.pendingRemoves = new LongArrayList();
+            this.pendingRemoves.addAll(pendingRemoves);
+        }
+    }
+
+    private static final class PendingSnapshot
+    {
+        final long delay;
+        final Runnable runnable;
+
+        private PendingSnapshot(long delay, Runnable runnable)
+        {
+            this.delay = delay;
+            this.runnable = runnable;
+        }
+    }
+
+    private Snapshot snapshot;
+    private final Deque<PendingSnapshot> pendingSnapshots = new ArrayDeque<>();
+    private long pendingDelay = 0;
+
+    public AsyncResult<Void> snapshot()
+    {
+        Snapshot snapshot = new Snapshot(data, addedAts, removedAts, purgedAts, fetchCompletes, pendingRemoves);
+        AsyncResult.Settable<Void> result = new AsyncResults.SettableResult<>();
+        long delay = Math.max(1, random.nextBiasedLong(100, 1000, 5000) - pendingDelay);
+        pendingDelay += delay;
+        pendingSnapshots.add(new PendingSnapshot(delay, () -> {
+            this.snapshot = snapshot;
+            result.setSuccess(null);
+        }));
+
+        if (pendingSnapshots.size() == 1)
+            scheduleRunSnapshot();
+        return result;
+    }
+
+    private void scheduleRunSnapshot()
+    {
+        Invariants.checkState(!pendingSnapshots.isEmpty());
+        scheduler.once(() -> {
+            if (pendingSnapshots.isEmpty())
+                return;
+
+            PendingSnapshot pendingSnapshot = pendingSnapshots.pollFirst();
+            pendingSnapshot.runnable.run();
+            pendingDelay -= pendingSnapshot.delay;
+            if (!pendingSnapshots.isEmpty())
+                scheduleRunSnapshot();
+        }, pendingSnapshots.peekFirst().delay, TimeUnit.MILLISECONDS);
     }
 
     public void restoreFromSnapshot()
     {
-        data.putAll(snapshot);
-        addedAts.addAll(addedAtSnapshot);
-        removedAts.addAll(removedAtSnapshot);
-        purgedAts.addAll(purgedAtSnapshot);
-        fetchCompletes.addAll(fetchCompleteSnapshot);
-        pendingRemoves.addAll(pendingRemovesSnapshot);
+        data.putAll(snapshot.data);
+        addedAts.addAll(snapshot.addedAts);
+        removedAts.addAll(snapshot.removedAts);
+        purgedAts.addAll(snapshot.purgedAts);
+        fetchCompletes.addAll(snapshot.fetchCompletes);
+        pendingRemoves.addAll(snapshot.pendingRemoves);
     }
 
     public void clear()
@@ -195,8 +248,10 @@ public class ListStore implements DataStore
     // adding here to help trace burn test queries
     public final Node.Id node;
 
-    public ListStore(Node.Id node)
+    public ListStore(Scheduler scheduler, RandomSource random, Node.Id node)
     {
+        this.scheduler = scheduler;
+        this.random = random;
         this.node = node;
     }
 

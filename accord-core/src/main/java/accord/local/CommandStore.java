@@ -28,15 +28,11 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BiConsumer;
-import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSortedMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,7 +42,6 @@ import accord.api.ConfigurationService.EpochReady;
 import accord.api.DataStore;
 import accord.api.LocalListeners;
 import accord.api.ProgressLog;
-import accord.api.Scheduler;
 import accord.api.VisibleForImplementationTesting;
 import accord.coordinate.CollectCalculatedDeps;
 import accord.local.Command.WaitingOn;
@@ -68,7 +63,6 @@ import accord.utils.DeterministicIdentitySet;
 import accord.utils.Invariants;
 import accord.utils.ReducingRangeMap;
 import accord.utils.async.AsyncChain;
-import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 import org.agrona.collections.Int2ObjectHashMap;
@@ -82,7 +76,6 @@ import static accord.primitives.Routables.Slice.Minimal;
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static accord.utils.Invariants.checkState;
 import static accord.utils.Invariants.illegalState;
-import static com.google.common.base.Preconditions.checkNotNull;
 
 /**
  * Single threaded internal shard of accord transaction metadata
@@ -119,13 +112,13 @@ public abstract class CommandStore implements AgentExecutor
         // TODO (desired): can better encapsulate by accepting only the newRangesForEpoch and deriving the add/remove ranges
         public void add(long epoch, RangesForEpoch newRangesForEpoch, Ranges addRanges)
         {
-            RedundantBefore addRedundantBefore = RedundantBefore.create(addRanges, epoch, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, TxnId.minForEpoch(epoch));
+            RedundantBefore addRedundantBefore = RedundantBefore.create(addRanges, epoch, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.minForEpoch(epoch));
             update(newRangesForEpoch, addRedundantBefore);
         }
 
         public void remove(long epoch, RangesForEpoch newRangesForEpoch, Ranges removeRanges)
         {
-            RedundantBefore addRedundantBefore = RedundantBefore.create(removeRanges, Long.MIN_VALUE, epoch, TxnId.NONE, TxnId.NONE, TxnId.NONE);
+            RedundantBefore addRedundantBefore = RedundantBefore.create(removeRanges, Long.MIN_VALUE, epoch, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE);
             update(newRangesForEpoch, addRedundantBefore);
         }
 
@@ -146,8 +139,7 @@ public abstract class CommandStore implements AgentExecutor
                             DataStore store,
                             ProgressLog.Factory progressLogFactory,
                             LocalListeners.Factory listenersFactory,
-                            EpochUpdateHolder rangesForEpoch,
-                            Scheduler scheduler);
+                            EpochUpdateHolder rangesForEpoch);
     }
 
     private static final ThreadLocal<CommandStore> CURRENT_STORE = new ThreadLocal<>();
@@ -189,22 +181,13 @@ public abstract class CommandStore implements AgentExecutor
     private final Set<Bootstrap> bootstraps = Collections.synchronizedSet(new DeterministicIdentitySet<>());
     @Nullable private ReducingRangeMap<Timestamp> rejectBefore;
 
-    protected final PersistentField<DurableBefore, DurableBefore> durableBeforePersistentField;
-    protected final PersistentField<RedundantBefore, RedundantBefore> redundantBeforePersistentField;
-    protected final PersistentField<BootstrapSyncPoint, NavigableMap<TxnId, Ranges>> bootstrapBeganAtPersistentField;
-    protected final PersistentField<NavigableMap<Timestamp, Ranges>, NavigableMap<Timestamp, Ranges>> safeToReadPersistentField;
-
     protected CommandStore(int id,
                            NodeTimeService time,
                            Agent agent,
                            DataStore store,
                            ProgressLog.Factory progressLogFactory,
                            LocalListeners.Factory listenersFactory,
-                           EpochUpdateHolder epochUpdateHolder,
-                           FieldPersister<DurableBefore> persistDurableBefore,
-                           FieldPersister<RedundantBefore> persistRedundantBefore,
-                           FieldPersister<NavigableMap<TxnId, Ranges>> persistBootstrapBeganAt,
-                           FieldPersister<NavigableMap<Timestamp, Ranges>> persistSafeToReadAt)
+                           EpochUpdateHolder epochUpdateHolder)
     {
         this.id = id;
         this.time = time;
@@ -213,11 +196,6 @@ public abstract class CommandStore implements AgentExecutor
         this.progressLog = progressLogFactory.create(this);
         this.listeners = listenersFactory.create(this);
         this.epochUpdateHolder = epochUpdateHolder;
-        this.durableBeforePersistentField = new PersistentField<>(this::durableBefore, DurableBefore::merge, persistDurableBefore, durableBefore -> setDurableBefore(durableBefore));
-        this.redundantBeforePersistentField = new PersistentField<>(this::redundantBefore, RedundantBefore::merge, persistRedundantBefore, redundantBefore -> setRedundantBefore(redundantBefore));
-        this.bootstrapBeganAtPersistentField = new PersistentField<>(this::bootstrapBeganAt, CommandStore::bootstrap, persistBootstrapBeganAt, bootstrapBeganAt -> setBootstrapBeganAt(bootstrapBeganAt));
-        this.safeToReadPersistentField = new PersistentField<>(this::safeToRead, null, persistSafeToReadAt, safeToRead -> setSafeToRead(safeToRead));
-
     }
 
     public final int id()
@@ -238,18 +216,12 @@ public abstract class CommandStore implements AgentExecutor
             return rangesForEpoch;
 
         update = epochUpdateHolder.getAndSet(null);
-
         if (!update.addGlobalRanges.isEmpty())
-            // Intentionally don't care if this persists since it will be replayed from topology at startup
             setDurableBefore(DurableBefore.merge(durableBefore, DurableBefore.create(update.addGlobalRanges, TxnId.NONE, TxnId.NONE)));
-
         if (update.addRedundantBefore.size() > 0)
-            // Intentionally don't care if this persists since it will be replayed from topology at startup
             setRedundantBefore(RedundantBefore.merge(redundantBefore, update.addRedundantBefore));
-
         if (update.newRangesForEpoch != null)
             rangesForEpoch = update.newRangesForEpoch;
-
         return rangesForEpoch;
     }
 
@@ -279,12 +251,6 @@ public abstract class CommandStore implements AgentExecutor
         this.rejectBefore = newRejectBefore;
     }
 
-    protected AsyncResult<?> mergeAndUpdateBootstrapBeganAt(BootstrapSyncPoint globalSyncPoint)
-    {
-        return bootstrapBeganAtPersistentField.mergeAndUpdate(globalSyncPoint, null, null, false);
-    }
-
-    // This will not work correctly if called outside PersistentField without remerging
     protected final void setBootstrapBeganAt(NavigableMap<TxnId, Ranges> newBootstrapBeganAt)
     {
         this.bootstrapBeganAt = newBootstrapBeganAt;
@@ -295,23 +261,21 @@ public abstract class CommandStore implements AgentExecutor
         return durableBefore;
     }
 
-    public final AsyncResult<?> mergeAndUpdateDurableBefore(DurableBefore newDurableBefore)
+    public final void upsertDurableBefore(DurableBefore addDurableBefore)
     {
-        return durableBeforePersistentField.mergeAndUpdate(newDurableBefore, null, null, true);
+        durableBefore = DurableBefore.merge(durableBefore, addDurableBefore);
     }
 
-    // For implementations to use after persistence
     protected final void setDurableBefore(DurableBefore newDurableBefore)
     {
         durableBefore = newDurableBefore;
     }
 
-    protected final AsyncResult<?> mergeAndUpdateRedundantBefore(RedundantBefore newRedundantBefore, Timestamp gcBefore, Ranges updatedRanges)
+    protected void upsertRedundantBefore(RedundantBefore addRedundantBefore)
     {
-        return redundantBeforePersistentField.mergeAndUpdate(newRedundantBefore, gcBefore, updatedRanges, true);
+        redundantBefore = RedundantBefore.merge(redundantBefore, addRedundantBefore);
     }
 
-    // For implementations to use after persistence
     protected void setRedundantBefore(RedundantBefore newRedundantBefore)
     {
         redundantBefore = newRedundantBefore;
@@ -336,13 +300,6 @@ public abstract class CommandStore implements AgentExecutor
         setMaxConflicts(maxConflicts.update(keysOrRanges, executeAt));
     }
 
-    protected AsyncResult<?> mergeAndUpdateSafeToRead(Function<NavigableMap<Timestamp, Ranges>, NavigableMap<Timestamp, Ranges>> computeNewValue)
-    {
-        // The input values are bound into the merge function to satisfy the fact that there are two different sets of inputs types to the merge function
-        // depending on whether it is purgeHistory or purgeAndInsert
-        return safeToReadPersistentField.mergeAndUpdate(computeNewValue);
-    }
-
     /**
      * This method may be invoked on a non-CommandStore thread
      */
@@ -360,15 +317,13 @@ public abstract class CommandStore implements AgentExecutor
         setRejectBefore(newRejectBefore);
     }
 
-    public final AsyncChain<?> markExclusiveSyncPointLocallyApplied(CommandStore commandStore, TxnId txnId, Ranges ranges)
+    public final void markExclusiveSyncPointLocallyApplied(SafeCommandStore safeStore, TxnId txnId, Ranges ranges)
     {
         // TODO (desired): narrow ranges to those that are owned
         Invariants.checkArgument(txnId.kind() == ExclusiveSyncPoint);
-        RedundantBefore newRedundantBefore = RedundantBefore.merge(redundantBefore, RedundantBefore.create(ranges, txnId, TxnId.NONE, TxnId.NONE));
-        AsyncResult<?> setRedundantBeforeChain = mergeAndUpdateRedundantBefore(newRedundantBefore, txnId, ranges);
-        return setRedundantBeforeChain.flatMap(
-                   ignored -> commandStore.execute(contextFor(txnId),
-                       safeStore -> updatedRedundantBefore(safeStore, txnId, ranges)));
+        RedundantBefore newRedundantBefore = RedundantBefore.merge(redundantBefore, RedundantBefore.create(ranges, txnId, TxnId.NONE, TxnId.NONE, TxnId.NONE));
+        setRedundantBefore(newRedundantBefore);
+        updatedRedundantBefore(safeStore, txnId, ranges);
     }
 
     /**
@@ -558,35 +513,37 @@ public abstract class CommandStore implements AgentExecutor
         bootstraps.remove(bootstrap);
     }
 
-    final AsyncChain<?> markBootstrapping(CommandStore commandStore, TxnId globalSyncId, Ranges ranges)
+    final void markBootstrapping(SafeCommandStore safeStore, TxnId globalSyncId, Ranges ranges)
     {
-        store.snapshot();
-        AsyncResult<?> setBootstrapBeganAtResult = mergeAndUpdateBootstrapBeganAt(new BootstrapSyncPoint(globalSyncId, ranges));
-        RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, globalSyncId);
-        // TODO (review): What is the correct txnId to provide here to restrict what memtables are flushed?
-        AsyncResult<?> setRedundantBeforeResult = mergeAndUpdateRedundantBefore(RedundantBefore.merge(redundantBefore, addRedundantBefore), globalSyncId, ranges);
-        DurableBefore addDurableBefore = DurableBefore.create(ranges, TxnId.NONE, TxnId.NONE);
-        AsyncResult<?> setDurableBeforeResult = mergeAndUpdateDurableBefore(DurableBefore.merge(durableBefore, addDurableBefore));
-        AsyncChain<?> combinedChain = AsyncChains.allOf(ImmutableList.of(setBootstrapBeganAtResult, setRedundantBeforeResult, setDurableBeforeResult));
-        return combinedChain.flatMap(
-                   ignored -> commandStore.execute(PreLoadContext.contextFor(globalSyncId),
-                       safeStore -> updatedRedundantBefore(safeStore, globalSyncId, ranges)));
+        setBootstrapBeganAt(bootstrap(globalSyncId, ranges, bootstrapBeganAt));
+        RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, TxnId.NONE, globalSyncId);
+        upsertRedundantBefore(addRedundantBefore);
+        upsertDurableBefore(DurableBefore.create(ranges, TxnId.NONE, TxnId.NONE));
+        updatedRedundantBefore(safeStore, globalSyncId, ranges);
     }
 
     // TODO (expected): we can immediately truncate dependencies locally once an exclusiveSyncPoint applies, we don't need to wait for the whole shard
-    public AsyncChain<Void> markShardDurable(SafeCommandStore safeStore0, TxnId globalSyncId, Ranges ranges)
+    public void markShardDurable(SafeCommandStore safeStore, TxnId globalSyncId, Ranges durableRanges)
     {
-        store.snapshot();
-        ranges = ranges.slice(safeStore0.ranges().allUntil(globalSyncId.epoch()), Minimal);
-        RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, globalSyncId, TxnId.NONE);
-        AsyncResult<?> setRedundantBeforeChain = mergeAndUpdateRedundantBefore(RedundantBefore.merge(redundantBefore, addRedundantBefore), globalSyncId, ranges);
-        DurableBefore addDurableBefore = DurableBefore.create(ranges, globalSyncId, globalSyncId);
-        AsyncResult<?> setDurableBeforeChain = mergeAndUpdateDurableBefore(DurableBefore.merge(durableBefore, addDurableBefore));
-        Ranges slicedRanges = ranges;
-        AsyncChain<?> combinedChain = AsyncChains.allOf(ImmutableList.of(setRedundantBeforeChain, setDurableBeforeChain));
-        return combinedChain.flatMap(
-                   ignored -> safeStore0.commandStore().execute(PreLoadContext.contextFor(globalSyncId),
-                       safeStore1 -> updatedRedundantBefore(safeStore1, globalSyncId, slicedRanges)));
+        final Ranges slicedRanges = durableRanges.slice(safeStore.ranges().allUntil(globalSyncId.epoch()), Minimal);
+        RedundantBefore addShardRedundant = RedundantBefore.create(slicedRanges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, globalSyncId, TxnId.NONE, TxnId.NONE);
+        upsertRedundantBefore(addShardRedundant);
+        DurableBefore addDurableBefore = DurableBefore.create(slicedRanges, globalSyncId, globalSyncId);
+        upsertDurableBefore(addDurableBefore);
+        updatedRedundantBefore(safeStore, globalSyncId, slicedRanges);
+        safeStore = safeStore; // make unusable in lambda
+        safeStore.dataStore().snapshot(slicedRanges).begin((success, fail) -> {
+            if (fail != null)
+            {
+                logger.error("Unsuccessful dataStore snapshot; unable to update GC markers", fail);
+                return;
+            }
+
+            execute(PreLoadContext.empty(), safeStore0 -> {
+                RedundantBefore addGc = RedundantBefore.create(slicedRanges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, globalSyncId, TxnId.NONE);
+                upsertRedundantBefore(addGc);
+            });
+        });
     }
 
     protected void updatedRedundantBefore(SafeCommandStore safeStore, TxnId syncId, Ranges ranges)
@@ -598,7 +555,6 @@ public abstract class CommandStore implements AgentExecutor
     //      also: we no longer expect epochs that are losing a range to be marked stale, make sure logic reflects this
     public void markShardStale(SafeCommandStore safeStore, Timestamp staleSince, Ranges ranges, boolean isSincePrecise)
     {
-        store.snapshot();
         Timestamp staleUntilAtLeast = staleSince;
         if (isSincePrecise)
         {
@@ -612,10 +568,8 @@ public abstract class CommandStore implements AgentExecutor
         }
         agent.onStale(staleSince, ranges);
 
-        RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, TxnId.NONE, TxnId.NONE, TxnId.NONE, staleUntilAtLeast);
-        // TODO (review): Is it ok for this to be asynchronous here?
-        // TODO (review): Is stale since the right txnid here?
-        mergeAndUpdateRedundantBefore(RedundantBefore.merge(redundantBefore, addRedundantBefore), staleSince, ranges).addCallback(agent);
+        RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE, staleUntilAtLeast);
+        setRedundantBefore(RedundantBefore.merge(redundantBefore, addRedundantBefore));
         // find which ranges need to bootstrap, subtracting those already in progress that cover the id
 
         markUnsafeToRead(ranges);
@@ -631,7 +585,7 @@ public abstract class CommandStore implements AgentExecutor
     {
         // Merge in a base for any ranges that needs to be covered
         DurableBefore addDurableBefore = DurableBefore.create(ranges, TxnId.NONE, TxnId.NONE);
-        setDurableBefore(DurableBefore.merge(durableBefore, addDurableBefore));
+        upsertDurableBefore(addDurableBefore);
         // TODO (review): Convoluted check to not overwrite existing bootstraps with TxnId.NONE
         // If loading from disk didn't finish before this then we might initialize the range at TxnId.NONE?
         // Does CommandStores.topology ensure that doesn't happen? Is it fine if it does because it will get superseded?
@@ -639,7 +593,7 @@ public abstract class CommandStore implements AgentExecutor
         for (Ranges existing : bootstrapBeganAt.values())
             newBootstrapRanges = newBootstrapRanges.without(existing);
         if (!newBootstrapRanges.isEmpty())
-            bootstrapBeganAt = bootstrap(new BootstrapSyncPoint(TxnId.NONE, newBootstrapRanges), bootstrapBeganAt);
+            bootstrapBeganAt = bootstrap(TxnId.NONE, newBootstrapRanges, bootstrapBeganAt);
         safeToRead = purgeAndInsert(safeToRead, TxnId.NONE, ranges);
         return () -> new EpochReady(epoch, DONE, DONE, DONE, DONE);
     }
@@ -696,9 +650,9 @@ public abstract class CommandStore implements AgentExecutor
                 Keys prev = partiallyBootstrapping.get(txnIdx);
                 Keys remaining = prev;
                 if (remaining == null) remaining = builder.directKeyDeps.participatingKeys(txnIdx);
-                else checkState(!remaining.isEmpty());
+                else Invariants.checkState(!remaining.isEmpty());
                 remaining = remaining.without(range);
-                if (prev == null) checkState(!remaining.isEmpty());
+                if (prev == null) Invariants.checkState(!remaining.isEmpty());
                 partiallyBootstrapping.put(txnIdx, remaining);
                 return remaining.isEmpty();
             }
@@ -761,9 +715,9 @@ public abstract class CommandStore implements AgentExecutor
                 Ranges prev = partiallyBootstrapping.get(rangeTxnIdx);
                 Ranges remaining = prev;
                 if (remaining == null) remaining = builder.directRangeDeps.ranges(rangeTxnIdx);
-                else checkState(!remaining.isEmpty());
+                else Invariants.checkState(!remaining.isEmpty());
                 remaining = remaining.without(Ranges.of(range));
-                if (prev == null) checkState(!remaining.isEmpty());
+                if (prev == null) Invariants.checkState(!remaining.isEmpty());
                 partiallyBootstrapping.put(rangeTxnIdx, remaining);
                 return remaining.isEmpty();
             }
@@ -817,19 +771,19 @@ public abstract class CommandStore implements AgentExecutor
     final synchronized void markUnsafeToRead(Ranges ranges)
     {
         if (safeToRead.values().stream().anyMatch(r -> r.intersects(ranges)))
-            mergeAndUpdateSafeToRead(safeToRead -> purgeHistory(safeToRead, ranges));
+            setSafeToRead(purgeHistory(safeToRead, ranges));
     }
 
     final synchronized void markSafeToRead(Timestamp forBootstrapAt, Timestamp at, Ranges ranges)
     {
         Ranges validatedSafeToRead = redundantBefore.validateSafeToRead(forBootstrapAt, ranges);
-        mergeAndUpdateSafeToRead(safeToRead -> purgeAndInsert(safeToRead, at, validatedSafeToRead));
+        setSafeToRead(purgeAndInsert(safeToRead, at, validatedSafeToRead));
     }
 
     protected static class BootstrapSyncPoint
     {
-        TxnId syncTxnId;
-        Ranges ranges;
+        final TxnId syncTxnId;
+        final Ranges ranges;
 
         protected BootstrapSyncPoint(TxnId syncTxnId, Ranges ranges)
         {
@@ -838,14 +792,12 @@ public abstract class CommandStore implements AgentExecutor
         }
     }
 
-    protected static ImmutableSortedMap<TxnId, Ranges> bootstrap(BootstrapSyncPoint syncPoint, NavigableMap<TxnId, Ranges> bootstrappedAt)
+    protected static ImmutableSortedMap<TxnId, Ranges> bootstrap(TxnId at, Ranges ranges, NavigableMap<TxnId, Ranges> bootstrappedAt)
     {
-        TxnId at = syncPoint.syncTxnId;
-        Invariants.checkArgument(bootstrappedAt.lastKey().compareTo(at) < 0 || syncPoint.syncTxnId == TxnId.NONE);
-        if (syncPoint.syncTxnId == TxnId.NONE)
-            for (Ranges ranges : bootstrappedAt.values())
-                checkState(!syncPoint.ranges.intersects(ranges));
-        Ranges ranges = syncPoint.ranges;
+        Invariants.checkArgument(bootstrappedAt.lastKey().compareTo(at) < 0 || at == TxnId.NONE);
+        if (at == TxnId.NONE)
+            for (Ranges rs : bootstrappedAt.values())
+                checkState(!ranges.intersects(rs));
         Invariants.checkArgument(!ranges.isEmpty());
         // if we're bootstrapping these ranges, then any period we previously owned the ranges for is effectively invalidated
         return purgeAndInsert(bootstrappedAt, at, ranges);
@@ -881,110 +833,5 @@ public abstract class CommandStore implements AgentExecutor
         if (without == in.getValue())
             return in;
         return new SimpleImmutableEntry<>(in.getKey(), without);
-    }
-
-    protected interface FieldPersister<T>
-    {
-        default AsyncResult<?> persist(CommandStore store, Timestamp timestamp, Ranges ranges, T toPersist)
-        {
-            return persist(store, toPersist);
-        }
-
-        AsyncResult<?> persist(CommandStore store, T toPersist);
-
-        default T restore() { return  null; };
-    }
-
-    // A helper class for implementing fields that needs to be asynchronously persisted and concurrent updates
-    // need to be merged and ordered
-    protected class PersistentField<I, T>
-    {
-        @Nonnull
-        private final Supplier<T> currentValue;
-        // The update can be bound into the merge function in which case it will be null
-        // Useful when the merge/update function takes multiple types of input arguments
-        @Nullable
-        private final BiFunction<I, T, T> merge;
-        @Nonnull
-        private final FieldPersister<T> persister;
-        @Nonnull
-        private final Consumer<T> set;
-
-        private T pendingValue;
-        private AsyncResult<?> pendingResult;
-
-        public PersistentField(@Nonnull Supplier<T> currentValue, @Nonnull BiFunction<I, T, T> merge, @Nonnull FieldPersister<T> persist, @Nullable Consumer<T> set)
-        {
-            checkNotNull(currentValue, "currentValue cannot be null");
-            checkNotNull(persist, "persist cannot be null");
-            checkNotNull(set, "set cannot be null");
-            this.currentValue = currentValue;
-            this.merge = merge;
-            this.persister = persist;
-            this.set = set;
-        }
-
-        public void clearAndRestore()
-        {
-            pendingValue = null;
-            set.accept(persister.restore());
-        }
-
-        public AsyncResult<?> mergeAndUpdate(@Nonnull I inputValue, @Nullable Timestamp gcBefore, @Nullable Ranges updatedRanges, boolean remergeAfterPersistence)
-        {
-            checkNotNull(merge, "merge cannot be null");
-            checkNotNull(inputValue, "inputValue cannot be null");
-            return mergeAndUpdate(inputValue, merge, gcBefore, updatedRanges, remergeAfterPersistence);
-        }
-
-        public AsyncResult<?> mergeAndUpdate(@Nonnull Function<T, T> update)
-        {
-            checkNotNull(update, "merge cannot be null");
-            return mergeAndUpdate(null, (ignored, existingValue) -> update.apply(existingValue), null, null, false);
-        }
-
-        private AsyncResult<?> mergeAndUpdate(@Nullable I inputValue, @Nonnull BiFunction<I, T, T> merge, @Nullable Timestamp gcBefore, @Nullable Ranges updatedRanges, boolean remergeAfterPersistence)
-        {
-            checkNotNull(merge, "merge cannot be null");
-            AsyncResult.Settable<Void> result = AsyncResults.settable();
-            AsyncResult<?> oldPendingResult = pendingResult;
-            T startingValue = currentValue.get();
-            T newValue = pendingValue != null ? merge.apply(inputValue, pendingValue) : merge.apply(inputValue, startingValue);
-            this.pendingResult = result;
-            this.pendingValue= newValue;
-
-            AsyncResult<?> pendingWrite = persister.persist(CommandStore.this, gcBefore, updatedRanges, newValue);
-
-            final T newValueFinal = newValue;
-            BiConsumer<Object, Throwable> callback = (ignored, failure) -> {
-                if (PersistentField.this.pendingResult == result)
-                {
-                    PersistentField.this.pendingResult = null;
-                    PersistentField.this.pendingValue = null;
-                }
-                if (failure != null)
-                    result.tryFailure(failure);
-                else
-                {
-                    // DurableBefore and RedundantBefore can have initial values set non-persistently in updateRangesForEpoch so remerge them here
-                    // updateRangesForEpoch really doesn't integrate well with is callers if it is asynchronous updating these values
-                    // so this complexity is better than the alternative
-                    if (remergeAfterPersistence && currentValue.get() != startingValue)
-                        // I and T will have to be the same for remerge to work
-                        set.accept(merge.apply((I)newValueFinal, currentValue.get()));
-                    else
-                        set.accept(newValueFinal);
-                    result.trySuccess(null);
-                }
-            };
-
-            // Order completion after previous updates, this is probably stricter than necessary but easy to implement
-            if (oldPendingResult != null)
-                oldPendingResult.addCallback(() -> pendingWrite.withExecutor(CommandStore.this).addCallback(callback).begin(agent));
-            else
-                pendingWrite.withExecutor(CommandStore.this).addCallback(callback).begin(agent);
-
-            return result;
-        }
     }
 }

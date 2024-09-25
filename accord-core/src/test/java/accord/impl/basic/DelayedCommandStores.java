@@ -109,15 +109,15 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         return false;
     }
 
-    private DelayedCommandStores(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, SimulatedDelayedExecutorService executorService, BooleanSupplier isLoadedCheck, Journal journal, Scheduler scheduler)
+    private DelayedCommandStores(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, SimulatedDelayedExecutorService executorService, BooleanSupplier isLoadedCheck, Journal journal)
     {
-        super(time, agent, store, random, shardDistributor, progressLogFactory, listenersFactory, DelayedCommandStore.factory(executorService, isLoadedCheck, journal), scheduler);
+        super(time, agent, store, random, shardDistributor, progressLogFactory, listenersFactory, DelayedCommandStore.factory(executorService, isLoadedCheck, journal));
     }
 
     public static CommandStores.Factory factory(PendingQueue pending, BooleanSupplier isLoadedCheck, Journal journal)
     {
-        return (time, agent, store, random, shardDistributor, progressLogFactory, listenersFactory, scheduler) ->
-               new DelayedCommandStores(time, agent, store, random, shardDistributor, progressLogFactory, listenersFactory, new SimulatedDelayedExecutorService(pending, agent), isLoadedCheck, journal, scheduler);
+        return (time, agent, store, random, shardDistributor, progressLogFactory, listenersFactory) ->
+               new DelayedCommandStores(time, agent, store, random, shardDistributor, progressLogFactory, listenersFactory, new SimulatedDelayedExecutorService(pending, agent), isLoadedCheck, journal);
     }
 
     @Override
@@ -168,9 +168,9 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         private final BooleanSupplier isLoadedCheck;
         private final Journal journal;
 
-        public DelayedCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder, SimulatedDelayedExecutorService executor, BooleanSupplier isLoadedCheck, Journal journal, Scheduler scheduler)
+        public DelayedCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder, SimulatedDelayedExecutorService executor, BooleanSupplier isLoadedCheck, Journal journal)
         {
-            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder, scheduler);
+            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder);
             this.executor = executor;
             this.isLoadedCheck = isLoadedCheck;
             this.journal = journal;
@@ -201,7 +201,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
 
         private static CommandStore.Factory factory(SimulatedDelayedExecutorService executor, BooleanSupplier isLoadedCheck, Journal journal)
         {
-            return (id, time, agent, store, progressLogFactory, listenersFactory, rangesForEpoch, scheduler) -> new DelayedCommandStore(id, time, agent, store, progressLogFactory, listenersFactory, rangesForEpoch, executor, isLoadedCheck, journal, scheduler);
+            return (id, time, agent, store, progressLogFactory, listenersFactory, rangesForEpoch) -> new DelayedCommandStore(id, time, agent, store, progressLogFactory, listenersFactory, rangesForEpoch, executor, isLoadedCheck, journal);
         }
 
         @Override

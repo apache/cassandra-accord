@@ -26,6 +26,7 @@ import accord.primitives.Ranges;
 import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
 import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
 
 /**
  * A marker interface for a shard instance's storage, that is passed to
@@ -111,6 +112,6 @@ public interface DataStore
     }
 
     FetchResult fetch(Node node, SafeCommandStore safeStore, Ranges ranges, SyncPoint syncPoint, FetchRanges callback);
-    default void snapshot() {};
+    default AsyncResult<Void> snapshot(Ranges ranges) { return AsyncResults.success(null); };
     default void restoreFromSnapshot() {};
 }

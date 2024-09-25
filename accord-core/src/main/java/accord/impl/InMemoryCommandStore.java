@@ -42,7 +42,6 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableSortedMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,19 +50,16 @@ import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.LocalListeners;
 import accord.api.ProgressLog;
-import accord.api.Scheduler;
 import accord.impl.progresslog.DefaultProgressLog;
 import accord.local.Cleanup;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.CommandStores.RangesForEpoch;
 import accord.local.Commands;
-import accord.local.DurableBefore;
 import accord.local.KeyHistory;
 import accord.local.Node;
 import accord.local.NodeTimeService;
 import accord.local.PreLoadContext;
-import accord.local.RedundantBefore;
 import accord.local.RedundantStatus;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
@@ -90,8 +86,6 @@ import accord.primitives.TxnId;
 import accord.utils.Invariants;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
-import accord.utils.async.AsyncResult;
-import accord.utils.async.AsyncResults;
 
 import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestDep.WITH;
@@ -129,54 +123,9 @@ public abstract class InMemoryCommandStore extends CommandStore
 
     private InMemorySafeStore current;
 
-    // To simulate the delay in simulatedAsyncPersist
-    private final Scheduler scheduler;
-
-    private static final class SimulatedFieldPersister<T> implements FieldPersister<T>
+    public InMemoryCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
     {
-        private T lastValue;
-        private final Scheduler scheduler;
-        private final Node node;
-        private final int id;
-        public SimulatedFieldPersister(Scheduler scheduler, T defaultValue, Node node, int id)
-        {
-            this.scheduler = scheduler;
-            this.lastValue = defaultValue;
-            this.node = node;
-            this.id = id;
-        }
-
-        public AsyncResult<?> persist(CommandStore store, T toPersist)
-        {
-            System.out.println("Persisting for " + node.id() + "-store-" + id);
-            AsyncResult.Settable<?> result = AsyncResults.settable();
-            scheduler.once(() -> {
-                lastValue = toPersist;
-                result.trySuccess(null);
-            }, 100, TimeUnit.MICROSECONDS);
-            return result;
-        }
-
-        public T restore()
-        {
-            return lastValue;
-        }
-    }
-
-    public InMemoryCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder, Scheduler scheduler)
-    {
-        super(id,
-              time,
-              agent,
-              store,
-              progressLogFactory,
-              listenersFactory,
-              epochUpdateHolder,
-              new SimulatedFieldPersister<>(scheduler, DurableBefore.EMPTY, (Node) time, id),
-              new SimulatedFieldPersister<>(scheduler, RedundantBefore.EMPTY, (Node) time, id),
-              new SimulatedFieldPersister<>(scheduler, ImmutableSortedMap.of(TxnId.NONE, Ranges.EMPTY), (Node) time, id),
-              new SimulatedFieldPersister<>(scheduler, ImmutableSortedMap.of(TxnId.NONE, Ranges.EMPTY), (Node) time, id));
-        this.scheduler = scheduler;
+        super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder);
     }
 
     protected boolean canExposeUnloaded()
@@ -418,59 +367,57 @@ public abstract class InMemoryCommandStore extends CommandStore
     }
 
     @Override
-    public AsyncChain<Void> markShardDurable(SafeCommandStore safeStore, TxnId syncId, Ranges ranges)
+    public void markShardDurable(SafeCommandStore safeStore, TxnId syncId, Ranges ranges)
     {
-        // We know it completes immediately for InMemoryCommandStore
-        AsyncChain<Void> markShardDurableChain = super.markShardDurable(safeStore, syncId, ranges);
-        markShardDurableChain = markShardDurableChain.map(ignored ->
-         {
-             if (!rangeCommands.containsKey(syncId))
-                 historicalRangeCommands.merge(syncId, ranges, Ranges::with);
+        super.markShardDurable(safeStore, syncId, ranges);
+        markShardDurable(syncId, ranges);
+    }
 
-             // TODO (now): apply on retrieval
-             historicalRangeCommands.entrySet().removeIf(next -> next.getKey().compareTo(syncId) < 0 && next.getValue().intersects(ranges));
-             rangeCommands.entrySet().removeIf(tx -> {
-                 if (tx.getKey().compareTo(syncId) >= 0)
-                     return false;
-                 Ranges newRanges = tx.getValue().ranges.without(ranges);
-                 if (!newRanges.isEmpty())
-                 {
-                     tx.getValue().ranges = newRanges;
-                     return false;
-                 }
-                 else
-                 {
-                     maxRedundant = Timestamp.nonNullOrMax(maxRedundant, tx.getValue().command.value().executeAt());
-                     return true;
-                 }
-             });
+    private void markShardDurable(TxnId syncId, Ranges ranges)
+    {
+        if (!rangeCommands.containsKey(syncId))
+            historicalRangeCommands.merge(syncId, ranges, Ranges::with);
 
-             // verify we're clearing the progress log
-             ((Node)time).scheduler().once(() -> {
-                 DefaultProgressLog progressLog = (DefaultProgressLog) this.progressLog;
-                 commands.headMap(syncId, false).forEach((id, cmd) -> {
-                     Command command = cmd.value();
-                     if (!command.hasBeen(PreCommitted)) return;
-                     if (!command.txnId().kind().isGloballyVisible()) return;
+        // TODO (now): apply on retrieval
+        historicalRangeCommands.entrySet().removeIf(next -> next.getKey().compareTo(syncId) < 0 && next.getValue().intersects(ranges));
+        rangeCommands.entrySet().removeIf(tx -> {
+            if (tx.getKey().compareTo(syncId) >= 0)
+                return false;
+            Ranges newRanges = tx.getValue().ranges.without(ranges);
+            if (!newRanges.isEmpty())
+            {
+                tx.getValue().ranges = newRanges;
+                return false;
+            }
+            else
+            {
+                maxRedundant = Timestamp.nonNullOrMax(maxRedundant, tx.getValue().command.value().executeAt());
+                return true;
+            }
+        });
 
-                     Ranges allRanges = unsafeRangesForEpoch().allBetween(id.epoch(), command.executeAtOrTxnId().epoch());
-                     boolean done = command.hasBeen(Truncated);
-                     if (!done)
-                     {
-                         if (redundantBefore().status(cmd.txnId, command.executeAtOrTxnId(), command.route()) == RedundantStatus.PRE_BOOTSTRAP_OR_STALE)
-                             return;
+        // verify we're clearing the progress log
+        ((Node)time).scheduler().once(() -> {
+            DefaultProgressLog progressLog = (DefaultProgressLog) this.progressLog;
+            commands.headMap(syncId, false).forEach((id, cmd) -> {
+                Command command = cmd.value();
+                if (!command.hasBeen(PreCommitted)) return;
+                if (!command.txnId().kind().isGloballyVisible()) return;
 
-                         Route<?> route = cmd.value().route().slice(allRanges);
-                         done = !route.isEmpty() && ranges.containsAll(route);
-                     }
+                Ranges allRanges = unsafeRangesForEpoch().allBetween(id.epoch(), command.executeAtOrTxnId().epoch());
+                boolean done = command.hasBeen(Truncated);
+                if (!done)
+                {
+                    if (redundantBefore().status(cmd.txnId, command.executeAtOrTxnId(), command.route()) == RedundantStatus.PRE_BOOTSTRAP_OR_STALE)
+                        return;
 
-                     if (done) Invariants.checkState(progressLog.get(id) == null);
-                 });
-             }, 5L, TimeUnit.SECONDS);
-             return null;
-         }, this);
+                    Route<?> route = cmd.value().route().slice(allRanges);
+                    done = !route.isEmpty() && ranges.containsAll(route);
+                }
 
-        return markShardDurableChain;
+                if (done) Invariants.checkState(progressLog.get(id) == null);
+            });
+        }, 5L, TimeUnit.SECONDS);
     }
 
     protected InMemorySafeStore createSafeStore(PreLoadContext context, RangesForEpoch ranges,
@@ -1081,9 +1028,9 @@ public abstract class InMemoryCommandStore extends CommandStore
         Runnable active = null;
         final Queue<Runnable> queue = new ConcurrentLinkedQueue<>();
 
-        public Synchronized(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder, Scheduler scheduler)
+        public Synchronized(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
         {
-            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder, scheduler);
+            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder);
         }
 
         private synchronized void maybeRun()
@@ -1173,9 +1120,9 @@ public abstract class InMemoryCommandStore extends CommandStore
         private Thread thread; // when run in the executor this will be non-null, null implies not running in this store
         private final ExecutorService executor;
 
-        public SingleThread(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder, Scheduler scheduler)
+        public SingleThread(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
         {
-            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder, scheduler);
+            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder);
             this.executor = Executors.newSingleThreadExecutor(r -> {
                 Thread thread = new Thread(r);
                 thread.setName(CommandStore.class.getSimpleName() + '[' + time.id() + ']');
@@ -1257,9 +1204,9 @@ public abstract class InMemoryCommandStore extends CommandStore
             }
         }
 
-        public Debug(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder, Scheduler scheduler)
+        public Debug(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
         {
-            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder, scheduler);
+            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder);
         }
 
         @Override
@@ -1382,16 +1329,6 @@ public abstract class InMemoryCommandStore extends CommandStore
         commandsForKey.clear();
         rangeCommands.clear();
         historicalRangeCommands.clear();
-
-        durableBeforePersistentField.clearAndRestore();
-        redundantBeforePersistentField.clearAndRestore();
-        bootstrapBeganAtPersistentField.clearAndRestore();
-        safeToReadPersistentField.clearAndRestore();
-    }
-
-    protected void setRedundantBefore(RedundantBefore newRedundantBefore)
-    {
-        super.setRedundantBefore(newRedundantBefore);
     }
 
     public interface Loader

@@ -230,7 +230,7 @@ public abstract class SafeCommandStore
         if (newSaveStatus == Applied && oldSaveStatus != Applied)
         {
             Ranges ranges = updated.route().slice(ranges().all(), Minimal).toRanges();
-            commandStore().markExclusiveSyncPointLocallyApplied(this.commandStore(), txnId, ranges);
+            commandStore().markExclusiveSyncPointLocallyApplied(this, txnId, ranges);
         }
     }
 

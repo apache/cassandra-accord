@@ -909,11 +909,7 @@ public class CommandsForKeyTest
                   null,
                   ignore -> new ProgressLog.NoOpProgressLog(),
                   ignore -> new DefaultLocalListeners(new DefaultRemoteListeners((a, b, c, d, e)->{}), DefaultNotifySink.INSTANCE),
-                  new EpochUpdateHolder(),
-                  (ignored0, ignored1) -> AsyncResults.SUCCESS_VOID,
-                  (ignored0, ignored1) -> AsyncResults.SUCCESS_VOID,
-                  (ignored0, ignored1) -> AsyncResults.SUCCESS_VOID,
-                  (ignored0, ignored1) -> AsyncResults.SUCCESS_VOID);
+                  new EpochUpdateHolder());
             this.pruneInterval = pruneInterval;
             this.pruneHlcDelta = pruneHlcDelta;
         }
