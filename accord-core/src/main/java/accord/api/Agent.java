@@ -19,6 +19,7 @@
 package accord.api;
 
 import javax.annotation.Nonnull;
+
 import java.util.concurrent.TimeUnit;
 
 import accord.api.ProgressLog.BlockedUntil;
@@ -35,7 +36,7 @@ import accord.topology.Topologies;
 
 /**
  * Facility for augmenting node behaviour at specific points
- * <p>
+ *
  * TODO (expected): rationalise LocalConfig and Agent
  */
 public interface Agent extends UncaughtExceptionListener
@@ -44,7 +45,7 @@ public interface Agent extends UncaughtExceptionListener
      * For use by implementations to decide what to do about successfully recovered transactions.
      * Specifically intended to define if and how they should inform clients of the result.
      * e.g. in Maelstrom we send the full result directly, in other impls we may simply acknowledge success via the coordinator
-     * <p>
+     *
      * Note: may be invoked multiple times in different places
      */
     void onRecover(Node node, Result success, Throwable fail);
@@ -54,7 +55,7 @@ public interface Agent extends UncaughtExceptionListener
      * committed for the same transaction. This is a protocol consistency violation, potentially leading to non-linearizable
      * histories. In test cases this is used to fail the transaction, whereas in real systems this likely will be used for
      * reporting the violation, as it is no more correct at this point to refuse the operation than it is to complete it.
-     * <p>
+     *
      * Should throw an exception if the inconsistent timestamp should not be applied
      */
     void onInconsistentTimestamp(Command command, Timestamp prev, Timestamp next);
@@ -64,15 +65,12 @@ public interface Agent extends UncaughtExceptionListener
     /**
      * Invoked with the keys (but not ranges) that have all dependent transactions in the applied
      * state at this node as of some TxnId. No guarantees are made about other nodes.
-     * <p>
+     *
      * Useful for migrations to/from Accord where you want to know there are no in flight
      * transactions in Accord that might still execute, and that it is safe to read
      * outside of Accord.
      */
-    default void onLocalBarrier(@Nonnull Seekables<?, ?> keysOrRanges, @Nonnull TxnId txnId)
-    {
-    }
-
+    default void onLocalBarrier(@Nonnull Seekables<?, ?> keysOrRanges, @Nonnull TxnId txnId) {}
     void onStale(Timestamp staleSince, Ranges ranges);
 
     @Override
@@ -87,7 +85,7 @@ public interface Agent extends UncaughtExceptionListener
 
     /**
      * Controls pruning of CommandsForKey
-     * <p>
+     *
      * The timestamp delta between the prune point and any pruned TxnId. This works primarily to minimise the
      * chance of encountering a TxnId that precedes prunedBefore.
      */
@@ -95,7 +93,7 @@ public interface Agent extends UncaughtExceptionListener
 
     /**
      * Controls pruning of CommandsForKey.
-     * <p>
+     *
      * The number of entries before the candidate prune point that we require before we try to prune.
      * This only works to reduce the time wasted pruning when there is limited benefit.
      */
@@ -117,27 +115,24 @@ public interface Agent extends UncaughtExceptionListener
      * the number of messages we exchange. These nodes should be picked in a fashion so that there is a chain
      * connecting all replicas of a shard together, e.g. in a ring picking the replicas directly behind you in the ring.
      */
-    default Topologies selectPreferred(Node.Id from, Topologies to)
-    {
-        return to;
-    }
+    default Topologies selectPreferred(Node.Id from, Topologies to) { return to; }
 
     long replyTimeout(ReplyContext replyContext, TimeUnit units);
 
     /**
-     * This method permits implementations to configure the time at which a local home shard will attempt
-     * to coordinate a transaction to completion.
-     * <p>
-     * This should aim to prevent two home replicas from attempting to initiate coordination at the same time.
+     *  This method permits implementations to configure the time at which a local home shard will attempt
+     *  to coordinate a transaction to completion.
+     *
+     *  This should aim to prevent two home replicas from attempting to initiate coordination at the same time.
      */
     long attemptCoordinationDelay(Node node, SafeCommandStore safeStore, TxnId txnId, TimeUnit units, int retryCount);
 
     /**
-     * This method permits implementations to configure a delay for waiting to attempt to progress the local
-     * state machine for a transaction by querying its remote peers.
-     * <p>
-     * This method should only attempt to minimise wasted work that would anyway be achieved by the transaction's
-     * coordinator, while ensuring prompt when the coordinator considers the transaction to be durable.
+     *  This method permits implementations to configure a delay for waiting to attempt to progress the local
+     *  state machine for a transaction by querying its remote peers.
+     *
+     *  This method should only attempt to minimise wasted work that would anyway be achieved by the transaction's
+     *  coordinator, while ensuring prompt when the coordinator considers the transaction to be durable.
      */
     long seekProgressDelay(Node node, SafeCommandStore safeStore, TxnId txnId, int retryCount, BlockedUntil blockedUntil, TimeUnit units);
 
