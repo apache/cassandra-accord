@@ -40,7 +40,6 @@ import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.LocalListeners;
 import accord.api.ProgressLog;
-import accord.api.Scheduler;
 import accord.impl.InMemoryCommandStore;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.InMemorySafeCommand;

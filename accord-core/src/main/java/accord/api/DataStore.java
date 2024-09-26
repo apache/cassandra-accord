@@ -27,7 +27,6 @@ import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.utils.async.AsyncResult;
-import accord.utils.async.AsyncResults;
 
 /**
  * A marker interface for a shard instance's storage, that is passed to

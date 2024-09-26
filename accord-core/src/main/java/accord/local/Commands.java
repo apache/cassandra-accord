@@ -75,9 +75,7 @@ import static accord.local.Status.PreApplied;
 import static accord.local.Status.PreCommitted;
 import static accord.local.Status.Stable;
 import static accord.local.Status.Truncated;
-import static accord.primitives.Routables.Slice.Minimal;
 import static accord.primitives.Route.isFullRoute;
-import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static accord.utils.Invariants.illegalState;
 
 public class Commands

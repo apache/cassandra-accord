@@ -67,7 +67,6 @@ import accord.impl.CoordinateDurabilityScheduling;
 import accord.impl.DefaultLocalListeners;
 import accord.impl.DefaultRemoteListeners;
 import accord.impl.DefaultRequestTimeouts;
-import accord.impl.InMemoryCommandStore;
 import accord.impl.InMemoryCommandStore.GlobalCommand;
 import accord.impl.MessageListener;
 import accord.impl.PrefixedIntHashKey;
@@ -104,7 +103,6 @@ import accord.topology.TopologyRandomizer;
 import accord.utils.Gens;
 import accord.utils.Invariants;
 import accord.utils.RandomSource;
-import accord.utils.ReducingRangeMap;
 import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResult;
 
