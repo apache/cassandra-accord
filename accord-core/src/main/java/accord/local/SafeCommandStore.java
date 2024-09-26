@@ -18,6 +18,7 @@
 
 package accord.local;
 
+import java.util.NavigableMap;
 import javax.annotation.Nullable;
 
 import accord.api.Agent;
@@ -246,6 +247,36 @@ public abstract class SafeCommandStore
             return;
 
         commandStore().updateMaxConflicts(prev, updated);
+    }
+
+    public void upsertRedundantBefore(RedundantBefore addRedundantBefore)
+    {
+        commandStore().upsertRedundantBefore(addRedundantBefore);
+    }
+
+    public void upsertSetBootstrapBeganAt(NavigableMap<TxnId, Ranges> newBootstrapBeganAt)
+    {
+        commandStore().unsafeSetBootstrapBeganAt(newBootstrapBeganAt);
+    }
+
+    public void upsertDurableBefore(DurableBefore addDurableBefore)
+    {
+        commandStore().upsertDurableBefore(addDurableBefore);
+    }
+
+    public void upsertSafeToRead(NavigableMap<Timestamp, Ranges> newSafeToRead)
+    {
+        commandStore().unsafeSetSafeToRead(newSafeToRead);
+    }
+
+    public void setRangesForEpoch(CommandStores.RangesForEpoch rangesForEpoch)
+    {
+        commandStore().unsafeSetRangesForEpoch(rangesForEpoch);
+    }
+
+    public void upsertRejectBefore(TxnId txnId, Ranges ranges)
+    {
+        commandStore().upsertRejectBefore(txnId, ranges);
     }
 
     public void updateCommandsForKey(Command prev, Command next)

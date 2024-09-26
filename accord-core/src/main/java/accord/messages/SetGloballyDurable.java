@@ -52,7 +52,7 @@ public class SetGloballyDurable extends AbstractEpochRequest<SimpleReply>
         DurableBefore cur = safeStore.commandStore().durableBefore();
         DurableBefore upd = DurableBefore.merge(durableBefore, cur);
         // This is done asynchronously
-        safeStore.commandStore().upsertDurableBefore(upd);
+        safeStore.upsertDurableBefore(upd);
         return Ok;
     }
 

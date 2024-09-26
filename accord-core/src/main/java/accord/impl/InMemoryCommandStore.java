@@ -479,8 +479,8 @@ public abstract class InMemoryCommandStore extends CommandStore
     {
         if (current != null)
             throw illegalState("Another operation is in progress or it's store was not cleared");
-        RangesForEpoch rangesForEpoch = updateRangesForEpoch();
         current = createSafeStore(context, rangesForEpoch);
+        updateRangesForEpoch(current);
         return current;
     }
 
@@ -663,7 +663,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         protected final Map<TxnId, InMemorySafeCommand> commands;
         private final Map<RoutableKey, InMemorySafeTimestampsForKey> timestampsForKey;
         private final Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKey;
-        private final RangesForEpoch ranges;
+        private RangesForEpoch ranges;
 
         public InMemorySafeStore(InMemoryCommandStore commandStore,
                                  RangesForEpoch ranges,
@@ -677,7 +677,7 @@ public abstract class InMemoryCommandStore extends CommandStore
             this.commands = commands;
             this.commandsForKey = commandsForKey;
             this.timestampsForKey = timestampsForKey;
-            this.ranges = Invariants.nonNull(ranges);
+            this.ranges = ranges;
         }
 
         @Override
@@ -795,6 +795,13 @@ public abstract class InMemoryCommandStore extends CommandStore
         public RangesForEpoch ranges()
         {
             return ranges;
+        }
+
+        @Override
+        public void setRangesForEpoch(RangesForEpoch rangesForEpoch)
+        {
+            super.setRangesForEpoch(rangesForEpoch);
+            ranges = rangesForEpoch;
         }
 
         @Override

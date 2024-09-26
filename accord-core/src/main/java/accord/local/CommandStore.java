@@ -33,7 +33,6 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import javax.annotation.Nullable;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSortedMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -209,20 +208,19 @@ public abstract class CommandStore implements AgentExecutor
         return agent;
     }
 
-    public RangesForEpoch updateRangesForEpoch()
+    public void updateRangesForEpoch(SafeCommandStore safeStore)
     {
         EpochUpdate update = epochUpdateHolder.get();
         if (update == null)
-            return rangesForEpoch;
+            return;
 
         update = epochUpdateHolder.getAndSet(null);
         if (!update.addGlobalRanges.isEmpty())
-            upsertDurableBefore(DurableBefore.create(update.addGlobalRanges, TxnId.NONE, TxnId.NONE));
+            safeStore.upsertDurableBefore(DurableBefore.create(update.addGlobalRanges, TxnId.NONE, TxnId.NONE));
         if (update.addRedundantBefore.size() > 0)
-            upsertRedundantBefore(update.addRedundantBefore);
+            safeStore.upsertRedundantBefore(update.addRedundantBefore);
         if (update.newRangesForEpoch != null)
-            rangesForEpoch = update.newRangesForEpoch;
-        return rangesForEpoch;
+            safeStore.setRangesForEpoch(update.newRangesForEpoch);
     }
 
     public RangesForEpoch unsafeRangesForEpoch()
@@ -250,8 +248,7 @@ public abstract class CommandStore implements AgentExecutor
 
     protected abstract void registerHistoricalTransactions(Deps deps, SafeCommandStore safeStore);
 
-    // implementations are expected to override this for persistence
-    public void upsertDurableBefore(DurableBefore addDurableBefore)
+    protected void upsertDurableBefore(DurableBefore addDurableBefore)
     {
         durableBefore = DurableBefore.merge(durableBefore, addDurableBefore);
     }
@@ -261,6 +258,7 @@ public abstract class CommandStore implements AgentExecutor
         this.rejectBefore = newRejectBefore;
     }
 
+    // Should be called _only_ via safe command store
     protected void upsertRedundantBefore(RedundantBefore addRedundantBefore)
     {
         redundantBefore = RedundantBefore.merge(redundantBefore, addRedundantBefore);
@@ -274,6 +272,13 @@ public abstract class CommandStore implements AgentExecutor
     protected void unsafeSetRedundantBefore(RedundantBefore newRedundantBefore)
     {
         redundantBefore = newRedundantBefore;
+    }
+
+    protected void upsertRejectBefore(TxnId txnId, Ranges ranges)
+    {
+        ReducingRangeMap<Timestamp> newRejectBefore = rejectBefore != null ? rejectBefore : new ReducingRangeMap<>();
+        newRejectBefore = ReducingRangeMap.add(newRejectBefore, ranges, txnId, Timestamp::max);
+        unsafeSetRejectBefore(newRejectBefore);
     }
 
     /**
@@ -312,9 +317,7 @@ public abstract class CommandStore implements AgentExecutor
     {
         // TODO (desired): narrow ranges to those that are owned
         Invariants.checkArgument(txnId.kind() == ExclusiveSyncPoint);
-        ReducingRangeMap<Timestamp> newRejectBefore = rejectBefore != null ? rejectBefore : new ReducingRangeMap<>();
-        newRejectBefore = ReducingRangeMap.add(newRejectBefore, ranges, txnId, Timestamp::max);
-        unsafeSetRejectBefore(newRejectBefore);
+        safeStore.upsertRejectBefore(txnId, ranges);
     }
 
     public final void markExclusiveSyncPointLocallyApplied(SafeCommandStore safeStore, TxnId txnId, Ranges ranges)
@@ -515,10 +518,11 @@ public abstract class CommandStore implements AgentExecutor
 
     final void markBootstrapping(SafeCommandStore safeStore, TxnId globalSyncId, Ranges ranges)
     {
-        unsafeSetBootstrapBeganAt(bootstrap(globalSyncId, ranges, bootstrapBeganAt));
+        safeStore.upsertSetBootstrapBeganAt(bootstrap(globalSyncId, ranges, bootstrapBeganAt));
         RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, TxnId.NONE, globalSyncId);
-        upsertRedundantBefore(addRedundantBefore);
-        upsertDurableBefore(DurableBefore.create(ranges, TxnId.NONE, TxnId.NONE));
+        safeStore.upsertRedundantBefore(addRedundantBefore);
+        safeStore.upsertDurableBefore(DurableBefore.create(ranges, TxnId.NONE, TxnId.NONE));
+        // TODO: can we use `upsert` for notifications?
         updatedRedundantBefore(safeStore, globalSyncId, ranges);
     }
 
@@ -527,9 +531,9 @@ public abstract class CommandStore implements AgentExecutor
     {
         final Ranges slicedRanges = durableRanges.slice(safeStore.ranges().allUntil(globalSyncId.epoch()), Minimal);
         RedundantBefore addShardRedundant = RedundantBefore.create(slicedRanges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, globalSyncId, TxnId.NONE, TxnId.NONE);
-        upsertRedundantBefore(addShardRedundant);
+        safeStore.upsertRedundantBefore(addShardRedundant);
         DurableBefore addDurableBefore = DurableBefore.create(slicedRanges, globalSyncId, globalSyncId);
-        upsertDurableBefore(addDurableBefore);
+        safeStore.upsertDurableBefore(addDurableBefore);
         updatedRedundantBefore(safeStore, globalSyncId, slicedRanges);
         safeStore = safeStore; // make unusable in lambda
         safeStore.dataStore().snapshot(slicedRanges, globalSyncId).begin((success, fail) -> {
@@ -541,7 +545,7 @@ public abstract class CommandStore implements AgentExecutor
 
             execute(PreLoadContext.empty(), safeStore0 -> {
                 RedundantBefore addGc = RedundantBefore.create(slicedRanges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, globalSyncId, TxnId.NONE);
-                upsertRedundantBefore(addGc);
+                safeStore0.upsertRedundantBefore(addGc);
             });
         });
     }
@@ -569,9 +573,10 @@ public abstract class CommandStore implements AgentExecutor
         agent.onStale(staleSince, ranges);
 
         RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE, staleUntilAtLeast);
-        upsertRedundantBefore(addRedundantBefore);
+        safeStore.upsertRedundantBefore(addRedundantBefore);
         // find which ranges need to bootstrap, subtracting those already in progress that cover the id
 
+        // safeStore.upsertUnsafeToRead(ranges);
         markUnsafeToRead(ranges);
     }
 
@@ -583,19 +588,24 @@ public abstract class CommandStore implements AgentExecutor
     // with safeToRead
     Supplier<EpochReady> initialise(long epoch, Ranges ranges)
     {
-        // Merge in a base for any ranges that needs to be covered
-        DurableBefore addDurableBefore = DurableBefore.create(ranges, TxnId.NONE, TxnId.NONE);
-        upsertDurableBefore(addDurableBefore);
-        // TODO (review): Convoluted check to not overwrite existing bootstraps with TxnId.NONE
-        // If loading from disk didn't finish before this then we might initialize the range at TxnId.NONE?
-        // Does CommandStores.topology ensure that doesn't happen? Is it fine if it does because it will get superseded?
-        Ranges newBootstrapRanges = ranges;
-        for (Ranges existing : bootstrapBeganAt.values())
-            newBootstrapRanges = newBootstrapRanges.without(existing);
-        if (!newBootstrapRanges.isEmpty())
-            bootstrapBeganAt = bootstrap(TxnId.NONE, newBootstrapRanges, bootstrapBeganAt);
-        safeToRead = purgeAndInsert(safeToRead, TxnId.NONE, ranges);
-        return () -> new EpochReady(epoch, DONE, DONE, DONE, DONE);
+        return () -> {
+            AsyncResult<Void> done = execute(empty(), (safeStore) -> {
+                // Merge in a base for any ranges that needs to be covered
+                DurableBefore addDurableBefore = DurableBefore.create(ranges, TxnId.NONE, TxnId.NONE);
+                safeStore.upsertDurableBefore(addDurableBefore);
+                // TODO (review): Convoluted check to not overwrite existing bootstraps with TxnId.NONE
+                // If loading from disk didn't finish before this then we might initialize the range at TxnId.NONE?
+                // Does CommandStores.topology ensure that doesn't happen? Is it fine if it does because it will get superseded?
+                Ranges newBootstrapRanges = ranges;
+                for (Ranges existing : bootstrapBeganAt.values())
+                    newBootstrapRanges = newBootstrapRanges.without(existing);
+                if (!newBootstrapRanges.isEmpty())
+                    bootstrapBeganAt = bootstrap(TxnId.NONE, newBootstrapRanges, bootstrapBeganAt);
+                safeStore.upsertSafeToRead(purgeAndInsert(safeToRead, TxnId.NONE, ranges));
+            }).beginAsResult();
+
+            return new EpochReady(epoch, DONE, DONE, DONE, DONE);
+        };
     }
 
     public final Ranges safeToReadAt(Timestamp at)
@@ -618,12 +628,6 @@ public abstract class CommandStore implements AgentExecutor
     {
         return durableBefore;
     }
-
-    @VisibleForTesting
-    public final NavigableMap<TxnId, Ranges> bootstrapBeganAt() { return bootstrapBeganAt; }
-
-    @VisibleForTesting
-    public NavigableMap<Timestamp, Ranges> safeToRead() { return safeToRead; }
 
     public final boolean isRejectedIfNotPreAccepted(TxnId txnId, Unseekables<?> participants)
     {
@@ -773,16 +777,22 @@ public abstract class CommandStore implements AgentExecutor
         return redundantBefore.status(minimumDependencyId, executeAt, participantsOfWaitingTxn).compareTo(RedundantStatus.PARTIALLY_PRE_BOOTSTRAP_OR_STALE) >= 0;
     }
 
-    final synchronized void markUnsafeToRead(Ranges ranges)
+    final void markUnsafeToRead(Ranges ranges)
     {
         if (safeToRead.values().stream().anyMatch(r -> r.intersects(ranges)))
-            unsafeSetSafeToRead(purgeHistory(safeToRead, ranges));
+        {
+            execute(empty(), safeStore -> {
+                safeStore.upsertSafeToRead(purgeHistory(safeToRead, ranges));
+            });
+        }
     }
 
     final synchronized void markSafeToRead(Timestamp forBootstrapAt, Timestamp at, Ranges ranges)
     {
-        Ranges validatedSafeToRead = redundantBefore.validateSafeToRead(forBootstrapAt, ranges);
-        unsafeSetSafeToRead(purgeAndInsert(safeToRead, at, validatedSafeToRead));
+        execute(empty(), safeStore -> {
+            Ranges validatedSafeToRead = redundantBefore.validateSafeToRead(forBootstrapAt, ranges);
+            safeStore.upsertSafeToRead(purgeAndInsert(safeToRead, at, validatedSafeToRead));
+        });
     }
 
     protected static ImmutableSortedMap<TxnId, Ranges> bootstrap(TxnId at, Ranges ranges, NavigableMap<TxnId, Ranges> bootstrappedAt)
