@@ -141,6 +141,18 @@ public abstract class CommandStores
     // TODO (expected): merge with RedundantBefore, and standardise executeRanges() to treat removing stale ranges the same as adding new epoch ranges
     public static class RangesForEpoch
     {
+        public static class Snapshot
+        {
+            public final long[] epochs;
+            public final Ranges[] ranges;
+
+            public Snapshot(long[] epochs, Ranges[] ranges)
+            {
+                this.epochs = epochs;
+                this.ranges = ranges;
+            }
+        }
+
         final long[] epochs;
         final Ranges[] ranges;
         final CommandStore store;
@@ -157,6 +169,11 @@ public abstract class CommandStores
             this.epochs = epochs;
             this.ranges = ranges;
             this.store = store;
+        }
+
+        public Snapshot snapshot()
+        {
+            return new Snapshot(epochs, ranges);
         }
 
         public RangesForEpoch withRanges(long epoch, Ranges latestRanges)

@@ -33,6 +33,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSortedMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -206,6 +207,12 @@ public abstract class CommandStore implements AgentExecutor
     public Agent agent()
     {
         return agent;
+    }
+
+    @VisibleForTesting // TODO: check if this is right
+    public void updateRangesForEpoch()
+    {
+        execute(empty(), this::updateRangesForEpoch).beginAsResult();
     }
 
     public void updateRangesForEpoch(SafeCommandStore safeStore)
@@ -633,6 +640,12 @@ public abstract class CommandStore implements AgentExecutor
     {
         return durableBefore;
     }
+
+    @VisibleForTesting
+    public final NavigableMap<TxnId, Ranges> bootstrapBeganAt() { return bootstrapBeganAt; }
+
+    @VisibleForTesting
+    public NavigableMap<Timestamp, Ranges> safeToRead() { return safeToRead; }
 
     public final boolean isRejectedIfNotPreAccepted(TxnId txnId, Unseekables<?> participants)
     {
