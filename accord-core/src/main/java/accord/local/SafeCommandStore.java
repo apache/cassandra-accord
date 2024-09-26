@@ -254,9 +254,9 @@ public abstract class SafeCommandStore
         commandStore().upsertRedundantBefore(addRedundantBefore);
     }
 
-    public void upsertSetBootstrapBeganAt(NavigableMap<TxnId, Ranges> newBootstrapBeganAt)
+    public void upsertSetBootstrapBeganAt(TxnId globalSyncId, Ranges ranges)
     {
-        commandStore().unsafeSetBootstrapBeganAt(newBootstrapBeganAt);
+        commandStore().upsertSetBootstrapBeganAt(globalSyncId, ranges);
     }
 
     public void upsertDurableBefore(DurableBefore addDurableBefore)

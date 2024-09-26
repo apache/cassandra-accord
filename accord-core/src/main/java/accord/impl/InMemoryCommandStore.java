@@ -1468,40 +1468,4 @@ public abstract class InMemoryCommandStore extends CommandStore
             historicalRangeCommands.merge(txnId, ranges.slice(allRanges), Ranges::with);
         });
     }
-
-    @Override
-    public void unsafeSetRangesForEpoch(RangesForEpoch newRangesForEpoch)
-    {
-        super.unsafeSetRangesForEpoch(newRangesForEpoch);
-    }
-
-    @Override
-    public void unsafeSetDurableBefore(DurableBefore newDurableBefore)
-    {
-        super.unsafeSetDurableBefore(newDurableBefore);
-    }
-
-    @Override
-    public void unsafeSetRedundantBefore(RedundantBefore newRedundantBefore)
-    {
-        super.unsafeSetRedundantBefore(newRedundantBefore);
-    }
-
-    @Override
-    public void unsafeSetRejectBefore(ReducingRangeMap<Timestamp> newRejectBefore)
-    {
-        super.unsafeSetRejectBefore(newRejectBefore);
-    }
-
-    @Override
-    public void unsafeSetSafeToRead(NavigableMap<Timestamp, Ranges> newSafeToRead)
-    {
-        super.unsafeSetSafeToRead(newSafeToRead);
-    }
-
-    @Override
-    public void unsafeSetBootstrapBeganAt(NavigableMap<TxnId, Ranges> newBootstrapBeganAt)
-    {
-        super.unsafeSetBootstrapBeganAt(newBootstrapBeganAt);
-    }
 }

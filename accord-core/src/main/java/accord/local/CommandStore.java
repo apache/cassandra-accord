@@ -289,8 +289,14 @@ public abstract class CommandStore implements AgentExecutor
         this.safeToRead = newSafeToRead;
     }
 
+    public void upsertSetBootstrapBeganAt(TxnId globalSyncId, Ranges ranges)
+    {
+        unsafeSetBootstrapBeganAt(bootstrap(globalSyncId, ranges, bootstrapBeganAt));
+    }
+
     protected void unsafeSetBootstrapBeganAt(NavigableMap<TxnId, Ranges> newBootstrapBeganAt)
     {
+
         this.bootstrapBeganAt = newBootstrapBeganAt;
     }
 
@@ -518,7 +524,7 @@ public abstract class CommandStore implements AgentExecutor
 
     final void markBootstrapping(SafeCommandStore safeStore, TxnId globalSyncId, Ranges ranges)
     {
-        safeStore.upsertSetBootstrapBeganAt(bootstrap(globalSyncId, ranges, bootstrapBeganAt));
+        safeStore.upsertSetBootstrapBeganAt(globalSyncId, ranges);
         RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, TxnId.NONE, globalSyncId);
         safeStore.upsertRedundantBefore(addRedundantBefore);
         safeStore.upsertDurableBefore(DurableBefore.create(ranges, TxnId.NONE, TxnId.NONE));
@@ -576,7 +582,6 @@ public abstract class CommandStore implements AgentExecutor
         safeStore.upsertRedundantBefore(addRedundantBefore);
         // find which ranges need to bootstrap, subtracting those already in progress that cover the id
 
-        // safeStore.upsertUnsafeToRead(ranges);
         markUnsafeToRead(ranges);
     }
 
@@ -795,7 +800,7 @@ public abstract class CommandStore implements AgentExecutor
         });
     }
 
-    protected static ImmutableSortedMap<TxnId, Ranges> bootstrap(TxnId at, Ranges ranges, NavigableMap<TxnId, Ranges> bootstrappedAt)
+    public static ImmutableSortedMap<TxnId, Ranges> bootstrap(TxnId at, Ranges ranges, NavigableMap<TxnId, Ranges> bootstrappedAt)
     {
         Invariants.checkArgument(bootstrappedAt.lastKey().compareTo(at) < 0 || at == TxnId.NONE);
         if (at == TxnId.NONE)
