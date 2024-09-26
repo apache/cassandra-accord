@@ -709,7 +709,6 @@ public abstract class CommandStores
     {
         ShardHolder[] shards = current.shards;
         CommandStore[] all = new CommandStore[shards.length];
-        if (shards.length == 0) throw illegalState("Unable to get CommandStore; non defined");
         for (int i = 0; i < shards.length; i++)
             all[i] = shards[i].store;
         return all;
