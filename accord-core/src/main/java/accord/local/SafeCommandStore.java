@@ -250,19 +250,13 @@ public abstract class SafeCommandStore
         commandStore().updateMaxConflicts(prev, updated);
     }
 
-    protected void registerHistoricalTransactions(Deps deps)
-    {
-        commandStore().registerHistoricalTransactions(deps, this);
-    }
+    /**
+     * Methods that implementors can use to capture changes to auxiliary collections:
+     */
 
     public void upsertRedundantBefore(RedundantBefore addRedundantBefore)
     {
         commandStore().upsertRedundantBefore(addRedundantBefore);
-    }
-
-    public void upsertSetBootstrapBeganAt(TxnId globalSyncId, Ranges ranges)
-    {
-        commandStore().upsertSetBootstrapBeganAt(globalSyncId, ranges);
     }
 
     public void upsertDurableBefore(DurableBefore addDurableBefore)
@@ -270,7 +264,12 @@ public abstract class SafeCommandStore
         commandStore().upsertDurableBefore(addDurableBefore);
     }
 
-    public void unsafeSetSafeToRead(NavigableMap<Timestamp, Ranges> newSafeToRead)
+    public void upsertSetBootstrapBeganAt(TxnId globalSyncId, Ranges ranges)
+    {
+        commandStore().upsertSetBootstrapBeganAt(globalSyncId, ranges);
+    }
+
+    public void setSafeToRead(NavigableMap<Timestamp, Ranges> newSafeToRead)
     {
         commandStore().unsafeSetSafeToRead(newSafeToRead);
     }
@@ -278,6 +277,11 @@ public abstract class SafeCommandStore
     public void setRangesForEpoch(CommandStores.RangesForEpoch rangesForEpoch)
     {
         commandStore().unsafeSetRangesForEpoch(rangesForEpoch);
+    }
+
+    protected void registerHistoricalTransactions(Deps deps)
+    {
+        commandStore().registerHistoricalTransactions(deps, this);
     }
 
     public void updateCommandsForKey(Command prev, Command next)

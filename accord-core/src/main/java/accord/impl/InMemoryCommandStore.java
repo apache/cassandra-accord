@@ -1315,9 +1315,9 @@ public abstract class InMemoryCommandStore extends CommandStore
      * Replay and loading logic
      */
 
-    // For now, we are not clearing TimestampsForKey, since there is a plan to merge it into CommandsForKey.
-    // Similarly, there is a plan to use redundantBefore instead of maxRedundant, so we do not clear it here either.
-    @VisibleForTesting
+    // redundantBefore, durableBefore, newBootstrapBeganAt, safeToRead, rangesForEpoch are
+    // not replayed here. It is assumed that persistence on the application side will ensure
+    // they are brought up to latest values _before_ replay.
     public void clearForTesting()
     {
         Invariants.checkState(current == null);
