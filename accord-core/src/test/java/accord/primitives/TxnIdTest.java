@@ -16,30 +16,24 @@
  * limitations under the License.
  */
 
-package accord.coordinate;
+package accord.primitives;
 
-import static accord.utils.Invariants.checkState;
+import org.junit.jupiter.api.Test;
 
-public class EpochTimeout extends Timeout
+import accord.utils.AccordGens;
+import org.assertj.core.api.Assertions;
+
+import static accord.utils.Property.qt;
+
+class TxnIdTest
 {
-    public final long epoch;
-
-    public EpochTimeout(long epoch)
+    @Test
+    void stringSerde()
     {
-        super(null, null, "Timeout waiting for epoch " + epoch);
-        this.epoch = epoch;
-    }
+        qt().forAll(AccordGens.txnIds()).check(id -> {
+            Assertions.assertThat(TxnId.parse(id.toString())).isEqualTo(id);
 
-    private EpochTimeout(long epoch, EpochTimeout cause)
-    {
-        super(null, null, cause);
-        this.epoch = epoch;
-    }
-
-    @Override
-    public EpochTimeout wrap()
-    {
-        checkState(this.getClass() == EpochTimeout.class);
-        return new EpochTimeout(epoch, this);
+            Assertions.assertThat(Timestamp.fromString(id.toStandardString())).isEqualTo(new Timestamp(id));
+        });
     }
 }

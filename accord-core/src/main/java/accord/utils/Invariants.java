@@ -38,9 +38,12 @@ public class Invariants
         LOW, HIGH
     }
 
-    private static final int PARANOIA_COMPUTE = Paranoia.valueOf(System.getProperty("accord.paranoia.cpu", "NONE").toUpperCase()).ordinal();
-    private static final int PARANOIA_MEMORY = Paranoia.valueOf(System.getProperty("accord.paranoia.memory", "NONE").toUpperCase()).ordinal();
-    private static final int PARANOIA_FACTOR = ParanoiaCostFactor.valueOf(System.getProperty("accord.paranoia.costfactor", "LOW").toUpperCase()).ordinal();
+    public static final String KEY_PARANOIA_CPU = "accord.paranoia.cpu";
+    public static final String KEY_PARANOIA_MEMORY = "accord.paranoia.memory";
+    public static final String KEY_PARANOIA_COSTFACTOR = "accord.paranoia.costfactor";
+    private static final int PARANOIA_COMPUTE = Paranoia.valueOf(System.getProperty(KEY_PARANOIA_CPU, "NONE").toUpperCase()).ordinal();
+    private static final int PARANOIA_MEMORY = Paranoia.valueOf(System.getProperty(KEY_PARANOIA_MEMORY, "NONE").toUpperCase()).ordinal();
+    private static final int PARANOIA_FACTOR = ParanoiaCostFactor.valueOf(System.getProperty(KEY_PARANOIA_COSTFACTOR, "LOW").toUpperCase()).ordinal();
     private static boolean IS_PARANOID = PARANOIA_COMPUTE > 0 || PARANOIA_MEMORY > 0;
     private static final boolean DEBUG = System.getProperty("accord.debug", "false").equals("true");
 

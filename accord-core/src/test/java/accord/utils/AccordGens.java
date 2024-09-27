@@ -73,7 +73,12 @@ public class AccordGens
 
     public static Gen<Node.Id> nodes()
     {
-        return nodes(RandomSource::nextInt);
+        return nodes(nodeIdValues());
+    }
+
+    public static Gen.IntGen nodeIdValues()
+    {
+        return rs -> rs.nextInt(-1, Integer.MAX_VALUE) + 1;
     }
 
     public static Gen<Node.Id> nodes(Gen.IntGen nodes)
@@ -98,7 +103,7 @@ public class AccordGens
 
     public static Gen<Timestamp> timestamps()
     {
-        return timestamps(epochs()::nextLong, hlcs(), flags(), RandomSource::nextInt);
+        return timestamps(epochs()::nextLong, hlcs(), flags(), nodeIdValues());
     }
 
     public static Gen<Timestamp> timestamps(Gen.LongGen epochs, Gen.LongGen hlcs, Gen.IntGen flags, Gen.IntGen nodes)
@@ -113,12 +118,12 @@ public class AccordGens
 
     public static Gen<TxnId> txnIds(Gen<Txn.Kind> kinds)
     {
-        return txnIds(epochs(), hlcs(), RandomSource::nextInt, kinds);
+        return txnIds(epochs(), hlcs(), nodeIdValues(), kinds);
     }
 
     public static Gen<TxnId> txnIds(Gen<Txn.Kind> kinds, Gen<Routable.Domain> domains)
     {
-        return txnIds(epochs(), hlcs(), RandomSource::nextInt, kinds, domains);
+        return txnIds(epochs(), hlcs(), nodeIdValues(), kinds, domains);
     }
 
     public static Gen<TxnId> txnIds(Gen.LongGen epochs, Gen.LongGen hlcs, Gen.IntGen nodes)
@@ -138,7 +143,7 @@ public class AccordGens
 
     public static Gen<Ballot> ballot()
     {
-        return ballot(epochs()::nextLong, hlcs(), flags(), RandomSource::nextInt);
+        return ballot(epochs()::nextLong, hlcs(), flags(), nodeIdValues());
     }
 
     public static Gen<Ballot> ballot(Gen.LongGen epochs, Gen.LongGen hlcs, Gen.IntGen flags, Gen.IntGen nodes)
@@ -571,7 +576,7 @@ public class AccordGens
                 Gen<? extends Key> keyGen = Gens.pick(Iterators.toArray(((Keys) txn.keys()).iterator(), Key.class));
                 keyDepsGen = AccordGens.keyDeps(keyGen, AccordGens.txnIds(Gens.longs().between(0, txnId.epoch()),
                                                                           Gens.longs().between(0, txnId.hlc()),
-                                                                          RandomSource::nextInt,
+                                                                          nodeIdValues(),
                                                                           Gens.pick(Txn.Kind.Write, Txn.Kind.Read),
                                                                           ignore -> Routable.Domain.Key));
                 rangeDepsGen = i -> RangeDeps.NONE;

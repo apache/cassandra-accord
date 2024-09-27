@@ -20,6 +20,7 @@ package accord.utils;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
@@ -289,6 +290,12 @@ public interface RandomSource
     }
 
     default <T> T pickOrderedSet(SortedSet<T> set)
+    {
+        int offset = nextInt(0, set.size());
+        return Iterables.get(set, offset);
+    }
+
+    default <T extends Enum<T>> T pickOrderedSet(EnumSet<T> set)
     {
         int offset = nextInt(0, set.size());
         return Iterables.get(set, offset);

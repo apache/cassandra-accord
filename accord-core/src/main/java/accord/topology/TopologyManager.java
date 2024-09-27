@@ -56,7 +56,6 @@ import accord.utils.async.AsyncResults;
 
 import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_ADJACENT;
-import static accord.primitives.Routables.Slice.Minimal;
 import static accord.utils.Invariants.checkArgument;
 import static accord.utils.Invariants.checkState;
 import static accord.utils.Invariants.illegalState;
@@ -94,10 +93,10 @@ public class TopologyManager
         private final BitSet curShardSyncComplete;
         private final Ranges addedRanges, removedRanges;
         private EpochReady ready;
-        private Ranges curSyncComplete, prevSyncComplete, syncComplete;
+        private Ranges syncComplete;
         Ranges closed = Ranges.EMPTY, complete = Ranges.EMPTY;
 
-        EpochState(Id node, Topology global, TopologySorter sorter, Ranges prevRanges, Ranges prevSyncComplete)
+        EpochState(Id node, Topology global, TopologySorter sorter, Ranges prevRanges)
         {
             this.self = node;
             this.global = checkArgument(global, !global.isSubset());
@@ -110,20 +109,9 @@ public class TopologyManager
                 this.syncTracker = null;
 
             this.addedRanges = global.ranges.without(prevRanges).mergeTouching();
-            this.removedRanges = prevRanges.mergeTouching().without(global.ranges);
-            this.prevSyncComplete = addedRanges.union(MERGE_ADJACENT, prevSyncComplete.without(removedRanges));
-            this.curSyncComplete = this.syncComplete = addedRanges;
-        }
 
-        boolean markPrevSynced(Ranges newPrevSyncComplete)
-        {
-            newPrevSyncComplete = newPrevSyncComplete.union(MERGE_ADJACENT, addedRanges).without(removedRanges);
-            if (prevSyncComplete.containsAll(newPrevSyncComplete))
-                return false;
-            checkState(newPrevSyncComplete.containsAll(prevSyncComplete), "Expected %s to contain all ranges in %s; but did not", newPrevSyncComplete, prevSyncComplete);
-            prevSyncComplete = newPrevSyncComplete;
-            syncComplete = curSyncComplete.slice(newPrevSyncComplete, Minimal).union(MERGE_ADJACENT, addedRanges);
-            return true;
+            this.removedRanges = prevRanges.mergeTouching().without(global.ranges);
+            this.syncComplete = addedRanges;
         }
 
         public boolean hasReachedQuorum()
@@ -131,16 +119,25 @@ public class TopologyManager
             return syncTracker == null || syncTracker.hasReachedQuorum();
         }
 
-        public boolean recordSyncComplete(Id node)
+        private boolean recordSyncCompleteFromFuture()
+        {
+            if (syncTracker == null || syncComplete())
+                return false;
+            syncComplete = global.ranges.mergeTouching();
+            return true;
+        }
+
+        enum NodeSyncStatus { Untracked, Complete, ShardUpdate, NoUpdate }
+
+        NodeSyncStatus recordSyncComplete(Id node)
         {
             if (syncTracker == null)
-                return false;
+                return NodeSyncStatus.Untracked;
 
             if (syncTracker.recordSuccess(node) == Success)
             {
-                curSyncComplete = global.ranges.mergeTouching();
-                syncComplete = prevSyncComplete;
-                return true;
+                syncComplete = global.ranges.mergeTouching();
+                return NodeSyncStatus.Complete;
             }
             else
             {
@@ -150,13 +147,12 @@ public class TopologyManager
                 {
                     if (syncTracker.get(i).hasReachedQuorum() && !curShardSyncComplete.get(i))
                     {
-                        curSyncComplete = curSyncComplete.union(MERGE_ADJACENT, Ranges.of(global.shards[i].range));
-                        syncComplete = curSyncComplete.slice(prevSyncComplete, Minimal);
+                        syncComplete = syncComplete.union(MERGE_ADJACENT, Ranges.of(global.shards[i].range));
                         curShardSyncComplete.set(i);
                         updated = true;
                     }
                 }
-                return updated;
+                return updated ? NodeSyncStatus.ShardUpdate : NodeSyncStatus.NoUpdate;
             }
         }
 
@@ -312,10 +308,23 @@ public class TopologyManager
             else
             {
                 int i = indexOf(epoch);
-                if (i < 0 || !epochs[i].recordSyncComplete(node))
+                if (i < 0)
                     return;
-
-                while (--i >= 0 && epochs[i].markPrevSynced(epochs[i + 1].syncComplete)) {}
+                EpochState.NodeSyncStatus status = epochs[i].recordSyncComplete(node);
+                switch (status)
+                {
+                    case Complete:
+                        i++;
+                        for (; i < epochs.length && epochs[i].recordSyncCompleteFromFuture(); i++) {}
+                        break;
+                    case Untracked:
+                        // don't have access to TopologyManager.this.node to check if the nodes match... this state should not happen unless it is the same node
+                    case NoUpdate:
+                    case ShardUpdate:
+                        break;
+                    default:
+                        throw new UnsupportedOperationException("Unknown status " + status);
+                }
             }
         }
 
@@ -489,14 +498,8 @@ public class TopologyManager
 
         System.arraycopy(current.epochs, 0, nextEpochs, 1, current.epochs.length);
 
-        Ranges prevSynced, prevAll;
-        if (current.epochs.length == 0) prevSynced = prevAll = Ranges.EMPTY;
-        else
-        {
-            prevSynced = current.epochs[0].syncComplete;
-            prevAll = current.epochs[0].global.ranges;
-        }
-        nextEpochs[0] = new EpochState(node, topology, sorter.get(topology), prevAll, prevSynced);
+        Ranges prevAll = current.epochs.length == 0 ? Ranges.EMPTY : current.epochs[0].global.ranges;
+        nextEpochs[0] = new EpochState(node, topology, sorter.get(topology), prevAll);
         notifications.syncComplete.forEach(nextEpochs[0]::recordSyncComplete);
         nextEpochs[0].recordClosed(notifications.closed);
         nextEpochs[0].recordComplete(notifications.complete);
@@ -602,6 +605,11 @@ public class TopologyManager
     public Topology currentLocal()
     {
         return epochs.currentLocal();
+    }
+
+    public boolean isEmpty()
+    {
+        return epochs == Epochs.EMPTY;
     }
 
     public long epoch()

@@ -816,6 +816,12 @@ public class Property
                     CommandsBuilder.this.addIf(predicate, cmd);
                     return this;
                 }
+
+                @Override
+                public IfBuilder<State, SystemUnderTest> addIf(Predicate<State> nextPredicate, Setup<State, SystemUnderTest> cmd) {
+                    CommandsBuilder.this.addIf(predicate.and(nextPredicate), cmd);
+                    return this;
+                }
             });
             return this;
         }
@@ -823,6 +829,7 @@ public class Property
         public interface IfBuilder<State, SystemUnderTest>
         {
             IfBuilder<State, SystemUnderTest> add(Setup<State, SystemUnderTest> cmd);
+            IfBuilder<State, SystemUnderTest> addIf(Predicate<State> predicate, Setup<State, SystemUnderTest> cmd);
         }
 
         public CommandsBuilder<State, SystemUnderTest> unknownWeight(Gen.IntGen unknownWeightGen)

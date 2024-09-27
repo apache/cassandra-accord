@@ -40,6 +40,11 @@ public class Timeout extends CoordinationFailed
         super(txnId, homeKey, cause);
     }
 
+    protected Timeout(@Nullable TxnId txnId, @Nullable RoutingKey homeKey, String message)
+    {
+        super(txnId, homeKey, message);
+    }
+
     @Override
     public Timeout wrap()
     {
