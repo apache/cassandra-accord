@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -150,6 +151,21 @@ public abstract class CommandStores
             {
                 this.epochs = epochs;
                 this.ranges = ranges;
+            }
+
+            @Override
+            public boolean equals(Object o)
+            {
+                if (this == o) return true;
+                if (o == null || getClass() != o.getClass()) return false;
+                Snapshot snapshot = (Snapshot) o;
+                return Objects.deepEquals(epochs, snapshot.epochs) && Objects.deepEquals(ranges, snapshot.ranges);
+            }
+
+            @Override
+            public int hashCode()
+            {
+                return Objects.hash(Arrays.hashCode(epochs), Arrays.hashCode(ranges));
             }
         }
 
