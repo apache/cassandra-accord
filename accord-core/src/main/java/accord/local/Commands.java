@@ -895,10 +895,8 @@ public class Commands
                 break;
 
             case TRUNCATE:
-                Invariants.checkState(command.saveStatus().compareTo(TruncatedApply) < 0,
-                                      () -> String.format("%s should not have been in %s but is %s", command, TruncatedApply, command.saveStatus()));
-                Invariants.checkState(command.hasBeen(PreApplied),
-                                      () -> String.format("%s should have been %s", command, PreApplied));
+                Invariants.checkState(command.saveStatus().compareTo(TruncatedApply) < 0, "%s should not have been in %s but is %s", command, TruncatedApply, command.saveStatus());
+                Invariants.checkState(command.hasBeen(PreApplied),"%s should have been %s", command, PreApplied);
                 result = truncatedApply(command, Route.tryCastToFullRoute(maybeFullRoute));
                 break;
 

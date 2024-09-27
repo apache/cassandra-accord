@@ -478,7 +478,7 @@ public class DefaultProgressLog implements ProgressLog, Runnable
             if (!deregisterActive(runKind, this))
                 return; // we've been cancelled
 
-            Invariants.checkState(get(run.txnId) == run, () -> String.format("Transaction state for %s (%s) does not match expected one %s", run.txnId, get(run.txnId), run));
+            Invariants.checkState(get(run.txnId) == run, "Transaction state for %s does not match expected one %s", run.txnId, run);
             Invariants.checkState(run.scheduledTimer() != runKind, "We are actively executing %s, but we are also scheduled to run this same TxnState later. This should not happen.", runKind);
             Invariants.checkState(run.pendingTimer() != runKind, "We are actively executing %s, but we also have a pending scheduled task to run this same TxnState later. This should not happen.", runKind);
 
