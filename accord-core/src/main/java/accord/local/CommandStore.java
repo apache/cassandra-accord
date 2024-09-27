@@ -290,7 +290,6 @@ public abstract class CommandStore implements AgentExecutor
 
     protected void unsafeSetBootstrapBeganAt(NavigableMap<TxnId, Ranges> newBootstrapBeganAt)
     {
-
         this.bootstrapBeganAt = newBootstrapBeganAt;
     }
 
@@ -602,7 +601,7 @@ public abstract class CommandStore implements AgentExecutor
                     newBootstrapRanges = newBootstrapRanges.without(existing);
                 if (!newBootstrapRanges.isEmpty())
                     bootstrapBeganAt = bootstrap(TxnId.NONE, newBootstrapRanges, bootstrapBeganAt);
-                safeStore.setSafeToRead(purgeAndInsert(safeToRead, TxnId.NONE, ranges));
+                safeStore.unsafeSetSafeToRead(purgeAndInsert(safeToRead, TxnId.NONE, ranges));
             }).beginAsResult();
 
             return new EpochReady(epoch, DONE, DONE, DONE, DONE);
@@ -789,8 +788,8 @@ public abstract class CommandStore implements AgentExecutor
         if (safeToRead.values().stream().anyMatch(r -> r.intersects(ranges)))
         {
             execute(empty(), safeStore -> {
-                safeStore.setSafeToRead(purgeHistory(safeToRead, ranges));
-            });
+                safeStore.unsafeSetSafeToRead(purgeHistory(safeToRead, ranges));
+            }).beginAsResult();
         }
     }
 
@@ -798,8 +797,8 @@ public abstract class CommandStore implements AgentExecutor
     {
         execute(empty(), safeStore -> {
             Ranges validatedSafeToRead = redundantBefore.validateSafeToRead(forBootstrapAt, ranges);
-            safeStore.setSafeToRead(purgeAndInsert(safeToRead, at, validatedSafeToRead));
-        });
+            safeStore.unsafeSetSafeToRead(purgeAndInsert(safeToRead, at, validatedSafeToRead));
+        }).beginAsResult();
     }
 
     public static ImmutableSortedMap<TxnId, Ranges> bootstrap(TxnId at, Ranges ranges, NavigableMap<TxnId, Ranges> bootstrappedAt)

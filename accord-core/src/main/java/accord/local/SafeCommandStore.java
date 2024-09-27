@@ -270,7 +270,7 @@ public abstract class SafeCommandStore
         commandStore().upsertDurableBefore(addDurableBefore);
     }
 
-    public void setSafeToRead(NavigableMap<Timestamp, Ranges> newSafeToRead)
+    public void unsafeSetSafeToRead(NavigableMap<Timestamp, Ranges> newSafeToRead)
     {
         commandStore().unsafeSetSafeToRead(newSafeToRead);
     }
