@@ -45,7 +45,6 @@ import accord.primitives.Txn.Kind.Kinds;
 import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 import accord.utils.Invariants;
-import accord.utils.ReducingRangeMap;
 
 import static accord.local.Cleanup.NO;
 import static accord.local.KeyHistory.COMMANDS;
