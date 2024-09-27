@@ -209,12 +209,6 @@ public abstract class CommandStore implements AgentExecutor
         return agent;
     }
 
-    @VisibleForTesting // TODO: check if this is right
-    public void updateRangesForEpoch()
-    {
-        execute(empty(), this::updateRangesForEpoch).beginAsResult();
-    }
-
     public void updateRangesForEpoch(SafeCommandStore safeStore)
     {
         EpochUpdate update = epochUpdateHolder.get();
