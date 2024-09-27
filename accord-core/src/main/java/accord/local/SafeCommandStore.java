@@ -44,6 +44,7 @@ import accord.primitives.Txn.Kind.Kinds;
 import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 import accord.utils.Invariants;
+import accord.utils.ReducingRangeMap;
 
 import static accord.local.Cleanup.NO;
 import static accord.local.KeyHistory.COMMANDS;
@@ -274,9 +275,9 @@ public abstract class SafeCommandStore
         commandStore().unsafeSetRangesForEpoch(rangesForEpoch);
     }
 
-    public void upsertRejectBefore(TxnId txnId, Ranges ranges)
+    public void setRejectBefore(ReducingRangeMap<Timestamp> next)
     {
-        commandStore().upsertRejectBefore(txnId, ranges);
+        commandStore().unsafeSetRejectBefore(next);
     }
 
     public void updateCommandsForKey(Command prev, Command next)

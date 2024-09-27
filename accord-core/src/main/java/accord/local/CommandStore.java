@@ -281,13 +281,6 @@ public abstract class CommandStore implements AgentExecutor
         redundantBefore = newRedundantBefore;
     }
 
-    protected void upsertRejectBefore(TxnId txnId, Ranges ranges)
-    {
-        ReducingRangeMap<Timestamp> newRejectBefore = rejectBefore != null ? rejectBefore : new ReducingRangeMap<>();
-        newRejectBefore = ReducingRangeMap.add(newRejectBefore, ranges, txnId, Timestamp::max);
-        unsafeSetRejectBefore(newRejectBefore);
-    }
-
     /**
      * This method may be invoked on a non-CommandStore thread
      */
@@ -330,7 +323,9 @@ public abstract class CommandStore implements AgentExecutor
     {
         // TODO (desired): narrow ranges to those that are owned
         Invariants.checkArgument(txnId.kind() == ExclusiveSyncPoint);
-        safeStore.upsertRejectBefore(txnId, ranges);
+        ReducingRangeMap<Timestamp> newRejectBefore = rejectBefore != null ? rejectBefore : new ReducingRangeMap<>();
+        newRejectBefore = ReducingRangeMap.add(newRejectBefore, ranges, txnId, Timestamp::max);
+        safeStore.setRejectBefore(newRejectBefore);
     }
 
     public final void markExclusiveSyncPointLocallyApplied(SafeCommandStore safeStore, TxnId txnId, Ranges ranges)
