@@ -56,7 +56,6 @@ import accord.utils.Invariants;
 import org.agrona.collections.Long2ObjectHashMap;
 
 import static accord.local.Status.Invalidated;
-import static accord.local.Status.PreApplied;
 import static accord.local.Status.Truncated;
 import static accord.utils.Invariants.illegalState;
 

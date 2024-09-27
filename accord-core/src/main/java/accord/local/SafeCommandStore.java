@@ -30,6 +30,7 @@ import accord.api.RoutingKey;
 import accord.impl.ErasedSafeCommand;
 import accord.local.cfk.CommandsForKey;
 import accord.local.cfk.SafeCommandsForKey;
+import accord.primitives.Deps;
 import accord.primitives.EpochSupplier;
 import accord.primitives.Keys;
 import accord.primitives.Participants;
@@ -248,6 +249,11 @@ public abstract class SafeCommandStore
             return;
 
         commandStore().updateMaxConflicts(prev, updated);
+    }
+
+    protected void registerHistoricalTransactions(Deps deps)
+    {
+        commandStore().registerHistoricalTransactions(deps, this);
     }
 
     public void upsertRedundantBefore(RedundantBefore addRedundantBefore)
