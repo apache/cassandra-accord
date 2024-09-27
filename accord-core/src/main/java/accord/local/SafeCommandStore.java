@@ -271,7 +271,7 @@ public abstract class SafeCommandStore
         commandStore().upsertDurableBefore(addDurableBefore);
     }
 
-    public void upsertSafeToRead(NavigableMap<Timestamp, Ranges> newSafeToRead)
+    public void setSafeToRead(NavigableMap<Timestamp, Ranges> newSafeToRead)
     {
         commandStore().unsafeSetSafeToRead(newSafeToRead);
     }
@@ -279,11 +279,6 @@ public abstract class SafeCommandStore
     public void setRangesForEpoch(CommandStores.RangesForEpoch rangesForEpoch)
     {
         commandStore().unsafeSetRangesForEpoch(rangesForEpoch);
-    }
-
-    public void setRejectBefore(ReducingRangeMap<Timestamp> next)
-    {
-        commandStore().unsafeSetRejectBefore(next);
     }
 
     public void updateCommandsForKey(Command prev, Command next)

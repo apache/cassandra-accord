@@ -325,7 +325,7 @@ public abstract class CommandStore implements AgentExecutor
         Invariants.checkArgument(txnId.kind() == ExclusiveSyncPoint);
         ReducingRangeMap<Timestamp> newRejectBefore = rejectBefore != null ? rejectBefore : new ReducingRangeMap<>();
         newRejectBefore = ReducingRangeMap.add(newRejectBefore, ranges, txnId, Timestamp::max);
-        safeStore.setRejectBefore(newRejectBefore);
+        unsafeSetRejectBefore(newRejectBefore);
     }
 
     public final void markExclusiveSyncPointLocallyApplied(SafeCommandStore safeStore, TxnId txnId, Ranges ranges)
@@ -608,7 +608,7 @@ public abstract class CommandStore implements AgentExecutor
                     newBootstrapRanges = newBootstrapRanges.without(existing);
                 if (!newBootstrapRanges.isEmpty())
                     bootstrapBeganAt = bootstrap(TxnId.NONE, newBootstrapRanges, bootstrapBeganAt);
-                safeStore.upsertSafeToRead(purgeAndInsert(safeToRead, TxnId.NONE, ranges));
+                safeStore.setSafeToRead(purgeAndInsert(safeToRead, TxnId.NONE, ranges));
             }).beginAsResult();
 
             return new EpochReady(epoch, DONE, DONE, DONE, DONE);
@@ -795,7 +795,7 @@ public abstract class CommandStore implements AgentExecutor
         if (safeToRead.values().stream().anyMatch(r -> r.intersects(ranges)))
         {
             execute(empty(), safeStore -> {
-                safeStore.upsertSafeToRead(purgeHistory(safeToRead, ranges));
+                safeStore.setSafeToRead(purgeHistory(safeToRead, ranges));
             });
         }
     }
@@ -804,7 +804,7 @@ public abstract class CommandStore implements AgentExecutor
     {
         execute(empty(), safeStore -> {
             Ranges validatedSafeToRead = redundantBefore.validateSafeToRead(forBootstrapAt, ranges);
-            safeStore.upsertSafeToRead(purgeAndInsert(safeToRead, at, validatedSafeToRead));
+            safeStore.setSafeToRead(purgeAndInsert(safeToRead, at, validatedSafeToRead));
         });
     }
 
