@@ -26,7 +26,7 @@ public class EpochTimeout extends Timeout
 
     public EpochTimeout(long epoch)
     {
-        super(null, null);
+        super(null, null, "Timeout waiting for epoch " + epoch);
         this.epoch = epoch;
     }
 
