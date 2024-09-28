@@ -264,9 +264,9 @@ public abstract class SafeCommandStore
         commandStore().upsertDurableBefore(addDurableBefore);
     }
 
-    public void upsertSetBootstrapBeganAt(TxnId globalSyncId, Ranges ranges)
+    public void setBootstrapBeganAt(NavigableMap<TxnId, Ranges> newBootstrapBeganAt)
     {
-        commandStore().upsertSetBootstrapBeganAt(globalSyncId, ranges);
+        commandStore().unsafeSetBootstrapBeganAt(newBootstrapBeganAt);
     }
 
     public void setSafeToRead(NavigableMap<Timestamp, Ranges> newSafeToRead)

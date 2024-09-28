@@ -283,11 +283,6 @@ public abstract class CommandStore implements AgentExecutor
         this.safeToRead = newSafeToRead;
     }
 
-    public void upsertSetBootstrapBeganAt(TxnId globalSyncId, Ranges ranges)
-    {
-        unsafeSetBootstrapBeganAt(bootstrap(globalSyncId, ranges, bootstrapBeganAt));
-    }
-
     protected void unsafeSetBootstrapBeganAt(NavigableMap<TxnId, Ranges> newBootstrapBeganAt)
     {
         this.bootstrapBeganAt = newBootstrapBeganAt;
@@ -519,7 +514,7 @@ public abstract class CommandStore implements AgentExecutor
 
     final void markBootstrapping(SafeCommandStore safeStore, TxnId globalSyncId, Ranges ranges)
     {
-        safeStore.upsertSetBootstrapBeganAt(globalSyncId, ranges);
+        safeStore.setBootstrapBeganAt(bootstrap(globalSyncId, ranges, bootstrapBeganAt));
         RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, TxnId.NONE, globalSyncId);
         safeStore.upsertRedundantBefore(addRedundantBefore);
         safeStore.upsertDurableBefore(DurableBefore.create(ranges, TxnId.NONE, TxnId.NONE));
