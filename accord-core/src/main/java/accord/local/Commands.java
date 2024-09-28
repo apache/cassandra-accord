@@ -75,9 +75,7 @@ import static accord.local.Status.PreApplied;
 import static accord.local.Status.PreCommitted;
 import static accord.local.Status.Stable;
 import static accord.local.Status.Truncated;
-import static accord.primitives.Routables.Slice.Minimal;
 import static accord.primitives.Route.isFullRoute;
-import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static accord.utils.Invariants.illegalState;
 
 public class Commands
@@ -547,16 +545,23 @@ public class Commands
         return safeStore.ranges().applyRanges(executeAt);
     }
 
-    private static AsyncChain<Void> applyChain(SafeCommandStore safeStore, PreLoadContext context, TxnId txnId)
+    public static AsyncChain<Void> applyChain(SafeCommandStore safeStore, PreLoadContext context, TxnId txnId)
     {
         Command.Executed command = safeStore.get(txnId).current().asExecuted();
         if (command.hasBeen(Applied))
             return AsyncChains.success(null);
+        return apply(safeStore, context, txnId);
+    }
 
+    public static AsyncChain<Void> apply(SafeCommandStore safeStore, PreLoadContext context, TxnId txnId)
+    {
+        Command.Executed command = safeStore.get(txnId).current().asExecuted();
         // TODO (required): make sure we are correctly handling (esp. C* side with validation logic) executing a transaction
         //  that was pre-bootstrap for some range (so redundant and we may have gone ahead of), but had to be executed locally
         //  for another range
         CommandStore unsafeStore = safeStore.commandStore();
+        // TODO (required, API): do we care about tracking the write persistence latency, when this is just a memtable write?
+        //  the only reason it will be slow is because Memtable flushes are backed-up (which will be reported elsewhere)
         long t0 = safeStore.time().now();
         return command.writes().apply(safeStore, applyRanges(safeStore, command.executeAt()), command.partialTxn())
                .flatMap(unused -> unsafeStore.submit(context, ss -> {
@@ -568,7 +573,23 @@ public class Commands
                }));
     }
 
-    private static void apply(SafeCommandStore safeStore, Command.Executed command)
+    public static AsyncChain<Void> applyWrites(SafeCommandStore safeStore, PreLoadContext context, Command command)
+    {
+        CommandStore unsafeStore = safeStore.commandStore();
+        Ranges executeRanges = executeRanges(safeStore, command.executeAt());
+        Command.Executed executed = command.asExecuted();
+        boolean intersects = executed.writes().keys.intersects(executeRanges);
+        if (intersects)
+            return command.writes().apply(safeStore, applyRanges(safeStore, command.executeAt()), command.partialTxn())
+                          .flatMap(unused -> unsafeStore.submit(context, ss -> {
+                              postApply(ss, command.txnId());
+                              return null;
+                          }));
+        else
+            return AsyncChains.success(null);
+    }
+
+    public static void apply(SafeCommandStore safeStore, Command command)
     {
         CommandStore unsafeStore = safeStore.commandStore();
         TxnId txnId = command.txnId();
@@ -588,9 +609,13 @@ public class Commands
         }
     }
 
-    private static boolean maybeExecute(SafeCommandStore safeStore, SafeCommand safeCommand, boolean alwaysNotifyListeners, boolean notifyWaitingOn)
+    public static boolean maybeExecute(SafeCommandStore safeStore, SafeCommand safeCommand, boolean alwaysNotifyListeners, boolean notifyWaitingOn)
     {
-        final Command command = safeCommand.current();
+        return maybeExecute(safeStore, safeCommand, safeCommand.current(), alwaysNotifyListeners, notifyWaitingOn);
+    }
+
+    public static boolean maybeExecute(SafeCommandStore safeStore, SafeCommand safeCommand, Command command, boolean alwaysNotifyListeners, boolean notifyWaitingOn)
+    {
         if (logger.isTraceEnabled())
             logger.trace("{}: Maybe executing with status {}. Will notify listeners on noop: {}", command.txnId(), command.status(), alwaysNotifyListeners);
 
@@ -614,7 +639,6 @@ public class Commands
 
         // TODO (required): slice our execute ranges based on any pre-bootstrap state
         // FIXME: need to communicate to caller that we didn't execute if we take one of the above paths
-
         switch (command.status())
         {
             case Stable:
@@ -647,12 +671,6 @@ public class Commands
                     //      but: if we later support transitive dependency elision this could be dangerous
                     logger.trace("{}: applying no-op", command.txnId());
                     safeCommand.applied(safeStore);
-                    if (command.txnId().kind() == ExclusiveSyncPoint)
-                    {
-                        Ranges ranges = safeStore.ranges().allAt(command.txnId().epoch());
-                        ranges = command.route().slice(ranges, Minimal).participants().toRanges();
-                        safeStore.commandStore().markExclusiveSyncPointLocallyApplied(safeStore, command.txnId(), ranges);
-                    }
                     safeStore.notifyListeners(safeCommand, command);
                     return true;
                 }
@@ -851,6 +869,16 @@ public class Commands
                               || (command.route() == null || Infer.safeToCleanup(safeStore, command, command.route(), command.executeAt()) || safeStore.isFullyPreBootstrapOrStale(command, command.route().participants()))
         , "Command %s could not be truncated", command);
 
+        Command result = purge(command, maybeFullRoute, cleanup);
+        safeCommand.update(safeStore, result);
+        safeStore.progressLog().clear(safeCommand.txnId());
+        if (notifyListeners)
+            safeStore.notifyListeners(safeCommand, result);
+        return result;
+    }
+
+    public static Command purge(Command command, @Nullable Unseekables<?> maybeFullRoute, Cleanup cleanup)
+    {
         Command result;
         switch (cleanup)
         {
@@ -861,14 +889,14 @@ public class Commands
                 break;
 
             case TRUNCATE_WITH_OUTCOME:
-                Invariants.checkArgument(!command.hasBeen(Truncated));
+                Invariants.checkArgument(!command.hasBeen(Truncated), "%s", command);
                 Invariants.checkState(command.hasBeen(PreApplied));
                 result = truncatedApplyWithOutcome(command.asExecuted());
                 break;
 
             case TRUNCATE:
-                Invariants.checkState(command.saveStatus().compareTo(TruncatedApply) < 0);
-                Invariants.checkState(command.hasBeen(PreApplied));
+                Invariants.checkState(command.saveStatus().compareTo(TruncatedApply) < 0, "%s should not have been in %s but is %s", command, TruncatedApply, command.saveStatus());
+                Invariants.checkState(command.hasBeen(PreApplied),"%s should have been %s", command, PreApplied);
                 result = truncatedApply(command, Route.tryCastToFullRoute(maybeFullRoute));
                 break;
 
@@ -877,11 +905,6 @@ public class Commands
                 result = erased(command);
                 break;
         }
-
-        safeCommand.update(safeStore, result);
-        safeStore.progressLog().clear(safeCommand.txnId());
-        if (notifyListeners)
-            safeStore.notifyListeners(safeCommand, command);
         return result;
     }
 
@@ -1160,7 +1183,7 @@ public class Commands
     public static Command updateRouteOrParticipants(SafeCommandStore safeStore, SafeCommand safeCommand, Unseekables<?> participants)
     {
         Command current = safeCommand.current();
-        if (current.hasBeen(Invalidated))
+        if (current.saveStatus().compareTo(Erased) >= 0)
             return current;
 
         CommonAttributes updated = current;

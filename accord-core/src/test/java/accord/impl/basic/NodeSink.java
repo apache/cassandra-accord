@@ -22,6 +22,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.Function;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import accord.api.MessageSink;
 import accord.impl.basic.Cluster.Link;
 import accord.local.AgentExecutor;
@@ -41,6 +44,8 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 public class NodeSink implements MessageSink
 {
+    private static final Logger logger = LoggerFactory.getLogger(NodeSink.class);
+
     private static final boolean DEBUG = false;
     public enum Action { DELIVER, DROP, DELIVER_WITH_FAILURE, FAILURE }
 
@@ -150,8 +155,8 @@ public class NodeSink implements MessageSink
     }
 
     @Override
-    public void replyWithUnknownFailure(Id replyingToNode, ReplyContext replyContext, Throwable failure)
+    public void replyWithUnknownFailure(Id replyToNode, ReplyContext replyContext, Throwable failure)
     {
-        reply(replyingToNode, replyContext, new FailureReply(failure));
+        reply(replyToNode, replyContext, new FailureReply(failure));
     }
 }

@@ -132,6 +132,15 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
             if (scheduled.isDone() || newDeadline < scheduledAt - schedulerPreciseLateTolerance)
                 ensureScheduled(now);
         }
+
+        public void clear()
+        {
+            if (!scheduled.isDone())
+                scheduled.cancel();
+            scheduled = Scheduler.CANCELLED;
+            lastNow = 0;
+            scheduledAt = Long.MAX_VALUE;
+        }
     }
 
     static class Bucket<T extends Timer> extends IntrusivePriorityHeap<T> implements Comparable<Bucket<T>>
@@ -603,5 +612,17 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
     {
         for (int i = bucketsStart + 1 ; i < bucketsEnd ; ++i)
             Invariants.checkState(buckets[i - 1].end() == buckets[i].epoch);
+    }
+
+    public void clear()
+    {
+        while (bucketsStart < bucketsEnd)
+        {
+            buckets[bucketsStart].clear();
+            buckets[bucketsStart++] = null;
+        }
+        bucketsStart = bucketsEnd = 0;
+        curEpoch = 0;
+        addFinger = null;
     }
 }

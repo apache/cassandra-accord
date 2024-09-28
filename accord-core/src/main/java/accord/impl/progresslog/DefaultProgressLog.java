@@ -79,8 +79,8 @@ public class DefaultProgressLog implements ProgressLog, Runnable
     private Object[] stateMap = BTree.empty();
     private Object[] progressTokenMap = BTree.empty();
 
-    private final LogGroupTimers<TxnState> timers = new LogGroupTimers<>(MICROSECONDS);
-    private final LogGroupTimers<TxnState>.Scheduling timerScheduling;
+    final LogGroupTimers<TxnState> timers = new LogGroupTimers<>(MICROSECONDS);
+    final LogGroupTimers<TxnState>.Scheduling timerScheduling;
 
     /**
      * A collection of active callbacks (waiting remote replies) or submitted run invocations
@@ -278,6 +278,23 @@ public class DefaultProgressLog implements ProgressLog, Runnable
             clear(state);
     }
 
+    public void clear()
+    {
+        timers.clear();
+        timerScheduling.clear();
+
+        stateMap = BTree.empty();
+        progressTokenMap = BTree.empty();
+
+        activeWaiting.clear();
+        activeHome.clear();
+        if (deleted != null)
+            deleted.clear();
+
+        runBuffer = EMPTY_RUN_BUFFER;
+        runBufferCount = 0;
+    }
+
     private void clear(TxnState state)
     {
         state.setHomeDone(this);
@@ -461,7 +478,7 @@ public class DefaultProgressLog implements ProgressLog, Runnable
             if (!deregisterActive(runKind, this))
                 return; // we've been cancelled
 
-            Invariants.checkState(get(run.txnId) == run);
+            Invariants.checkState(get(run.txnId) == run, "Transaction state for %s does not match expected one %s", run.txnId, run);
             Invariants.checkState(run.scheduledTimer() != runKind, "We are actively executing %s, but we are also scheduled to run this same TxnState later. This should not happen.", runKind);
             Invariants.checkState(run.pendingTimer() != runKind, "We are actively executing %s, but we also have a pending scheduled task to run this same TxnState later. This should not happen.", runKind);
 

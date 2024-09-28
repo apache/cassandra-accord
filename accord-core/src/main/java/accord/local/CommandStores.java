@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -29,8 +30,11 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import javax.annotation.Nonnull;
 
 import com.google.common.annotations.VisibleForTesting;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import accord.api.Agent;
 import accord.api.ConfigurationService.EpochReady;
@@ -56,13 +60,8 @@ import accord.utils.MapReduceConsume;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
-import javax.annotation.Nonnull;
-
 import org.agrona.collections.Hashing;
 import org.agrona.collections.Int2ObjectHashMap;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import static accord.api.ConfigurationService.EpochReady.done;
 import static accord.local.PreLoadContext.empty;
@@ -143,6 +142,33 @@ public abstract class CommandStores
     // TODO (expected): merge with RedundantBefore, and standardise executeRanges() to treat removing stale ranges the same as adding new epoch ranges
     public static class RangesForEpoch
     {
+        public static class Snapshot
+        {
+            public final long[] epochs;
+            public final Ranges[] ranges;
+
+            public Snapshot(long[] epochs, Ranges[] ranges)
+            {
+                this.epochs = epochs;
+                this.ranges = ranges;
+            }
+
+            @Override
+            public boolean equals(Object o)
+            {
+                if (this == o) return true;
+                if (o == null || getClass() != o.getClass()) return false;
+                Snapshot snapshot = (Snapshot) o;
+                return Objects.deepEquals(epochs, snapshot.epochs) && Objects.deepEquals(ranges, snapshot.ranges);
+            }
+
+            @Override
+            public int hashCode()
+            {
+                return Objects.hash(Arrays.hashCode(epochs), Arrays.hashCode(ranges));
+            }
+        }
+
         final long[] epochs;
         final Ranges[] ranges;
         final CommandStore store;
@@ -159,6 +185,11 @@ public abstract class CommandStores
             this.epochs = epochs;
             this.ranges = ranges;
             this.store = store;
+        }
+
+        public Snapshot snapshot()
+        {
+            return new Snapshot(epochs, ranges);
         }
 
         public RangesForEpoch withRanges(long epoch, Ranges latestRanges)
@@ -688,6 +719,15 @@ public abstract class CommandStores
         ShardHolder[] shards = current.shards;
         if (shards.length == 0) throw illegalState("Unable to get CommandStore; non defined");
         return shards[supplier.random.nextInt(shards.length)].store;
+    }
+
+    public CommandStore[] all()
+    {
+        ShardHolder[] shards = current.shards;
+        CommandStore[] all = new CommandStore[shards.length];
+        for (int i = 0; i < shards.length; i++)
+            all[i] = shards[i].store;
+        return all;
     }
 
     public CommandStore forId(int id)

@@ -18,8 +18,10 @@
 
 package accord.impl.basic;
 
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 
 public class PropagatingPendingQueue implements PendingQueue
 {
@@ -63,6 +65,12 @@ public class PropagatingPendingQueue implements PendingQueue
         return wrapped.poll();
     }
 
+    @Override
+    public List<Pending> drain(Predicate<Pending> toDrain)
+    {
+        return wrapped.drain(toDrain);
+    }
+
     public void checkFailures()
     {
         if (!failures.isEmpty())
@@ -98,5 +106,17 @@ public class PropagatingPendingQueue implements PendingQueue
     public long nowInMillis()
     {
         return wrapped.nowInMillis();
+    }
+
+    @Override
+    public boolean hasNonRecurring()
+    {
+        return wrapped.hasNonRecurring();
+    }
+
+    @Override
+    public Iterator<Pending> iterator()
+    {
+        return wrapped.iterator();
     }
 }

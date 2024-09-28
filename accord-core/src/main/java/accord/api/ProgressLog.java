@@ -185,11 +185,14 @@ public interface ProgressLog
      */
     void clear(TxnId txnId);
 
+    void clear();
+
     class NoOpProgressLog implements ProgressLog
     {
         @Override public void update(SafeCommandStore safeStore, TxnId txnId, Command before, Command after) {}
         @Override public void remoteCallback(SafeCommandStore safeStore, SafeCommand safeCommand, SaveStatus remoteStatus, int callbackId, Node.Id from) {}
         @Override public void waiting(BlockedUntil blockedUntil, SafeCommandStore safeStore, SafeCommand blockedBy, Route<?> blockedOnRoute, Participants<?> blockedOnParticipants) {}
         @Override public void clear(TxnId txnId) {}
+        @Override public void clear() {}
     }
 }

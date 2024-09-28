@@ -18,26 +18,33 @@
 
 package accord.impl.basic;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Objects;
-import java.util.Queue;
-import java.util.concurrent.TimeUnit;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.IntFunction;
+import java.util.stream.Collectors;
 
 import accord.api.Result;
+import accord.impl.InMemoryCommandStore;
+import accord.local.Cleanup;
 import accord.local.Command;
+import accord.local.CommandStore;
+import accord.local.Commands;
 import accord.local.CommonAttributes;
 import accord.local.Node;
 import accord.local.SaveStatus;
 import accord.local.Status;
-import accord.messages.Message;
-import accord.messages.ReplyContext;
-import accord.messages.Request;
 import accord.primitives.Ballot;
+import accord.primitives.Deps;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Route;
@@ -47,121 +54,132 @@ import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.utils.Invariants;
 import org.agrona.collections.Long2ObjectHashMap;
-import org.agrona.collections.LongArrayList;
 
+import static accord.local.Status.Invalidated;
+import static accord.local.Status.Truncated;
 import static accord.utils.Invariants.illegalState;
 
-
-public class Journal implements Runnable
+public class Journal
 {
-    private final Queue<RequestContext> unframedRequests = new ArrayDeque<>();
-    private final LongArrayList waitForEpochs = new LongArrayList();
-    private final Long2ObjectHashMap<ArrayList<RequestContext>> delayedRequests = new Long2ObjectHashMap<>();
-    private final Map<Key, List<Diff>> diffs = new HashMap<>();
-    private Node node;
-    boolean isScheduled;
+    private final Long2ObjectHashMap<NavigableMap<TxnId, List<Diff>>> diffsPerCommandStore = new Long2ObjectHashMap<>();
+    private final Map<Integer, List<Deps>> historicalTransactions = new HashMap<>();
 
-    public Journal()
+    private final Node.Id id;
+
+    public Journal(Node.Id id)
     {
+        this.id = id;
     }
 
-    public void start(Node node)
+    public void purge(IntFunction<CommandStore> storeSupplier)
     {
-        this.node = node;
-    }
-
-    private void ensureScheduled()
-    {
-        if (isScheduled) return;
-        node.scheduler().once(this, 1, TimeUnit.MILLISECONDS);
-        isScheduled = true;
-    }
-
-    public void shutdown()
-    {
-        this.node = null;
-    }
-
-    public void handle(Request request, Node.Id from, ReplyContext replyContext)
-    {
-        ensureScheduled();
-        if (request.type() != null && request.type().hasSideEffects())
+        for (Map.Entry<Long, NavigableMap<TxnId, List<Diff>>> e : diffsPerCommandStore.entrySet())
         {
-            // enqueue
-            unframedRequests.add(new RequestContext(request, request.waitForEpoch(), () -> node.receive(request, from, replyContext)));
-            return;
+            int commandStoreId = e.getKey().intValue();
+            Map<TxnId, List<Diff>> localJournal = e.getValue();
+            CommandStore store = storeSupplier.apply(commandStoreId);
+
+            Map<TxnId, List<Diff>> updates = new HashMap<>();
+            List<TxnId> removals = new ArrayList<>();
+            for (Map.Entry<TxnId, List<Diff>> e2 : localJournal.entrySet())
+            {
+                TxnId txnId = e2.getKey();
+                List<Diff> diffs = e2.getValue();
+                Command command = reconstruct(diffs, Reconstruct.Last).get(0);
+                if (command.status() == Truncated || command.status() == Invalidated)
+                    continue; // Already truncated
+                Cleanup cleanup = Cleanup.shouldCleanup(store, command, null, command.route(), false);
+                switch (cleanup)
+                {
+                    case NO:
+                        break;
+                    case INVALIDATE:
+                    case TRUNCATE_WITH_OUTCOME:
+                    case TRUNCATE:
+                        command = Commands.purge(command, command.route(), cleanup);
+                        Invariants.checkState(command.saveStatus() != SaveStatus.Uninitialised);
+                        List<Diff> arr = new ArrayList<>();
+                        arr.add(diff(null, command));
+                        updates.put(txnId, arr);
+                        break;
+                    case ERASE:
+                        removals.add(txnId);
+                        break;
+                }
+            }
+
+            for (TxnId removal : removals)
+                localJournal.remove(removal);
+            localJournal.putAll(updates);
         }
-        node.receive(request, from, replyContext);
     }
 
-    @Override
-    public void run()
+    // TODO (required): this might be a good first approximation, but maybe we need to make a better distinction between
+    // when we want to produce side-effects.
+    private boolean loading = false;
+
+    public void reconstructAll(InMemoryCommandStore.Loader loader, int commandStoreId)
     {
-        isScheduled = false;
-        if (this.node == null)
+        Map<TxnId, List<Diff>> diffs = diffsPerCommandStore.get(commandStoreId);
+
+        // Nothing to do here, journal is empty for this command store
+        if (diffs == null)
             return;
+
+        loading = true;
         try
         {
-            doRun();
+            List<Command> toApply = new ArrayList<>();
+            for (TxnId txnId : diffs.keySet())
+            {
+                Command command = reconstruct(commandStoreId, txnId);
+                if (command.saveStatus().compareTo(SaveStatus.Applying) >= 0 && !command.is(Invalidated) && !command.is(Truncated))
+                    toApply.add(command);
+                loader.load(command);
+            }
+
+            toApply.sort(Comparator.comparing(Command::executeAt));
+            for (Command command : toApply)
+                loader.apply(command);
         }
-        catch (Throwable t)
+        finally
         {
-            node.agent().onUncaughtException(t);
+            loading = false;
         }
     }
 
-    private void doRun()
+    private enum Reconstruct
     {
-        ArrayList<RequestContext> requests = null;
-        // check to see if any pending epochs are in
-        waitForEpochs.sort(null);
-        for (int i = 0; i < waitForEpochs.size(); i++)
-        {
-            long waitForEpoch = waitForEpochs.getLong(i);
-            if (!node.topology().hasEpoch(waitForEpoch))
-                break;
-            List<RequestContext> delayed = delayedRequests.remove(waitForEpoch);
-            if (null == requests) requests = new ArrayList<>(delayed.size());
-            requests.addAll(delayed);
-        }
-        waitForEpochs.removeIfLong(epoch -> !delayedRequests.containsKey(epoch));
-
-        // for anything queued, put into the pending epochs or schedule
-        RequestContext request;
-        while (null != (request = unframedRequests.poll()))
-        {
-            long waitForEpoch = request.waitForEpoch;
-            if (waitForEpoch != 0 && !node.topology().hasEpoch(waitForEpoch))
-            {
-                delayedRequests.computeIfAbsent(waitForEpoch, ignore -> new ArrayList<>()).add(request);
-                if (!waitForEpochs.containsLong(waitForEpoch))
-                    waitForEpochs.addLong(waitForEpoch);
-            }
-            else
-            {
-                if (null == requests) requests = new ArrayList<>();
-                requests.add(request);
-            }
-        }
-
-        // schedule
-        if (requests != null)
-        {
-            requests.forEach(Runnable::run);
-        }
+        Each,
+        Last
     }
 
-    public Command reconstruct(int commandStoreId, TxnId txnId, Result result)
+    public void loadHistoricalTransactions(Consumer<Deps> consumer, int commandStoreId)
     {
-        Key key = new Key(txnId, commandStoreId);
-        List<Diff> diffs = this.diffs.get(key);
-        if (diffs == null || diffs.isEmpty())
-            return null;
+        List<Deps> depsList = historicalTransactions.get(commandStoreId);
+        if (depsList == null)
+            return;
+        for (Deps deps : depsList)
+            consumer.accept(deps);
+    }
 
+    public Command reconstruct(int commandStoreId, TxnId txnId)
+    {
+        List<Diff> diffs = this.diffsPerCommandStore.get(commandStoreId).get(txnId);
+        return reconstruct(diffs, Reconstruct.Last).get(0);
+    }
+
+    private List<Command> reconstruct(List<Diff> diffs, Reconstruct reconstruct)
+    {
+        Invariants.checkState(diffs != null && !diffs.isEmpty());
+
+        List<Command> results = new ArrayList<>();
+
+        TxnId txnId = null;
         Timestamp executeAt = null;
         Timestamp executesAtLeast = null;
         SaveStatus saveStatus = null;
-        Status.Durability durability = null;
+        Status.Durability durability = Status.Durability.NotDurable;
 
         Ballot acceptedOrCommitted = Ballot.ZERO;
         Ballot promised = Ballot.ZERO;
@@ -173,94 +191,138 @@ public class Journal implements Runnable
 
         Command.WaitingOn waitingOn = null;
         Writes writes = null;
+        Result result = null;
 
-        for (Diff diff : diffs)
+        for (int i = 0; i < diffs.size(); i++)
         {
+            Diff diff = diffs.get(i);
             if (diff.txnId != null)
-                txnId = diff.txnId;
+                txnId = diff.txnId.get();
             if (diff.executeAt != null)
-                executeAt = diff.executeAt;
+                executeAt = diff.executeAt.get();
             if (diff.executesAtLeast != null)
-                executesAtLeast = diff.executesAtLeast;
+                executesAtLeast = diff.executesAtLeast.get();
             if (diff.saveStatus != null)
-                saveStatus = diff.saveStatus;
+            {
+                Set<SaveStatus> allowed = new HashSet<>();
+                allowed.add(SaveStatus.TruncatedApply);
+                allowed.add(SaveStatus.TruncatedApplyWithOutcome);
+
+                saveStatus = diff.saveStatus.get();
+            }
             if (diff.durability != null)
-                durability = diff.durability;
+                durability = diff.durability.get();
 
             if (diff.acceptedOrCommitted != null)
-                acceptedOrCommitted = diff.acceptedOrCommitted;
+                acceptedOrCommitted = diff.acceptedOrCommitted.get();
             if (diff.promised != null)
-                promised = diff.promised;
+                promised = diff.promised.get();
 
             if (diff.route != null)
-                route = diff.route;
+                route = diff.route.get();
             if (diff.partialTxn != null)
-                partialTxn = diff.partialTxn;
+                partialTxn = diff.partialTxn.get();
             if (diff.partialDeps != null)
-                partialDeps = diff.partialDeps;
+                partialDeps = diff.partialDeps.get();
             if (diff.additionalKeysOrRanges != null)
-                additionalKeysOrRanges = diff.additionalKeysOrRanges;
+                additionalKeysOrRanges = diff.additionalKeysOrRanges.get();
 
             if (diff.waitingOn != null)
-                waitingOn = diff.waitingOn;
+                waitingOn = diff.waitingOn.get();
             if (diff.writes != null)
-                writes = diff.writes;
+                writes = diff.writes.get();
+
+            if (diff.result != null)
+                result = diff.result.get();
+
+            try
+            {
+                if (!txnId.kind().awaitsOnlyDeps())
+                    executesAtLeast = null;
+            }
+            catch (Throwable t)
+            {
+                t.printStackTrace();
+            }
+            switch (saveStatus.known.outcome)
+            {
+                case Erased:
+                case WasApply:
+                    writes = null;
+                    result = null;
+                    break;
+            }
+
+            CommonAttributes.Mutable attrs = new CommonAttributes.Mutable(txnId);
+            if (partialTxn != null)
+                attrs.partialTxn(partialTxn);
+            if (durability != null)
+                attrs.durability(durability);
+            if (route != null)
+                attrs.route(route);
+
+            // TODO (desired): we can simplify this logic if, instead of diffing, we will infer the diff from the status
+            if (partialDeps != null &&
+                (saveStatus.known.deps != Status.KnownDeps.NoDeps &&
+                 saveStatus.known.deps != Status.KnownDeps.DepsErased &&
+                 saveStatus.known.deps != Status.KnownDeps.DepsUnknown))
+                attrs.partialDeps(partialDeps);
+            if (additionalKeysOrRanges != null)
+                attrs.additionalKeysOrRanges(additionalKeysOrRanges);
+            Invariants.checkState(saveStatus != null,
+                                  "Save status is null after applying %s", diffs);
+
+            try
+            {
+                if (reconstruct == Reconstruct.Each ||
+                    (reconstruct == Reconstruct.Last && i == diffs.size() - 1))
+                {
+                    Command current;
+                    switch (saveStatus.status)
+                    {
+                        case NotDefined:
+                            current = saveStatus == SaveStatus.Uninitialised ? Command.NotDefined.uninitialised(attrs.txnId())
+                                                                             : Command.NotDefined.notDefined(attrs, promised);
+                            break;
+                        case PreAccepted:
+                            current = Command.PreAccepted.preAccepted(attrs, executeAt, promised);
+                            break;
+                        case AcceptedInvalidate:
+                        case Accepted:
+                        case PreCommitted:
+                            if (saveStatus == SaveStatus.AcceptedInvalidate)
+                                current = Command.AcceptedInvalidateWithoutDefinition.acceptedInvalidate(attrs, promised, acceptedOrCommitted);
+                            else
+                                current = Command.Accepted.accepted(attrs, saveStatus, executeAt, promised, acceptedOrCommitted);
+                            break;
+                        case Committed:
+                        case Stable:
+                            current = Command.Committed.committed(attrs, saveStatus, executeAt, promised, acceptedOrCommitted, waitingOn);
+                            break;
+                        case PreApplied:
+                        case Applied:
+                            current = Command.Executed.executed(attrs, saveStatus, executeAt, promised, acceptedOrCommitted, waitingOn, writes, result);
+                            break;
+                        case Invalidated:
+                        case Truncated:
+                            current = truncated(attrs, saveStatus, executeAt, executesAtLeast, writes, result);
+                            break;
+                        default:
+                            throw new IllegalStateException("Do not know " + saveStatus.status + " " + saveStatus);
+                    }
+
+                    results.add(current);
+                }
+            }
+            catch (Throwable t)
+            {
+
+                throw new RuntimeException("Can not reconstruct from diff:\n" + diffs.stream().map(o -> o.toString())
+                                                                                     .collect(Collectors.joining("\n")),
+                                           t);
+            }
         }
-
-        if (!txnId.kind().awaitsOnlyDeps())
-            executesAtLeast = null;
-
-        switch (saveStatus.known.outcome)
-        {
-            case Erased:
-            case WasApply:
-                writes = null;
-                result = null;
-                break;
-        }
-
-        CommonAttributes.Mutable attrs = new CommonAttributes.Mutable(txnId);
-        if (partialTxn != null)
-            attrs.partialTxn(partialTxn);
-        if (durability != null)
-            attrs.durability(durability);
-        if (route != null)
-            attrs.route(route);
-
-        // TODO (desired): we can simplify this logic if, instead of diffing, we will infer the diff from the status
-        if (partialDeps != null &&
-            (saveStatus.known.deps != Status.KnownDeps.NoDeps &&
-             saveStatus.known.deps != Status.KnownDeps.DepsErased &&
-             saveStatus.known.deps != Status.KnownDeps.DepsUnknown))
-            attrs.partialDeps(partialDeps);
-        if (additionalKeysOrRanges != null)
-            attrs.additionalKeysOrRanges(additionalKeysOrRanges);
-        Invariants.checkState(saveStatus != null,
-                              "Save status is null after applying %s", diffs);
-
-        switch (saveStatus.status)
-        {
-            case NotDefined:
-                return saveStatus == SaveStatus.Uninitialised ? Command.NotDefined.uninitialised(attrs.txnId())
-                                                              : Command.NotDefined.notDefined(attrs, promised);
-            case PreAccepted:
-                return Command.PreAccepted.preAccepted(attrs, executeAt, promised);
-            case AcceptedInvalidate:
-            case Accepted:
-            case PreCommitted:
-                return Command.Accepted.accepted(attrs, saveStatus, executeAt, promised, acceptedOrCommitted);
-            case Committed:
-            case Stable:
-                return Command.Committed.committed(attrs, saveStatus, executeAt, promised, acceptedOrCommitted, waitingOn);
-            case PreApplied:
-            case Applied:
-                return Command.Executed.executed(attrs, saveStatus, executeAt, promised, acceptedOrCommitted, waitingOn, writes, result);
-            case Invalidated:
-            case Truncated:
-                return truncated(attrs, saveStatus, executeAt, executesAtLeast, writes, result);
-            default:
-                throw new IllegalStateException("Do not know " + saveStatus.status + " " + saveStatus);
-        }
+        return results;
     }
 
     private static Command.Truncated truncated(CommonAttributes.Mutable attrs, SaveStatus status, Timestamp executeAt, Timestamp executesAtLeast, Writes writes, Result result)
@@ -282,77 +344,74 @@ public class Journal implements Runnable
         }
     }
 
+    public void registerHistoricalTransactions(int commandStoreId, Deps deps)
+    {
+        this.historicalTransactions.computeIfAbsent(commandStoreId, (k) -> new ArrayList<>()).add(deps);
+    }
+
     public void onExecute(int commandStoreId, Command before, Command after, boolean isPrimary)
     {
-        if (before == null && after == null)
+        if (loading || (before == null && after == null))
             return;
+
+        if (after.saveStatus() == SaveStatus.Erased)
+        {
+            diffsPerCommandStore.computeIfAbsent(commandStoreId, (k) -> new TreeMap<>())
+                                .remove(after.txnId());
+            return;
+        }
         Diff diff = diff(before, after);
         if (!isPrimary)
-            diff = diff.asNonprimary();
+            diff = diff.asNonPrimary();
 
         if (diff != null)
         {
-            Key key = new Key(after.txnId(), commandStoreId);
-            diffs.computeIfAbsent(key, (k_) -> new ArrayList<>()).add(diff);
-        }
-    }
-
-    private static class RequestContext implements Runnable
-    {
-        final long waitForEpoch;
-        final Message message;
-        final Runnable fn;
-
-        protected RequestContext(Message request, long waitForEpoch, Runnable fn)
-        {
-            this.waitForEpoch = waitForEpoch;
-            this.message = request;
-            this.fn = fn;
-        }
-
-        @Override
-        public void run()
-        {
-            fn.run();
+            diffsPerCommandStore.computeIfAbsent(commandStoreId, (k) -> new TreeMap<>())
+                                .computeIfAbsent(after.txnId(), (k_) -> new ArrayList<>())
+                                .add(diff);
         }
     }
 
     private static class Diff
     {
-        public final TxnId txnId;
+        public final NewValue<TxnId> txnId;
 
-        public final Timestamp executeAt;
-        public final Timestamp executesAtLeast;
-        public final SaveStatus saveStatus;
-        public final Status.Durability durability;
+        public final NewValue<Timestamp> executeAt;
+        public final NewValue<Timestamp> executesAtLeast;
+        public final NewValue<SaveStatus> saveStatus;
+        public final NewValue<Status.Durability> durability;
 
-        public final Ballot acceptedOrCommitted;
-        public final Ballot promised;
+        public final NewValue<Ballot> acceptedOrCommitted;
+        public final NewValue<Ballot> promised;
 
-        public final Route<?> route;
-        public final PartialTxn partialTxn;
-        public final PartialDeps partialDeps;
+        public final NewValue<Route<?>> route;
+        public final NewValue<PartialTxn> partialTxn;
+        public final NewValue<PartialDeps> partialDeps;
 
-        public final Writes writes;
-        public final Command.WaitingOn waitingOn;
-        public final Seekables<?, ?> additionalKeysOrRanges;
+        public final NewValue<Writes> writes;
+        public final NewValue<Command.WaitingOn> waitingOn;
+        public final NewValue<Seekables<?, ?>> additionalKeysOrRanges;
 
-        public Diff(TxnId txnId,
-                    Timestamp executeAt,
-                    Timestamp executesAtLeast,
-                    SaveStatus saveStatus,
-                    Status.Durability durability,
+        public final NewValue<Result> result; // temporarily here for sakes for reloads
 
-                    Ballot acceptedOrCommitted,
-                    Ballot promised,
+        public Diff(NewValue<TxnId> txnId,
+                    NewValue<Timestamp> executeAt,
+                    NewValue<Timestamp> executesAtLeast,
+                    NewValue<SaveStatus> saveStatus,
+                    NewValue<Status.Durability> durability,
 
-                    Route<?> route,
-                    PartialTxn partialTxn,
-                    PartialDeps partialDeps,
-                    Command.WaitingOn waitingOn,
+                    NewValue<Ballot> acceptedOrCommitted,
+                    NewValue<Ballot> promised,
 
-                    Writes writes,
-                    Seekables<?, ?> additionalKeysOrRanges)
+                    NewValue<Route<?>> route,
+                    NewValue<PartialTxn> partialTxn,
+                    NewValue<PartialDeps> partialDeps,
+                    NewValue<Command.WaitingOn> waitingOn,
+
+                    NewValue<Writes> writes,
+                    NewValue<Seekables<?, ?>> additionalKeysOrRanges,
+
+                    NewValue<Result> result)
         {
             this.txnId = txnId;
             this.executeAt = executeAt;
@@ -370,12 +429,13 @@ public class Journal implements Runnable
             this.writes = writes;
             this.waitingOn = waitingOn;
             this.additionalKeysOrRanges = additionalKeysOrRanges;
+            this.result = result;
         }
 
-        // We allow only save status, waitingOn, and listeners to be updated by non-primary transactions
-        public Diff asNonprimary()
+        // We allow only save status, and waitingOn to be updated by non-primary transactions
+        public Diff asNonPrimary()
         {
-            return new Diff(null, null, null, saveStatus, null, null, null, null, null, null, waitingOn, null, null);
+            return new Diff(txnId, null, null, saveStatus, null, null, null, null, null, null, waitingOn, null, additionalKeysOrRanges, null);
         }
 
         public boolean allNulls()
@@ -393,13 +453,14 @@ public class Journal implements Runnable
             if (writes != null) return false;
             if (waitingOn != null) return false;
             if (additionalKeysOrRanges != null) return false;
+            if (result != null) return false;
             return true;
         }
 
         @Override
         public String toString()
         {
-            StringBuilder builder = new StringBuilder("SavedDiff{");
+            StringBuilder builder = new StringBuilder("Diff{");
             if (txnId != null)
                 builder.append("txnId = ").append(txnId).append(" ");
             if (executeAt != null)
@@ -426,6 +487,8 @@ public class Journal implements Runnable
                 builder.append("waitingOn = ").append(waitingOn).append(" ");
             if (additionalKeysOrRanges != null)
                 builder.append("additionalKeysOrRanges = ").append(additionalKeysOrRanges).append(" ");
+            if (result != null)
+                builder.append("result = ").append(result).append(" ");
             builder.append("}");
             return builder.toString();
         }
@@ -450,7 +513,9 @@ public class Journal implements Runnable
                              ifNotEqual(before, after, Command::partialDeps, false),
                              ifNotEqual(before, after, Journal::getWaitingOn, true),
                              ifNotEqual(before, after, Command::writes, false),
-                             ifNotEqual(before, after, Command::additionalKeysOrRanges, false));
+                             ifNotEqual(before, after, Command::additionalKeysOrRanges, false),
+                             ifNotEqual(before, after, Command::result, false));
+
         if (diff.allNulls())
             return null;
 
@@ -465,7 +530,7 @@ public class Journal implements Runnable
         return null;
     }
 
-    private static <OBJ, VAL> VAL ifNotEqual(OBJ lo, OBJ ro, Function<OBJ, VAL> convert, boolean allowClassMismatch)
+    private static <OBJ, VAL> NewValue<VAL> ifNotEqual(OBJ lo, OBJ ro, Function<OBJ, VAL> convert, boolean allowClassMismatch)
     {
         VAL l = null;
         VAL r = null;
@@ -473,39 +538,42 @@ public class Journal implements Runnable
         if (ro != null) r = convert.apply(ro);
 
         if (l == r)
-            return null;
+            return null; // null here means there was no change
+
         if (l == null || r == null)
-            return r;
+            return NewValue.of(r);
+
         assert allowClassMismatch || l.getClass() == r.getClass() : String.format("%s != %s", l.getClass(), r.getClass());
 
         if (l.equals(r))
             return null;
 
-        return r;
+        return NewValue.of(r);
     }
 
-    public static class Key
+    private static class NewValue<T>
     {
-        final TxnId timestamp;
-        final int commandStoreId;
+        final T value;
 
-        public Key(TxnId timestamp, int commandStoreId)
+        private NewValue(T value)
         {
-            this.timestamp = timestamp;
-            this.commandStoreId = commandStoreId;
+            this.value = value;
         }
 
-        public boolean equals(Object o)
+        public T get()
         {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            Key key = (Key) o;
-            return commandStoreId == key.commandStoreId && Objects.equals(timestamp, key.timestamp);
+            return value;
         }
 
-        public int hashCode()
+        public static <T> NewValue<T> of(T value)
         {
-            return Objects.hash(timestamp, commandStoreId);
+            return new NewValue<>(value);
+        }
+
+        public String toString()
+        {
+            return "" + value;
         }
     }
+
 }

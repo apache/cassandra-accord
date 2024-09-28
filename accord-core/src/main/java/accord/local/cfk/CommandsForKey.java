@@ -193,6 +193,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 {
     private static final Logger logger = LoggerFactory.getLogger(CommandsForKey.class);
 
+    private static boolean reportLinearizabilityViolations = true;
     private static final boolean ELIDE_TRANSITIVE_DEPENDENCIES = true;
 
     public static final TxnInfo NO_INFO = new TxnInfo(TxnId.NONE, HISTORICAL, TxnId.NONE);
@@ -1586,7 +1587,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             for (int i = maxAppliedWriteByExecuteAt ; i >= 0 ; --i)
             {
                 TxnInfo txn = committedByExecuteAt[i];
-                if (newInfo == txn)
+                if (newInfo == txn && CommandsForKey.reportLinearizabilityViolations())
                 {
                     // we haven't found anything pre-bootstrap that follows this command, so log a linearizability violation
                     // TODO (expected): this should be a rate-limited logger; need to integrate with Cassandra
@@ -1701,5 +1702,20 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 }
             }
         }
+    }
+
+    public static boolean reportLinearizabilityViolations()
+    {
+        return reportLinearizabilityViolations;
+    }
+
+    public static void enableLinearizabilityViolationsReporting()
+    {
+        reportLinearizabilityViolations = true;
+    }
+
+    public static void disableLinearizabilityViolationsReporting()
+    {
+        reportLinearizabilityViolations = false;
     }
 }

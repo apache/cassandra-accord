@@ -27,7 +27,10 @@ import accord.local.Node;
 import accord.local.SafeCommandStore;
 import accord.primitives.Ranges;
 import accord.primitives.SyncPoint;
+import accord.primitives.TxnId;
 import accord.utils.Timestamped;
+import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
 import accord.utils.async.AsyncResults.SettableResult;
 
 public class MaelstromStore implements DataStore
@@ -56,5 +59,11 @@ public class MaelstromStore implements DataStore
     public FetchResult fetch(Node node, SafeCommandStore safeStore, Ranges ranges, SyncPoint syncPoint, FetchRanges callback)
     {
         return new ImmediateFetchResult(ranges);
+    }
+
+    @Override
+    public AsyncResult<Void> snapshot(Ranges ranges, TxnId before)
+    {
+        return AsyncResults.success(null);
     }
 }

@@ -460,6 +460,8 @@ public class StrictSerializabilityVerifier implements Verifier
                     .append(", preds:").append(Arrays.toString(maxPredecessors))
                     .append(unknownStepPeers != null ? ", peers?:" + unknownStepPeers : "")
                     .append(unknownStepPredecessors != null ? ", preds?:" + unknownStepPredecessors.values() : "")
+                   .append(" writtenBefore " + writtenBefore)
+                   .append(" writtenAfter " + writtenAfter)
                     .append("}");
             return builder.toString();
         }
@@ -709,7 +711,7 @@ public class StrictSerializabilityVerifier implements Verifier
                 throw new HistoryViolation(prefix, key, "Cycle detected on key " + prefix + ":" + key + ", step " + step.ofStepIndex + " " + Arrays.toString(Arrays.copyOf(sequence, step.ofStepIndex)));
 
             if (step.writtenBefore < step.writtenAfter)
-                throw new HistoryViolation(prefix, key, prefix + ":" + key + ": timestamp inconsistency, step " + step.ofStepIndex);
+                throw new HistoryViolation(prefix, key, String.format("%s:%d: timestamp inconsistency, step %d. %s", prefix, key, step.ofStepIndex, step));
 
             if (step.maxPredecessorWrittenAfter > step.writtenBefore)
                 throw new HistoryViolation(prefix, key, prefix + ":" + key + " must have been written prior to its maximum predecessor in real-time order on step " + step.ofStepIndex);

@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -41,7 +42,6 @@ import java.util.function.IntSupplier;
 import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
-
 import javax.annotation.Nullable;
 
 import org.junit.jupiter.api.Assertions;
@@ -50,12 +50,12 @@ import org.slf4j.LoggerFactory;
 
 import accord.api.BarrierType;
 import accord.api.Key;
+import accord.api.LocalConfig;
 import accord.api.MessageSink;
 import accord.api.Scheduler;
 import accord.burn.BurnTestConfigurationService;
 import accord.burn.TopologyUpdates;
 import accord.burn.random.FrequentLargeRange;
-import accord.api.LocalConfig;
 import accord.coordinate.Barrier;
 import accord.coordinate.CoordinationAdapter;
 import accord.coordinate.Exhausted;
@@ -64,22 +64,23 @@ import accord.coordinate.Preempted;
 import accord.coordinate.Timeout;
 import accord.coordinate.Truncated;
 import accord.impl.CoordinateDurabilityScheduling;
+import accord.impl.DefaultLocalListeners;
+import accord.impl.DefaultRemoteListeners;
 import accord.impl.DefaultRequestTimeouts;
 import accord.impl.InMemoryCommandStore.GlobalCommand;
 import accord.impl.MessageListener;
 import accord.impl.PrefixedIntHashKey;
-import accord.impl.DefaultLocalListeners;
-import accord.impl.progresslog.DefaultProgressLogs;
-import accord.impl.DefaultRemoteListeners;
 import accord.impl.SizeOfIntersectionSorter;
 import accord.impl.TopologyFactory;
 import accord.impl.basic.DelayedCommandStores.DelayedCommandStore;
 import accord.impl.list.ListAgent;
 import accord.impl.list.ListStore;
+import accord.impl.progresslog.DefaultProgressLogs;
 import accord.local.AgentExecutor;
 import accord.local.Command;
-import accord.local.Node.Id;
+import accord.local.CommandStore;
 import accord.local.Node;
+import accord.local.Node.Id;
 import accord.local.NodeTimeService;
 import accord.local.SaveStatus;
 import accord.local.ShardDistributor;
@@ -219,19 +220,52 @@ public class Cluster implements Scheduler
             processNext(next);
     }
 
+    boolean hasNonRecurring()
+    {
+        boolean hasNonRecurring = false;
+        for (Pending p : pending)
+        {
+            if (!(p instanceof RecurringPendingRunnable))
+                continue;
+            RecurringPendingRunnable r = (RecurringPendingRunnable) p;
+            if (r.requeue.hasNonRecurring())
+            {
+                hasNonRecurring = true;
+                break;
+            }
+        }
+
+        return hasNonRecurring;
+    }
+
     public boolean processPending()
     {
         checkFailures.run();
-        if (pending.size() == recurring)
+        // All remaining tasks are recurring
+        if (recurring > 0 && pending.size() == recurring && !hasNonRecurring())
             return false;
 
-        Object next = pending.poll();
+        Pending next = pending.poll();
         if (next == null)
             return false;
 
         processNext(next);
+
         checkFailures.run();
         return true;
+    }
+
+    /**
+     * Drain tasks that match predicate.
+     *
+     * Returns whether any tasks were processed
+     */
+    public boolean drain(Predicate<Pending> process)
+    {
+        List<Pending> pending = this.pending.drain(process);
+        for (Pending p : pending)
+            processNext(p);
+        return !pending.isEmpty();
     }
 
     private void processNext(Object next)
@@ -257,7 +291,8 @@ public class Cluster implements Scheduler
                     else callback.success(deliver.src, reply);
                 }
             }
-            else journalLookup.apply(deliver.dst).handle((Request) deliver.message, deliver.src, deliver);
+
+            else on.receive((Request) deliver.message, deliver.src, deliver);
         }
         else
         {
@@ -274,19 +309,25 @@ public class Cluster implements Scheduler
     @Override
     public Scheduled recurring(Runnable run, long delay, TimeUnit units)
     {
-        RecurringPendingRunnable result = new RecurringPendingRunnable(pending, run, delay, units);
-        ++recurring;
-        result.onCancellation(() -> --recurring);
-        pending.add(result, delay, units);
-        return result;
+        return recurring(run, () -> delay, units);
     }
 
     @Override
     public Scheduled once(Runnable run, long delay, TimeUnit units)
     {
-        RecurringPendingRunnable result = new RecurringPendingRunnable(null, run, delay, units);
+        RecurringPendingRunnable result = new RecurringPendingRunnable(null, run, () -> delay, units);
         pending.add(result, delay, units);
         return result;
+    }
+
+    public Scheduled recurring(Runnable run, LongSupplier delay, TimeUnit units)
+    {
+        RecurringPendingRunnable result = new RecurringPendingRunnable(pending, run, delay, units);
+        ++recurring;
+        result.onCancellation(() -> --recurring);
+        pending.add(result, delay.getAsLong(), units);
+        return result;
+
     }
 
     public void onDone(Runnable run)
@@ -422,12 +463,12 @@ public class Cluster implements Scheduler
                 BiConsumer<Timestamp, Ranges> onStale = (sinceAtLeast, ranges) -> configRandomizer.onStale(id, sinceAtLeast, ranges);
                 AgentExecutor nodeExecutor = nodeExecutorSupplier.apply(id, onStale);
                 executorMap.put(id, nodeExecutor);
-                Journal journal = new Journal();
+                Journal journal = new Journal(id);
                 journalMap.put(id, journal);
                 BurnTestConfigurationService configService = new BurnTestConfigurationService(id, nodeExecutor, randomSupplier, topology, nodeMap::get, topologyUpdates);
                 BooleanSupplier isLoadedCheck = Gens.supplier(Gens.bools().mixedDistribution().next(random), random);
                 Node node = new Node(id, messageSink, configService, nowSupplier, NodeTimeService.elapsedWrapperFromNonMonotonicSource(TimeUnit.MILLISECONDS, nowSupplier),
-                                     () -> new ListStore(id), new ShardDistributor.EvenSplit<>(8, ignore -> new PrefixedIntHashKey.Splitter()),
+                                     () -> new ListStore(sinks, random, id), new ShardDistributor.EvenSplit<>(8, ignore -> new PrefixedIntHashKey.Splitter()),
                                      nodeExecutor.agent(),
                                      randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER, DefaultRemoteListeners::new, DefaultRequestTimeouts::new,
                                      DefaultProgressLogs::new, DefaultLocalListeners.Factory::new, DelayedCommandStores.factory(sinks.pending, isLoadedCheck, journal), new CoordinationAdapter.DefaultFactory(),
@@ -461,8 +502,6 @@ public class Cluster implements Scheduler
             updateDurabilityRate.run();
             schemaApply.onUpdate(topology);
 
-            // startup
-            journalMap.entrySet().forEach(e -> e.getValue().start(nodeMap.get(e.getKey())));
             AsyncResult<?> startup = AsyncChains.reduce(nodeMap.values().stream().map(Node::unsafeStart).collect(toList()), (a, b) -> null).beginAsResult();
             while (sinks.processPending());
             Assertions.assertTrue(startup.isDone());
@@ -475,11 +514,54 @@ public class Cluster implements Scheduler
             }, 5L, SECONDS);
 
             Scheduled reconfigure = sinks.recurring(configRandomizer::maybeUpdateTopology, 1, SECONDS);
+
+            Scheduled purge = sinks.recurring(() -> {
+                trace.debug("Triggering purge.");
+                int numNodes = random.nextInt(1, nodeMap.size());
+                for (int i = 0; i < numNodes; i++)
+                {
+                    Id id = random.pick(nodes);
+                    Node node = nodeMap.get(id);
+
+                    Journal journal = journalMap.get(node.id());
+                    CommandStore[] stores = nodeMap.get(node.id()).commandStores().all();
+                    journal.purge((j) -> stores[j]);
+                }
+            }, () -> random.nextInt(1, 10), SECONDS);
+
+            Scheduled restart = sinks.recurring(() -> {
+                Id id = random.pick(nodes);
+                CommandStore[] stores = nodeMap.get(id).commandStores().all();
+                Predicate<Pending> pred = getPendingPredicate(stores);
+                while (sinks.drain(pred));
+
+                // Journal cleanup is a rough equivalent of a node restart.
+                trace.debug("Triggering journal cleanup for node " + id);
+                CommandsForKey.disableLinearizabilityViolationsReporting();
+                ListStore listStore = (ListStore) nodeMap.get(id).commandStores().dataStore();
+                listStore.clear();
+                listStore.restoreFromSnapshot();
+
+                Journal journal = journalMap.get(id);
+                for (CommandStore s : stores)
+                {
+                    DelayedCommandStores.DelayedCommandStore store = (DelayedCommandStores.DelayedCommandStore) s;
+                    store.clearForTesting();
+                    journal.reconstructAll(store.loader(), store.id());
+                    journal.loadHistoricalTransactions(store::load, store.id());
+                }
+                while (sinks.drain(pred));
+                CommandsForKey.enableLinearizabilityViolationsReporting();
+                trace.debug("Done with cleanup.");
+            }, () -> random.nextInt(1, 10), SECONDS);
+
             durabilityScheduling.forEach(CoordinateDurabilityScheduling::start);
             services.forEach(Service::start);
 
             noMoreWorkSignal.accept(() -> {
                 reconfigure.cancel();
+                purge.cancel();
+                restart.cancel();
                 durabilityScheduling.forEach(CoordinateDurabilityScheduling::stop);
                 services.forEach(Service::close);
             });
@@ -517,9 +599,22 @@ public class Cluster implements Scheduler
         }
         finally
         {
-            journalMap.values().forEach(Journal::shutdown);
             nodeMap.values().forEach(Node::shutdown);
         }
+    }
+
+    private static Predicate<Pending> getPendingPredicate(CommandStore[] stores)
+    {
+        Set<CommandStore> nodeStores = new HashSet<>(Arrays.asList(stores));
+        return item -> {
+            if (item instanceof DelayedCommandStore.DelayedTask)
+            {
+                DelayedCommandStore.DelayedTask<?> task = (DelayedCommandStore.DelayedTask<?>) item;
+                if (nodeStores.contains(task.parent()))
+                    return true;
+            }
+            return false;
+        };
     }
 
     private interface Service extends AutoCloseable

@@ -39,8 +39,6 @@ interface NotifySink
 {
     void notWaiting(SafeCommandStore safeStore, TxnId txnId, Key key);
 
-    void notWaiting(SafeCommandStore safeStore, SafeCommand safeCommand, Key key);
-
     void waitingOn(SafeCommandStore safeStore, TxnInfo txn, Key key, SaveStatus waitingOnStatus, BlockedUntil blockedUntil, boolean notifyCfk);
 
     class DefaultNotifySink implements NotifySink
@@ -60,8 +58,7 @@ interface NotifySink
             }
         }
 
-        @Override
-        public void notWaiting(SafeCommandStore safeStore, SafeCommand safeCommand, Key key)
+        private void notWaiting(SafeCommandStore safeStore, SafeCommand safeCommand, Key key)
         {
             Commands.removeWaitingOnKeyAndMaybeExecute(safeStore, safeCommand, key);
         }
