@@ -42,6 +42,11 @@ public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
     {
         public static DurableBefore create(boolean inclusiveEnds, RoutingKey[] ends, Entry[] values)
         {
+            if (values.length == 0)
+            {
+                Invariants.checkState(ends.length == 1 && ends[0] == null);
+                return DurableBefore.EMPTY;
+            }
             return new DurableBefore(inclusiveEnds, ends, values);
         }
     }
