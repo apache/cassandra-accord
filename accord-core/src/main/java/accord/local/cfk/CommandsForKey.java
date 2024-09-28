@@ -812,6 +812,15 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         return i >= committedByExecuteAt.length ? null : committedByExecuteAt[i];
     }
 
+    @VisibleForTesting
+    public TxnId nextWaitingToApply()
+    {
+        int i = maxAppliedWriteByExecuteAt + 1;
+        while (i < committedByExecuteAt.length && committedByExecuteAt[i].status == APPLIED)
+            ++i;
+        return i >= committedByExecuteAt.length ? null : committedByExecuteAt[i];
+    }
+
     public TxnId blockedOnTxnId(TxnId txnId, @Nullable Timestamp executeAt)
     {
         TxnInfo minUndecided = minUndecided();

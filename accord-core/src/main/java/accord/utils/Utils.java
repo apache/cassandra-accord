@@ -30,13 +30,14 @@ import java.util.SortedMap;
 import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.function.BiFunction;
 import java.util.function.IntFunction;
+import java.util.function.Predicate;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedMap;
 import com.google.common.collect.ImmutableSortedSet;
 
-// TODO (low priority): remove when jdk8 support is dropped
 public class Utils
 {
     // reimplements Collection#toArray
@@ -149,5 +150,19 @@ public class Utils
             array[j] = array[k];
             array[k] = tmp;
         }
+    }
+
+    public static <A, B> B reduce(B zero,
+                                  Iterable<A> input,
+                                  Predicate<A> filter,
+                                  BiFunction<B, ? super A, B> reducer)
+    {
+        B result = zero;
+        for (A a : input)
+        {
+            if (filter.test(a))
+                result = reducer.apply(result, a);
+        }
+        return result;
     }
 }

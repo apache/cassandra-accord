@@ -212,6 +212,11 @@ public interface PreLoadContext
         return contextFor(null, Collections.emptyList(), keys);
     }
 
+    static PreLoadContext contextFor(Seekables<?, ?> keys, KeyHistory keyHistory)
+    {
+        return contextFor(null, Collections.emptyList(), keys, keyHistory);
+    }
+
     static PreLoadContext empty()
     {
         return EMPTY_PRELOADCONTEXT;

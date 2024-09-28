@@ -30,6 +30,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.stream.IntStream;
 import javax.annotation.Nullable;
 
@@ -551,6 +552,13 @@ public class Topology
     {
         for (int i : supersetIndexes)
             forEach.accept(shards[i]);
+    }
+
+    public <A> A reduce(A zero,
+                        Predicate<Shard> filter,
+                        BiFunction<A, ? super Shard, A> reducer)
+    {
+        return Utils.reduce(zero, shards(), filter, reducer);
     }
 
     public SortedArrayList<Id> nodes()
