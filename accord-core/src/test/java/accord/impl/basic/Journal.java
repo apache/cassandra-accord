@@ -55,6 +55,7 @@ import accord.primitives.Writes;
 import accord.utils.Invariants;
 import org.agrona.collections.Long2ObjectHashMap;
 
+import static accord.primitives.SaveStatus.Stable;
 import static accord.primitives.Status.Invalidated;
 import static accord.primitives.Status.Truncated;
 import static accord.utils.Invariants.illegalState;
@@ -134,7 +135,7 @@ public class Journal
             for (TxnId txnId : diffs.keySet())
             {
                 Command command = reconstruct(commandStoreId, txnId);
-                if (command.saveStatus().compareTo(SaveStatus.Applying) >= 0 && !command.is(Invalidated) && !command.is(Truncated))
+                if (command.saveStatus().compareTo(Stable) >= 0 && !command.hasBeen(Truncated))
                     toApply.add(command);
                 loader.load(command);
             }

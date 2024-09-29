@@ -101,6 +101,7 @@ import static accord.primitives.SaveStatus.ReadyToExecute;
 import static accord.primitives.Status.Applied;
 import static accord.primitives.Status.Durability.Local;
 import static accord.primitives.Status.Invalidated;
+import static accord.primitives.Status.PreApplied;
 import static accord.primitives.Status.PreCommitted;
 import static accord.primitives.Status.Stable;
 import static accord.primitives.Status.Truncated;
@@ -1397,7 +1398,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                                  safeStore -> {
                                      SafeCommand safeCommand = safeStore.unsafeGet(txnId);
                                      Command local = safeCommand.current();
-                                     if (local.is(Stable) && !local.hasBeen(Applied))
+                                     if (local.is(Stable) || local.is(PreApplied))
                                          Commands.maybeExecute(safeStore, safeCommand, local, true, true);
                                      else if (local.saveStatus().compareTo(Applying) >= 0 && !local.is(Invalidated) && !local.is(Truncated))
                                          Commands.applyWrites(safeStore, context, local).begin(agent);
