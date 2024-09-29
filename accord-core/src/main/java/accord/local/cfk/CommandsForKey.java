@@ -957,7 +957,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
     static TxnId bootstrappedAt(RedundantBefore.Entry boundsInfo)
     {
         TxnId bootstrappedAt = boundsInfo.bootstrappedAt;
-        if (bootstrappedAt.compareTo(boundsInfo.shardRedundantBefore()) <= 0)
+        if (bootstrappedAt.compareTo(boundsInfo.gcBefore) <= 0)
             bootstrappedAt = null;
         return bootstrappedAt;
     }
@@ -969,7 +969,8 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 
     static TxnId redundantBefore(RedundantBefore.Entry boundsInfo)
     {
-        return boundsInfo.shardAppliedOrInvalidatedBefore;
+        // TODO (expected): this can be weakened to shardAppliedOrInvalidatedBefore
+        return boundsInfo.gcBefore;
     }
 
     public boolean isPostBootstrapAndOwned(TxnId txnId)
@@ -1327,7 +1328,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
     {
         int prunedBeforeById = Arrays.binarySearch(byId, prunedBefore);
         Invariants.checkState(prunedBeforeById >= 0 || prunedBefore.equals(TxnId.NONE));
-        return reconstruct(key, NO_BOUNDS_INFO.withShardAppliedOrInvalidatedBeforeAtLeast(redundantBefore),
+        return reconstruct(key, NO_BOUNDS_INFO.withGcBeforeBeforeAtLeast(redundantBefore),
                            byId, BTree.empty(), prunedBeforeById, unmanageds);
     }
 
@@ -1627,13 +1628,14 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
      */
     public CommandsForKeyUpdate withRedundantBeforeAtLeast(RedundantBefore.Entry newBoundsInfo, boolean force)
     {
-        if (!force && newBoundsInfo.shardAppliedOrInvalidatedBefore.equals(boundsInfo.shardAppliedOrInvalidatedBefore)
+        // TODO (required): handle receiving an entry from the past, e.g. on reload (OR expunge all CFK on restart)
+        if (!force && newBoundsInfo.gcBefore.equals(boundsInfo.gcBefore)
             && newBoundsInfo.bootstrappedAt.equals(boundsInfo.bootstrappedAt)
             && newBoundsInfo.locallyDecidedAndAppliedOrInvalidatedBefore.equals(boundsInfo.locallyDecidedAndAppliedOrInvalidatedBefore)
             && newBoundsInfo.endOwnershipEpoch == boundsInfo.endOwnershipEpoch)
             return this;
 
-        if (newBoundsInfo.shardAppliedOrInvalidatedBefore.epoch() >= newBoundsInfo.endOwnershipEpoch)
+        if (newBoundsInfo.gcBefore.epoch() >= newBoundsInfo.endOwnershipEpoch)
         {
             // we should be completely finished; notify every unmanaged and return an empty CFK
             // we special case this to handle the case of future dependencies supplied to us by other CommandsForKey that had pruned their dependencies;
@@ -1661,7 +1663,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
     @VisibleForImplementation
     public CommandsForKey withRedundantBeforeAtLeast(TxnId newRedundantBefore)
     {
-        RedundantBefore.Entry newBoundsInfo = boundsInfo.withShardAppliedOrInvalidatedBeforeAtLeast(newRedundantBefore);
+        RedundantBefore.Entry newBoundsInfo = boundsInfo.withGcBeforeBeforeAtLeast(newRedundantBefore);
 
         TxnInfo[] newById = pruneById(byId, boundsInfo, newBoundsInfo);
         int newPrunedBeforeById = prunedBeforeId(newById, prunedBefore(), newRedundantBefore);

@@ -536,7 +536,7 @@ public class CommandsForKeyTest
         {
             CommonAttributes.Mutable result = new CommonAttributes.Mutable(txnId)
                    .durability(NotDurable)
-                   .updateParticipants(StoreParticipants.all(txnId, txnId.is(Key) ? KEY_ROUTE : RANGE_ROUTE));
+                   .updateParticipants(StoreParticipants.all(txnId.is(Key) ? KEY_ROUTE : RANGE_ROUTE));
 
             if (withDefinition)
                 result.partialTxn((txnId.domain() == Key ? KEY_TXN : RANGE_TXN).slice(RANGES, true));
@@ -992,7 +992,7 @@ public class CommandsForKeyTest
         }
 
         @Override
-        public void onHandledException(Throwable t)
+        public void onHandledException(Throwable t, String context)
         {
             throw new UnsupportedOperationException();
         }

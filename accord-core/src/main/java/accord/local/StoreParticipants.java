@@ -271,7 +271,7 @@ public class StoreParticipants
         return new StoreParticipants(route, empty, empty, empty);
     }
 
-    public static StoreParticipants all(TxnId txnId, Route<?> route)
+    public static StoreParticipants all(Route<?> route)
     {
         return new StoreParticipants(route, route, route, route);
     }

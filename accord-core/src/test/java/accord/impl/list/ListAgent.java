@@ -109,7 +109,7 @@ public class ListAgent implements Agent
     }
 
     @Override
-    public void onHandledException(Throwable t)
+    public void onHandledException(Throwable t, String context)
     {
     }
 

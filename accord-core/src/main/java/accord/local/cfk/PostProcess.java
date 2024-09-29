@@ -46,7 +46,6 @@ import static accord.local.cfk.CommandsForKey.InternalStatus.INVALID_OR_TRUNCATE
 import static accord.local.cfk.CommandsForKey.InternalStatus.STABLE;
 import static accord.local.cfk.CommandsForKey.Unmanaged.Pending.APPLY;
 import static accord.local.cfk.CommandsForKey.maxContiguousManagedAppliedIndex;
-import static accord.local.cfk.CommandsForKey.updateAndNotifyUnmanageds;
 import static accord.local.cfk.Updating.updateUnmanaged;
 import static accord.local.cfk.Updating.updateUnmanagedAsync;
 import static accord.local.cfk.Utils.findApply;
@@ -54,7 +53,6 @@ import static accord.local.cfk.Utils.findCommit;
 import static accord.local.cfk.Utils.findFirstApply;
 import static accord.local.cfk.Utils.removeUnmanaged;
 import static accord.local.cfk.Utils.selectUnmanaged;
-import static accord.primitives.Timestamp.max;
 import static accord.primitives.TxnId.NO_TXNIDS;
 import static accord.utils.ArrayBuffers.cachedTxnIds;
 

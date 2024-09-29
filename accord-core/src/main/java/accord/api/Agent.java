@@ -64,8 +64,7 @@ public interface Agent extends UncaughtExceptionListener
 
     @Override
     void onUncaughtException(Throwable t);
-
-    void onHandledException(Throwable t);
+    void onHandledException(Throwable t, String context);
 
     /**
      * @return PreAccept timeout with implementation-defined resolution of the hybrid logical clock

@@ -18,13 +18,7 @@
 
 package accord.topology;
 
-import java.util.AbstractCollection;
 import java.util.Arrays;
-import java.util.Collection;
-import java.util.Iterator;
-import java.util.Set;
-
-import com.google.common.collect.Iterators;
 
 import accord.api.TopologySorter;
 import accord.local.Node;

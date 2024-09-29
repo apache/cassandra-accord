@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -179,12 +180,12 @@ public class ListStore implements DataStore
     private static final class PendingSnapshot
     {
         final long delay;
-        final Runnable runnable;
+        final Consumer<Boolean> onCompletion;
 
-        private PendingSnapshot(long delay, Runnable runnable)
+        private PendingSnapshot(long delay, Consumer<Boolean> onCompletion)
         {
             this.delay = delay;
-            this.runnable = runnable;
+            this.onCompletion = onCompletion;
         }
     }
 
@@ -198,9 +199,16 @@ public class ListStore implements DataStore
         AsyncResult.Settable<Void> result = new AsyncResults.SettableResult<>();
         long delay = Math.max(1, random.nextBiasedLong(100, 1000, 5000) - pendingDelay);
         pendingDelay += delay;
-        pendingSnapshots.add(new PendingSnapshot(delay, () -> {
-            this.snapshot = snapshot;
-            result.setSuccess(null);
+        pendingSnapshots.add(new PendingSnapshot(delay, success -> {
+            if (success)
+            {
+                this.snapshot = snapshot;
+                result.setSuccess(null);
+            }
+            else
+            {
+                result.setFailure(new RuntimeException("Snapshot aborted due to earlier snapshot being restored"));
+            }
         }));
 
         if (pendingSnapshots.size() == 1)
@@ -216,7 +224,7 @@ public class ListStore implements DataStore
                 return;
 
             PendingSnapshot pendingSnapshot = pendingSnapshots.pollFirst();
-            pendingSnapshot.runnable.run();
+            pendingSnapshot.onCompletion.accept(true);
             pendingDelay -= pendingSnapshot.delay;
             if (!pendingSnapshots.isEmpty())
                 scheduleRunSnapshot();
@@ -234,6 +242,9 @@ public class ListStore implements DataStore
         purgedAts.addAll(snapshot.purgedAts);
         fetchCompletes.addAll(snapshot.fetchCompletes);
         pendingRemoves.addAll(snapshot.pendingRemoves);
+
+        while (!pendingSnapshots.isEmpty())
+            pendingSnapshots.pollFirst().onCompletion.accept(false);
     }
 
     public void clear()
@@ -547,6 +558,7 @@ public class ListStore implements DataStore
         // TODO (effeciency, correctness): remove the delayed removal logic.
         // This logic was added to make sure the sequence of events made sense but doesn't handle everything perfectly; I (David C) believe that this code
         // will suffer from the ABA problem; if a range is removed, then added back it is not likley to be handled correctly (the add will no-op as it wasn't removed, then the remove will remove it!)
+        if (pendingRemoves.isEmpty()) return;
         if (pendingRemoves.get(0) != epoch)
         {
             onRemovalDone.add(() -> performRemoval(epoch, removed, s));

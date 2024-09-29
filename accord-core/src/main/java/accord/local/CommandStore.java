@@ -161,7 +161,6 @@ public abstract class CommandStore implements AgentExecutor
     private DurableBefore durableBefore = DurableBefore.EMPTY;
     private MaxConflicts maxConflicts = MaxConflicts.EMPTY;
     protected RangesForEpoch rangesForEpoch;
-    protected Ranges activeRanges, leavingRanges;
 
     /**
      * safeToRead is related to RedundantBefore, but a distinct concept.
@@ -535,7 +534,7 @@ public abstract class CommandStore implements AgentExecutor
         safeStore.dataStore().snapshot(slicedRanges, globalSyncId).begin((success, fail) -> {
             if (fail != null)
             {
-                logger.error("Unsuccessful dataStore snapshot; unable to update GC markers", fail);
+                agent.onHandledException(fail, "Unsuccessful dataStore snapshot; unable to update GC markers");
                 return;
             }
 

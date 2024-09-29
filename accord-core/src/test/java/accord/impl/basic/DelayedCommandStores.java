@@ -286,6 +286,12 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
             journal.registerHistoricalTransactions(id(), deps);
             super.registerHistoricalTransactions(deps, safeStore);
         }
+
+        @Override
+        public void unsafeRunIn(Runnable fn)
+        {
+            super.unsafeRunIn(fn);
+        }
     }
 
     public static class DelayedSafeStore extends InMemoryCommandStore.InMemorySafeStore

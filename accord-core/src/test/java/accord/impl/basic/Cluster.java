@@ -533,27 +533,29 @@ public class Cluster implements Scheduler
             Scheduled restart = sinks.recurring(() -> {
                 Id id = random.pick(nodes);
                 CommandStore[] stores = nodeMap.get(id).commandStores().all();
-                Predicate<Pending> pred = getPendingPredicate(stores);
-                while (sinks.drain(pred));
+                ((DelayedCommandStore)stores[0]).unsafeRunIn(() -> {
+                    Predicate<Pending> pred = getPendingPredicate(stores);
+                    while (sinks.drain(pred));
 
-                // Journal cleanup is a rough equivalent of a node restart.
-                trace.debug("Triggering journal cleanup for node " + id);
-                CommandsForKey.disableLinearizabilityViolationsReporting();
-                ListStore listStore = (ListStore) nodeMap.get(id).commandStores().dataStore();
-                listStore.clear();
-                listStore.restoreFromSnapshot();
+                    // Journal cleanup is a rough equivalent of a node restart.
+                    trace.debug("Triggering journal cleanup for node " + id);
+                    CommandsForKey.disableLinearizabilityViolationsReporting();
+                    ListStore listStore = (ListStore) nodeMap.get(id).commandStores().dataStore();
+                    listStore.clear();
+                    listStore.restoreFromSnapshot();
 
-                Journal journal = journalMap.get(id);
-                for (CommandStore s : stores)
-                {
-                    DelayedCommandStores.DelayedCommandStore store = (DelayedCommandStores.DelayedCommandStore) s;
-                    store.clearForTesting();
-                    journal.reconstructAll(store.loader(), store.id());
-                    journal.loadHistoricalTransactions(store::load, store.id());
-                }
-                while (sinks.drain(pred));
-                CommandsForKey.enableLinearizabilityViolationsReporting();
-                trace.debug("Done with cleanup.");
+                    Journal journal = journalMap.get(id);
+                    for (CommandStore s : stores)
+                    {
+                        DelayedCommandStores.DelayedCommandStore store = (DelayedCommandStores.DelayedCommandStore) s;
+                        store.clearForTesting();
+                        journal.reconstructAll(store.loader(), store.id());
+                        journal.loadHistoricalTransactions(store::load, store.id());
+                    }
+                    while (sinks.drain(pred));
+                    CommandsForKey.enableLinearizabilityViolationsReporting();
+                    trace.debug("Done with cleanup.");
+                });
             }, () -> random.nextInt(1, 10), SECONDS);
 
             durabilityScheduling.forEach(CoordinateDurabilityScheduling::start);

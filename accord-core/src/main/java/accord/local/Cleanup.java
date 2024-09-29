@@ -23,7 +23,6 @@ import javax.annotation.Nonnull;
 import accord.primitives.SaveStatus;
 import accord.primitives.Status.Durability;
 import accord.primitives.TxnId;
-import accord.primitives.Unseekables;
 
 import static accord.local.RedundantBefore.PreBootstrapOrStale.FULLY;
 import static accord.local.RedundantStatus.LIVE;

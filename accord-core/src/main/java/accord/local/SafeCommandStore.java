@@ -46,7 +46,6 @@ import accord.primitives.Unseekable;
 import accord.primitives.Unseekables;
 import accord.utils.Invariants;
 
-import static accord.local.Cleanup.NO;
 import static accord.local.KeyHistory.COMMANDS;
 import static accord.local.RedundantBefore.PreBootstrapOrStale.FULLY;
 import static accord.primitives.Routables.Slice.Minimal;

@@ -79,7 +79,6 @@ import static accord.primitives.Status.PreApplied;
 import static accord.primitives.Status.PreCommitted;
 import static accord.primitives.Status.Stable;
 import static accord.primitives.Status.Truncated;
-import static accord.primitives.Routables.Slice.Minimal;
 import static accord.primitives.Route.isFullRoute;
 import static accord.utils.Invariants.illegalState;
 

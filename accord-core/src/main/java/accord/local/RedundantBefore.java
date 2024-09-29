@@ -61,7 +61,7 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
 
     public enum PreBootstrapOrStale { NOT_OWNED, FULLY, PARTIALLY, POST_BOOTSTRAP }
 
-    // TODO (expected): rationalise the various bounds we maintain; make merge idempotent and apply any filtering by superseding bounds on access
+    // TODO (required): rationalise the various bounds we maintain; make merge idempotent and apply any filtering by superseding bounds on access
     public static class Entry
     {
         // TODO (desired): we don't need to maintain this now, can migrate to ReducingRangeMap.foldWithBounds
@@ -129,11 +129,6 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
          * See also {@link CommandStore#safeToRead}.
          */
         public final @Nullable Timestamp staleUntilAtLeast;
-
-        public Entry(Range range, long startOwnershipEpoch, long endOwnershipEpoch, @Nonnull TxnId locallyAppliedOrInvalidatedBefore, @Nonnull TxnId shardAppliedOrInvalidatedBefore, @Nonnull TxnId shardOnlyAppliedOrInvalidatedBefore, @Nonnull TxnId gcBefore, @Nonnull TxnId bootstrappedAt, @Nullable Timestamp staleUntilAtLeast)
-        {
-            this(range, startOwnershipEpoch, endOwnershipEpoch, locallyAppliedOrInvalidatedBefore, locallyAppliedOrInvalidatedBefore, shardAppliedOrInvalidatedBefore, shardOnlyAppliedOrInvalidatedBefore, gcBefore, bootstrappedAt, staleUntilAtLeast);
-        }
 
         public Entry(Range range, long startOwnershipEpoch, long endOwnershipEpoch, @Nonnull TxnId locallyAppliedOrInvalidatedBefore, @Nonnull TxnId locallyDecidedAndAppliedOrInvalidatedBefore, @Nonnull TxnId shardAppliedOrInvalidatedBefore, @Nonnull TxnId shardOnlyAppliedOrInvalidatedBefore, @Nonnull TxnId gcBefore, @Nonnull TxnId bootstrappedAt, @Nullable Timestamp staleUntilAtLeast)
         {
@@ -207,21 +202,20 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
             return new Entry(range, startEpoch, endEpoch, locallyAppliedOrInvalidatedBefore, locallyDecidedAndAppliedOrInvalidatedBefore, shardAppliedOrInvalidatedBefore, shardOnlyAppliedOrInvalidatedBefore, gcBefore, bootstrappedAt, staleUntilAtLeast);
         }
 
-        public Entry withShardAppliedOrInvalidatedBeforeAtLeast(TxnId newShardAppliedOrInvalidatedBefore)
+        public Entry withGcBeforeBeforeAtLeast(TxnId newGcBefore)
         {
-            if (newShardAppliedOrInvalidatedBefore.compareTo(locallyAppliedOrInvalidatedBefore) >= 0)
-                newShardAppliedOrInvalidatedBefore = locallyAppliedOrInvalidatedBefore;
-
-            if (newShardAppliedOrInvalidatedBefore.compareTo(shardAppliedOrInvalidatedBefore) <= 0)
+            if (newGcBefore.compareTo(gcBefore) <= 0)
                 return this;
 
-            return new Entry(range, startOwnershipEpoch, endOwnershipEpoch, locallyAppliedOrInvalidatedBefore, locallyDecidedAndAppliedOrInvalidatedBefore, newShardAppliedOrInvalidatedBefore, shardOnlyAppliedOrInvalidatedBefore, gcBefore, bootstrappedAt, staleUntilAtLeast);
+            TxnId locallyAppliedOrInvalidatedBefore = TxnId.nonNullOrMax(this.locallyAppliedOrInvalidatedBefore, newGcBefore);
+            TxnId shardAppliedOrInvalidatedBefore = TxnId.nonNullOrMax(this.shardAppliedOrInvalidatedBefore, newGcBefore);
+            return new Entry(range, startOwnershipEpoch, endOwnershipEpoch, locallyAppliedOrInvalidatedBefore, locallyDecidedAndAppliedOrInvalidatedBefore, shardAppliedOrInvalidatedBefore, shardOnlyAppliedOrInvalidatedBefore, newGcBefore, bootstrappedAt, staleUntilAtLeast);
         }
 
         @VisibleForImplementation
         public Entry withEpochs(long start, long end)
         {
-            return new Entry(range, start, end, locallyAppliedOrInvalidatedBefore, locallyDecidedAndAppliedOrInvalidatedBefore, shardOnlyAppliedOrInvalidatedBefore, gcBefore, bootstrappedAt, staleUntilAtLeast);
+            return new Entry(range, start, end, locallyAppliedOrInvalidatedBefore, locallyDecidedAndAppliedOrInvalidatedBefore, shardAppliedOrInvalidatedBefore, shardOnlyAppliedOrInvalidatedBefore, gcBefore, bootstrappedAt, staleUntilAtLeast);
         }
 
         static @Nonnull RedundantStatus getAndMerge(Entry entry, @Nonnull RedundantStatus prev, TxnId txnId, Object ignore)
@@ -282,8 +276,8 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
             if (entry == null)
                 return prev;
 
-            if (entry.shardAppliedOrInvalidatedBefore.compareTo(Timestamp.NONE) > 0)
-                prev.add(entry.range, entry.shardAppliedOrInvalidatedBefore);
+            if (entry.gcBefore.compareTo(Timestamp.NONE) > 0)
+                prev.add(entry.range, entry.gcBefore);
 
             return prev;
         }
@@ -315,7 +309,7 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
             if (entry == null || (executeAt == null ? entry.outOfBounds(txnId) : entry.outOfBounds(txnId, executeAt)))
                 return notRedundant;
 
-            if (txnId.compareTo(entry.shardAppliedOrInvalidatedBefore) < 0)
+            if (txnId.compareTo(entry.gcBefore) < 0)
                 return notRedundant.without(Ranges.of(entry.range));
 
             return notRedundant;
@@ -348,7 +342,7 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
 
             if (locallyAppliedOrInvalidatedBefore.compareTo(txnId) > 0)
             {
-                if (shardAppliedOrInvalidatedBefore.compareTo(txnId) > 0)
+                if (gcBefore.compareTo(txnId) > 0)
                     return SHARD_REDUNDANT;
                 return LOCALLY_REDUNDANT;
             }
@@ -368,7 +362,7 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
 
         public final TxnId shardRedundantBefore()
         {
-            return shardAppliedOrInvalidatedBefore;
+            return gcBefore;
         }
 
         public final TxnId locallyRedundantBefore()
@@ -395,7 +389,7 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
         private boolean isComplete()
         {
             // TODO (required): carefully consider whether we should ALSO expect some local property to be met here
-            return endOwnershipEpoch <= shardAppliedOrInvalidatedBefore.epoch();
+            return endOwnershipEpoch <= gcBefore.epoch();
         }
 
         private boolean outOfBounds(Timestamp lb)
@@ -405,12 +399,12 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
 
         Entry withEpochs(int startEpoch, int endEpoch)
         {
-            return new Entry(range, startEpoch, endEpoch, locallyAppliedOrInvalidatedBefore, shardAppliedOrInvalidatedBefore, shardOnlyAppliedOrInvalidatedBefore, gcBefore, bootstrappedAt, staleUntilAtLeast);
+            return new Entry(range, startEpoch, endEpoch, locallyAppliedOrInvalidatedBefore, locallyDecidedAndAppliedOrInvalidatedBefore, shardAppliedOrInvalidatedBefore, shardOnlyAppliedOrInvalidatedBefore, gcBefore, bootstrappedAt, staleUntilAtLeast);
         }
 
         public Entry withRange(Range range)
         {
-            return new Entry(range, startOwnershipEpoch, endOwnershipEpoch, locallyAppliedOrInvalidatedBefore, shardAppliedOrInvalidatedBefore, shardOnlyAppliedOrInvalidatedBefore, gcBefore, bootstrappedAt, staleUntilAtLeast);
+            return new Entry(range, startOwnershipEpoch, endOwnershipEpoch, locallyAppliedOrInvalidatedBefore, locallyDecidedAndAppliedOrInvalidatedBefore, shardAppliedOrInvalidatedBefore, shardOnlyAppliedOrInvalidatedBefore, gcBefore, bootstrappedAt, staleUntilAtLeast);
         }
 
         public boolean equals(Object that)
@@ -430,6 +424,8 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
                    && this.locallyAppliedOrInvalidatedBefore.equals(that.locallyAppliedOrInvalidatedBefore)
                    && this.locallyDecidedAndAppliedOrInvalidatedBefore.equals(that.locallyDecidedAndAppliedOrInvalidatedBefore)
                    && this.shardAppliedOrInvalidatedBefore.equals(that.shardAppliedOrInvalidatedBefore)
+                   && this.shardOnlyAppliedOrInvalidatedBefore.equals(that.shardOnlyAppliedOrInvalidatedBefore)
+                   && this.gcBefore.equals(that.gcBefore)
                    && this.bootstrappedAt.equals(that.bootstrappedAt)
                    && Objects.equals(this.staleUntilAtLeast, that.staleUntilAtLeast);
         }
@@ -502,8 +498,9 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
         if (ranges.isEmpty())
             return new RedundantBefore();
 
+        TxnId locallyDecidedAndAppliedOrInvalidatedBefore = locallyAppliedOrInvalidatedBefore;
         TxnId shardAppliedOrInvalidatedBefore = TxnId.min(locallyAppliedOrInvalidatedBefore, shardOnlyAppliedOrInvalidatedBefore);
-        Entry entry = new Entry(null, startEpoch, endEpoch, locallyAppliedOrInvalidatedBefore, shardAppliedOrInvalidatedBefore, shardOnlyAppliedOrInvalidatedBefore, gcBefore, bootstrappedAt, staleUntilAtLeast);
+        Entry entry = new Entry(null, startEpoch, endEpoch, locallyAppliedOrInvalidatedBefore, locallyDecidedAndAppliedOrInvalidatedBefore, shardAppliedOrInvalidatedBefore, shardOnlyAppliedOrInvalidatedBefore, gcBefore, bootstrappedAt, staleUntilAtLeast);
         Builder builder = new Builder(ranges.get(0).endInclusive(), ranges.size() * 2);
         for (int i = 0 ; i < ranges.size() ; ++i)
         {
@@ -616,7 +613,7 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
             if (v.range.start().equals(start) && v.range.end().equals(end))
                 return v;
 
-            return new Entry(v.range.newRange(start, end), v.startOwnershipEpoch, v.endOwnershipEpoch, v.locallyAppliedOrInvalidatedBefore, v.shardAppliedOrInvalidatedBefore, v.shardOnlyAppliedOrInvalidatedBefore, v.gcBefore, v.bootstrappedAt, v.staleUntilAtLeast);
+            return new Entry(v.range.newRange(start, end), v.startOwnershipEpoch, v.endOwnershipEpoch, v.locallyAppliedOrInvalidatedBefore, v.locallyDecidedAndAppliedOrInvalidatedBefore, v.shardAppliedOrInvalidatedBefore, v.shardOnlyAppliedOrInvalidatedBefore, v.gcBefore, v.bootstrappedAt, v.staleUntilAtLeast);
         }
 
         @Override
@@ -635,7 +632,7 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
             return new Entry(a.range.newRange(
                 a.range.start().compareTo(b.range.start()) <= 0 ? a.range.start() : b.range.start(),
                 a.range.end().compareTo(b.range.end()) >= 0 ? a.range.end() : b.range.end()
-            ), a.startOwnershipEpoch, a.endOwnershipEpoch, a.locallyAppliedOrInvalidatedBefore, a.shardAppliedOrInvalidatedBefore, a.shardOnlyAppliedOrInvalidatedBefore, a.gcBefore, a.bootstrappedAt, a.staleUntilAtLeast);
+            ), a.startOwnershipEpoch, a.endOwnershipEpoch, a.locallyDecidedAndAppliedOrInvalidatedBefore, a.locallyAppliedOrInvalidatedBefore, a.shardAppliedOrInvalidatedBefore, a.shardOnlyAppliedOrInvalidatedBefore, a.gcBefore, a.bootstrappedAt, a.staleUntilAtLeast);
         }
 
         @Override

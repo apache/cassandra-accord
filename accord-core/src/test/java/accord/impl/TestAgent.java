@@ -69,7 +69,7 @@ public class TestAgent implements Agent
         }
 
         @Override
-        public void onHandledException(Throwable t)
+        public void onHandledException(Throwable t, String context)
         {
             throw new AssertionError("Unexpected exception", t);
         }
@@ -108,7 +108,7 @@ public class TestAgent implements Agent
     }
 
     @Override
-    public void onHandledException(Throwable t)
+    public void onHandledException(Throwable t, String context)
     {
     }
 

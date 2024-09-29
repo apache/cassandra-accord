@@ -88,7 +88,8 @@ public class Journal
                 Command command = reconstruct(diffs, Reconstruct.Last).get(0);
                 if (command.status() == Truncated || command.status() == Invalidated)
                     continue; // Already truncated
-                Cleanup cleanup = Cleanup.shouldCleanup(store, command, command.participants());
+                StoreParticipants participants = Invariants.nonNull(command.participants());
+                Cleanup cleanup = Cleanup.shouldCleanup(store, command, participants);
                 switch (cleanup)
                 {
                     case NO:
@@ -254,8 +255,8 @@ public class Journal
                 attrs.partialTxn(partialTxn);
             if (durability != null)
                 attrs.durability(durability);
-            if (participants != null)
-                attrs.setParticipants(participants);
+            if (participants != null) attrs.setParticipants(participants);
+            else attrs.setParticipants(StoreParticipants.empty(txnId));
 
             // TODO (desired): we can simplify this logic if, instead of diffing, we will infer the diff from the status
             if (partialDeps != null &&
