@@ -1404,7 +1404,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                                      }
                                      else if (local.saveStatus().compareTo(Applying) >= 0 && !local.hasBeen(Truncated))
                                      {
-                                         unsafeApplyWrites(safeStore, context, safeCommand, local);
+                                         unsafeApplyWrites(safeStore, safeCommand, local);
                                      }
                                      return null;
                                  });
@@ -1412,9 +1412,8 @@ public abstract class InMemoryCommandStore extends CommandStore
         };
     }
 
-    public static void unsafeApplyWrites(SafeCommandStore safeStore, PreLoadContext context, SafeCommand safeCommand, Command command)
+    public static void unsafeApplyWrites(SafeCommandStore safeStore, SafeCommand safeCommand, Command command)
     {
-        CommandStore unsafeStore = safeStore.commandStore();
         Command.Executed executed = command.asExecuted();
         Participants<?> executes = executed.participants().executes(safeStore, command.txnId(), command.executeAt());
         if (!executes.isEmpty())
@@ -1424,8 +1423,6 @@ public abstract class InMemoryCommandStore extends CommandStore
             safeStore.notifyListeners(safeCommand, command);
         }
     }
-
-
 
     @VisibleForTesting
     public void load(Deps loading)

@@ -775,7 +775,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             return this == COMMITTED | this == STABLE | this == APPLIED;
         }
 
-        Timestamp depsKnownBefore(TxnId txnId, Timestamp executeAt)
+        public Timestamp depsKnownBefore(TxnId txnId, Timestamp executeAt)
         {
             return depsKnownUntilExecuteAt() ? executeAt : txnId;
         }
