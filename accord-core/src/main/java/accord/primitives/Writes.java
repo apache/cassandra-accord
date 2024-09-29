@@ -85,6 +85,17 @@ public class Writes
         return AsyncChains.reduce(futures, (l, r) -> null);
     }
 
+    public void applyUnsafe(SafeCommandStore safeStore, Ranges ranges, PartialTxn txn)
+    {
+        if (write == null || ranges.isEmpty())
+            return;
+
+        Routables.foldl(keys, ranges, (key, obj, index) -> {
+            write.applyUnsafe(key, safeStore, txnId, executeAt, safeStore.dataStore(), txn);
+            return obj;
+        }, null);
+    }
+
     @Override
     public String toString()
     {

@@ -95,6 +95,7 @@ public enum Cleanup
         return shouldCleanupInternal(txnId, status, durability, participants, redundantBefore, durableBefore).filter(status);
     }
 
+    // TODO (required): simulate compaction of log records in burn test
     @VisibleForImplementation
     public static Cleanup shouldCleanupPartial(TxnId txnId, SaveStatus status, Durability durability, StoreParticipants participants, RedundantBefore redundantBefore, DurableBefore durableBefore)
     {

@@ -67,6 +67,18 @@ public class ListWrite extends TreeMap<Key, int[]> implements Write
         });
     }
 
+    public void applyUnsafe(Seekable key, SafeCommandStore safeStore, TxnId txnId, Timestamp executeAt, DataStore store, PartialTxn txn)
+    {
+        ListStore s = (ListStore) store;
+        if (!containsKey(key))
+            return;
+
+        TimestampsForKeys.updateLastExecutionTimestamps((AbstractSafeCommandStore<?, ?, ?>) safeStore, ((Key)key).toUnseekable(), txnId, executeAt, true);
+        logger.trace("unsafe applying WRITE on {} at {} key:{}", s.node, executeAt, key);
+        int[] data = get(key);
+        s.data.merge((Key)key, new Timestamped<>(executeAt, data, Arrays::toString), ListStore::merge);
+    }
+
     @Override
     public boolean equals(Object o)
     {

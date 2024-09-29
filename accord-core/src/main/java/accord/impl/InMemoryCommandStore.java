@@ -1399,14 +1399,33 @@ public abstract class InMemoryCommandStore extends CommandStore
                                      SafeCommand safeCommand = safeStore.unsafeGet(txnId);
                                      Command local = safeCommand.current();
                                      if (local.is(Stable) || local.is(PreApplied))
+                                     {
                                          Commands.maybeExecute(safeStore, safeCommand, local, true, true);
-                                     else if (local.saveStatus().compareTo(Applying) >= 0 && !local.is(Invalidated) && !local.is(Truncated))
-                                         Commands.applyWrites(safeStore, context, local).begin(agent);
+                                     }
+                                     else if (local.saveStatus().compareTo(Applying) >= 0 && !local.hasBeen(Truncated))
+                                     {
+                                         unsafeApplyWrites(safeStore, context, safeCommand, local);
+                                     }
                                      return null;
                                  });
             }
         };
     }
+
+    public static void unsafeApplyWrites(SafeCommandStore safeStore, PreLoadContext context, SafeCommand safeCommand, Command command)
+    {
+        CommandStore unsafeStore = safeStore.commandStore();
+        Command.Executed executed = command.asExecuted();
+        Participants<?> executes = executed.participants().executes(safeStore, command.txnId(), command.executeAt());
+        if (!executes.isEmpty())
+        {
+            command.writes().applyUnsafe(safeStore, Commands.applyRanges(safeStore, command.executeAt()), command.partialTxn());
+            safeCommand.applied(safeStore);
+            safeStore.notifyListeners(safeCommand, command);
+        }
+    }
+
+
 
     @VisibleForTesting
     public void load(Deps loading)

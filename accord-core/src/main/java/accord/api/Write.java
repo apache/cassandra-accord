@@ -33,4 +33,6 @@ import accord.utils.async.AsyncChain;
 public interface Write
 {
     AsyncChain<Void> apply(Seekable key, SafeCommandStore safeStore, TxnId txnId, Timestamp executeAt, DataStore store, PartialTxn txn);
+    // TODO (expected): this is used only for testing today; hide it somewhere outside of the public API
+    default void applyUnsafe(Seekable key, SafeCommandStore safeStore, TxnId txnId, Timestamp executeAt, DataStore store, PartialTxn txn) { throw new UnsupportedOperationException(); }
 }

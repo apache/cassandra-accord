@@ -484,7 +484,7 @@ public class Commands
      * for transactions below a SyncPoint where we adopted the range, and that will be obtained from peers,
      * and therefore we do not want to execute locally
      */
-    private static Ranges applyRanges(SafeCommandStore safeStore, Timestamp executeAt)
+    public static Ranges applyRanges(SafeCommandStore safeStore, Timestamp executeAt)
     {
         return safeStore.ranges().allAt(executeAt.epoch());
     }
@@ -515,21 +515,6 @@ public class Commands
                    postApply(ss, txnId);
                    return null;
                }));
-    }
-
-    public static AsyncChain<Void> applyWrites(SafeCommandStore safeStore, PreLoadContext context, Command command)
-    {
-        CommandStore unsafeStore = safeStore.commandStore();
-        Command.Executed executed = command.asExecuted();
-        Participants<?> executes = executed.participants().executes(safeStore, command.txnId(), command.executeAt());
-        if (!executes.isEmpty())
-            return command.writes().apply(safeStore, applyRanges(safeStore, command.executeAt()), command.partialTxn())
-                          .flatMap(unused -> unsafeStore.submit(context, ss -> {
-                              postApply(ss, command.txnId());
-                              return null;
-                          }));
-        else
-            return AsyncChains.success(null);
     }
 
     private static void apply(SafeCommandStore safeStore, Command.Executed command, Participants<?> executes)
