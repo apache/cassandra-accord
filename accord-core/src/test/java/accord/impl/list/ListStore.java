@@ -233,15 +233,15 @@ public class ListStore implements DataStore
 
     public void restoreFromSnapshot()
     {
-        if (snapshot == null)
-            return;
-
-        data.putAll(snapshot.data);
-        addedAts.addAll(snapshot.addedAts);
-        removedAts.addAll(snapshot.removedAts);
-        purgedAts.addAll(snapshot.purgedAts);
-        fetchCompletes.addAll(snapshot.fetchCompletes);
-        pendingRemoves.addAll(snapshot.pendingRemoves);
+        if (snapshot != null)
+        {
+            data.putAll(snapshot.data);
+            addedAts.addAll(snapshot.addedAts);
+            removedAts.addAll(snapshot.removedAts);
+            purgedAts.addAll(snapshot.purgedAts);
+            fetchCompletes.addAll(snapshot.fetchCompletes);
+            pendingRemoves.addAll(snapshot.pendingRemoves);
+        }
 
         while (!pendingSnapshots.isEmpty())
             pendingSnapshots.pollFirst().onCompletion.accept(false);
