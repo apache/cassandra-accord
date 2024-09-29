@@ -847,6 +847,7 @@ public class Commands
                 break;
 
             case ERASE:
+            case EXPUNGE:
                 Invariants.checkState(command.saveStatus().compareTo(Erased) < 0);
                 result = erased(command);
                 break;

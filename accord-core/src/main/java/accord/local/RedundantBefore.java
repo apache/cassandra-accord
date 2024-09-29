@@ -522,6 +522,11 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
         return Entry.get(entry, txnId, executeAt);
     }
 
+    public RedundantStatus shardStatus(TxnId txnId)
+    {
+        return foldl(Entry::getAndMerge, NOT_OWNED, txnId, null, i -> i == LIVE);
+    }
+
     public RedundantStatus status(TxnId txnId, Participants<?> participants)
     {   // TODO (required): consider how the use of txnId for executeAt affects exclusive sync points for cleanup
         //    may want to issue synthetic sync points for local evaluation in later epochs

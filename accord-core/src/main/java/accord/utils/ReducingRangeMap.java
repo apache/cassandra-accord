@@ -122,7 +122,7 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         }
     }
 
-    public <V2, P1, P2> V2 foldl(AbstractKeys<?> keys, ReduceFunction<V, V2, P1, P2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
+    public <A, P1, P2> A foldl(AbstractKeys<?> keys, ReduceFunction<V, A, P1, P2> fold, A accumulator, P1 p1, P2 p2, Predicate<A> terminate)
     {
         if (values.length == 0)
             return accumulator;
@@ -153,6 +153,22 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
             ++i;
             j = nextj;
         }
+        return accumulator;
+    }
+
+    public <A, P1, P2> A foldl(QuadFunction<V, A, P1, P2, A> fold, A accumulator, P1 p1, P2 p2, Predicate<A> terminate)
+    {
+        if (values.length == 0)
+            return accumulator;
+
+        for (V value : values)
+        {
+            if (value == null) continue;
+            accumulator = fold.apply(value, accumulator, p1, p2);
+            if (terminate.test(accumulator))
+                return accumulator;
+        }
+
         return accumulator;
     }
 
