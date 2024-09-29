@@ -57,6 +57,8 @@ public enum Cleanup
     INVALIDATE(Invalidated),
     VESTIGIAL(ErasedOrVestigial),
     ERASE(Erased),
+    // erase all fields except any participants and committed executeAt
+    EXPUNGE_PARTIAL(Erased),
     // we can stop storing the record entirely
     EXPUNGE(Erased);
 
@@ -165,7 +167,7 @@ public enum Cleanup
                 case Applying:
                     return TRUNCATE_WITH_OUTCOME;
                 default:
-                    return EXPUNGE;
+                    return EXPUNGE_PARTIAL;
             }
         }
 
@@ -217,6 +219,7 @@ public enum Cleanup
 
             case UniversalOrInvalidated:
             case Universal:
+                // TODO (expected): can we EXPUNGE here?
                 return Cleanup.ERASE;
         }
     }

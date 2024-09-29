@@ -1346,7 +1346,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             TxnInfo txn = byId[i];
             if (txn.status() == INVALID_OR_TRUNCATED_OR_PRUNED) continue;
             if (txn.isCommittedAndExecutes()) ++countCommitted;
-            else if (minUndecidedById == -1 && mayExecute(newBoundsInfo, txn) && isPostBootstrapAndOwned(txn, newBoundsInfo))
+            else if (minUndecidedById == -1 && !txn.isCommittedToExecute() && txn.mayExecute())
                 minUndecidedById = i;
         }
         TxnInfo[] committedByExecuteAt = new TxnInfo[countCommitted];
