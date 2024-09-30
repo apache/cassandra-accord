@@ -20,8 +20,8 @@ package accord.coordinate;
 
 import accord.coordinate.tracking.QuorumTracker;
 import accord.coordinate.tracking.RequestStatus;
-import accord.local.Node;
 import accord.local.DurableBefore;
+import accord.local.Node;
 import accord.messages.Callback;
 import accord.messages.QueryDurableBefore;
 import accord.messages.QueryDurableBefore.DurableBeforeReply;
