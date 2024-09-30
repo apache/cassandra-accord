@@ -305,9 +305,9 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 
     public static class SerializerSupport
     {
-        public static CommandsForKey create(RoutingKey key, TxnInfo[] txns, Unmanaged[] unmanageds, TxnId redundantBefore, TxnId prunedBefore)
+        public static CommandsForKey create(RoutingKey key, TxnInfo[] txns, Unmanaged[] unmanageds, TxnId prunedBefore, RedundantBefore.Entry boundsInfo)
         {
-            return reconstruct(key, redundantBefore, txns, prunedBefore, unmanageds);
+            return reconstruct(key, boundsInfo, txns, prunedBefore, unmanageds);
         }
     }
 
@@ -337,6 +337,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         private TxnInfo(TxnId txnId, int encodedStatus, Timestamp executeAt)
         {
             super(txnId);
+            Invariants.checkState(executeAt == txnId || executeAt.getClass() != TxnId.class);
             this.encodedStatus = encodedStatus;
             this.executeAt = executeAt == txnId ? this : executeAt;
         }
@@ -345,6 +346,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         {
             Timestamp executeAt = txnId;
             if (status.hasExecuteAt()) executeAt = command.executeAt();
+            if (executeAt.getClass() == TxnId.class) executeAt = txnId;
             Ballot ballot;
             int encodedStatus = encode(txnId, status, mayExecute);
             if (!status.hasBallot || (ballot = command.acceptedOrCommitted()).equals(Ballot.ZERO))
@@ -1335,12 +1337,11 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                                          newLoadingPruned, newPrunedBeforeById, unmanageds, curInfo, newInfo);
     }
 
-    static CommandsForKey reconstruct(RoutingKey key, TxnId redundantBefore, TxnInfo[] byId, TxnId prunedBefore, Unmanaged[] unmanageds)
+    static CommandsForKey reconstruct(RoutingKey key, RedundantBefore.Entry boundsInfo, TxnInfo[] byId, TxnId prunedBefore, Unmanaged[] unmanageds)
     {
         int prunedBeforeById = Arrays.binarySearch(byId, prunedBefore);
         Invariants.checkState(prunedBeforeById >= 0 || prunedBefore.equals(TxnId.NONE));
-        return reconstruct(key, NO_BOUNDS_INFO.withGcBeforeBeforeAtLeast(redundantBefore),
-                           byId, BTree.empty(), prunedBeforeById, unmanageds);
+        return reconstruct(key, boundsInfo, byId, BTree.empty(), prunedBeforeById, unmanageds);
     }
 
     static CommandsForKey reconstruct(RoutingKey key, RedundantBefore.Entry newBoundsInfo, TxnInfo[] byId, Object[] loadingPruned, int newPrunedBeforeById, Unmanaged[] unmanageds)
@@ -1823,8 +1824,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         {
             Invariants.checkState(byId.length == 0 || byId[0].compareTo(redundantBefore()) >= 0);
             Invariants.checkState(prunedBeforeById == -1 || (prunedBefore().status() == APPLIED && prunedBefore().is(Write)));
-            Invariants.checkState(minUndecidedById < 0 || (byId[minUndecidedById].status().compareTo(InternalStatus.COMMITTED) < 0
-                                                           && mayExecute(byId[minUndecidedById]) && isPostBootstrapAndOwned(byId[minUndecidedById])));
+            Invariants.checkState(minUndecidedById < 0 || (byId[minUndecidedById].status().compareTo(InternalStatus.COMMITTED) < 0 && mayExecute(byId[minUndecidedById])));
 
             if (maxAppliedWriteByExecuteAt >= 0)
             {
