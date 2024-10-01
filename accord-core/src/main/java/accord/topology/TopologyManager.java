@@ -731,7 +731,7 @@ public class TopologyManager
         // An issue was found where a range was removed from a replica and min selection picked the epoch before that,
         // which caused a node to get included in the txn that actually lost the range
         // See CASSANDRA-18804
-        while (i < maxi && !select.isEmpty())
+        while (i < maxi)
         {
             EpochState epochState = snapshot.epochs[i++];
             topologies.add(epochState.global.forSelection(select, false));

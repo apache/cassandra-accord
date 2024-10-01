@@ -182,7 +182,7 @@ public class Barrier extends AsyncResults.AbstractResult<TxnId>
     {
         AsyncSyncPoint async = syncPoint.apply(node, route);
         coordinateSyncPoint = async.async;
-        if (!barrierType.global)
+        if (barrierType.async)
         {
             Invariants.checkState(barrierType.async);
             TxnId txnId = async.txnId;

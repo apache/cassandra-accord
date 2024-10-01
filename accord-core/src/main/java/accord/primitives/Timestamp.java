@@ -209,19 +209,28 @@ public class Timestamp implements Comparable<Timestamp>, EpochSupplier
     public int compareTo(@Nonnull Timestamp that)
     {
         if (this == that) return 0;
-        int c = Long.compareUnsigned(this.msb, that.msb);
-        if (c == 0) c = Long.compare(lowHlc(this.lsb), lowHlc(that.lsb));
-        if (c == 0) c = Long.compare(this.lsb & IDENTITY_FLAGS, that.lsb & IDENTITY_FLAGS);
+        int c = compareMsb(this.msb, that.msb);
+        if (c == 0) c = compareLsb(this.lsb, that.lsb);
         if (c == 0) c = this.node.compareTo(that.node);
         return c;
+    }
+
+    public static int compareMsb(long msbA, long msbB)
+    {
+        return Long.compareUnsigned(msbA, msbB);
+    }
+
+    public static int compareLsb(long lsbA, long lsbB)
+    {
+        int c = Long.compare(lowHlc(lsbA), lowHlc(lsbB));
+        return c != 0 ? c : Long.compare(lsbA & IDENTITY_FLAGS, lsbB & IDENTITY_FLAGS);
     }
 
     public int compareToWithoutEpoch(@Nonnull Timestamp that)
     {
         if (this == that) return 0;
         int c = Long.compare(highHlc(this.msb), highHlc(that.msb));
-        if (c == 0) c = Long.compare(lowHlc(this.lsb), lowHlc(that.lsb));
-        if (c == 0) c = Long.compare(this.lsb & IDENTITY_FLAGS, that.lsb & IDENTITY_FLAGS);
+        if (c == 0) c = compareLsb(this.lsb, that.lsb);
         if (c == 0) c = this.node.compareTo(that.node);
         return c;
     }

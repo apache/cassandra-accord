@@ -37,8 +37,13 @@ public class ErasedSafeCommand extends SafeCommand
     public ErasedSafeCommand(TxnId txnId, SaveStatus saveStatus)
     {
         super(txnId);
+        this.erased = erased(txnId, saveStatus);
+    }
+
+    public static Command erased(TxnId txnId, SaveStatus saveStatus)
+    {
         Invariants.checkArgument(saveStatus.compareTo(Erased) >= 0);
-        this.erased = new Command.Truncated(txnId, saveStatus, saveStatus == ErasedOrVestigial ? NotDurable : UniversalOrInvalidated, StoreParticipants.empty(txnId), null, null, null);
+        return new Command.Truncated(txnId, saveStatus, saveStatus == ErasedOrVestigial ? NotDurable : UniversalOrInvalidated, StoreParticipants.empty(txnId), null, null, null);
     }
 
     @Override

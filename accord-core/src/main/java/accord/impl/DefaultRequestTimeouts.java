@@ -24,6 +24,7 @@ import java.util.function.Function;
 
 import accord.api.RequestTimeouts;
 import accord.local.Node;
+import accord.utils.ArrayBuffers.BufferList;
 import accord.utils.LogGroupTimers;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -49,7 +50,8 @@ public class DefaultRequestTimeouts implements RequestTimeouts
                 lock.lock();
                 try
                 {
-                    timeouts.remove(this);
+                    if (isInHeap())
+                        timeouts.remove(this);
                 }
                 finally
                 {
@@ -91,16 +93,41 @@ public class DefaultRequestTimeouts implements RequestTimeouts
         @Override
         public void run()
         {
-            lock.lock();
-            try
+            try (BufferList<Registered> collect = new BufferList<>())
             {
-                long now = node.elapsed(MILLISECONDS);
-                // TODO (expected): should we handle reentrancy? Or at least throw an exception?
-                timeouts.advance(now, this, (s, r) -> r.timeout.timeout());
-            }
-            finally
-            {
-                lock.unlock();
+                int i = 0;
+                try
+                {
+                    lock.lock();
+                    try
+                    {
+                        long now = node.elapsed(MILLISECONDS);
+                        // TODO (expected): should we handle reentrancy? Or at least throw an exception?
+                        timeouts.advance(now, collect, BufferList::add);
+                    }
+                    finally
+                    {
+                        lock.unlock();
+                    }
+
+                    while (i < collect.size())
+                        collect.get(i++).timeout.timeout();
+                }
+                catch (Throwable t)
+                {
+                    while (i < collect.size())
+                    {
+                        try
+                        {
+                            collect.get(i++).timeout.timeout();
+                        }
+                        catch (Throwable t2)
+                        {
+                            t.addSuppressed(t2);
+                        }
+                    }
+                    throw t;
+                }
             }
         }
 

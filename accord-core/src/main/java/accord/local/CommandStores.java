@@ -52,6 +52,7 @@ import accord.primitives.Route;
 import accord.primitives.RoutingKeys;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.topology.Shard;
 import accord.topology.Topology;
 import accord.utils.Invariants;
 import accord.utils.MapReduce;
@@ -452,8 +453,10 @@ public abstract class CommandStores
             // TODO (desired): only sync affected shards
             Ranges ranges = shard.ranges().currentRanges();
             // ranges can be empty when ranges are lost or consolidated across epochs.
-            if (epoch > 1 && startSync && !ranges.isEmpty())
+            if (epoch > 1 && startSync && requiresSync(ranges, prev.global, newTopology))
+            {
                 bootstrapUpdates.add(shard.store.sync(node, ranges, epoch));
+            }
             result.add(shard);
         }
 
@@ -487,6 +490,37 @@ public abstract class CommandStores
             );
         };
         return new TopologyUpdate(new Snapshot(result.toArray(new ShardHolder[0]), newLocalTopology, newTopology), bootstrap);
+    }
+
+    private static boolean requiresSync(Ranges ranges, Topology oldTopology, Topology newTopology)
+    {
+        List<Shard> oldShards = oldTopology.foldl(ranges, (oldShard, shards, i) -> {
+            shards.add(oldShard);
+            return shards;
+        }, new ArrayList<>());
+
+        List<Shard> newShards = newTopology.foldl(ranges, (newShard, shards, i) -> {
+            shards.add(newShard);
+            return shards;
+        }, new ArrayList<>());
+
+        if (oldShards.size() != newShards.size())
+            return true;
+
+        for (int i = 0 ; i < oldShards.size() ; ++i)
+        {
+            Shard oldShard = oldShards.get(i);
+            Shard newShard = newShards.get(i);
+            if (!oldShard.fastPathElectorate.containsAll(newShard.fastPathElectorate))
+                return true;
+
+            if (!newShard.fastPathElectorate.containsAll(oldShard.fastPathElectorate))
+                return true;
+
+            if (!newShard.nodes.equals(oldShard.nodes))
+                return true;
+        }
+        return false;
     }
 
     public <R> R unsafeFoldLeft(R initial, BiFunction<R, CommandStore, R> f)

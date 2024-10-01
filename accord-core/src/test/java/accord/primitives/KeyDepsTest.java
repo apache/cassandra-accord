@@ -53,7 +53,6 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import accord.api.Key;
 import accord.impl.IntHashKey;
 import accord.local.Node.Id;
 
@@ -432,7 +431,7 @@ public class KeyDepsTest
 
         void testSimpleEquality()
         {
-            Assertions.assertArrayEquals(canonical.keySet().toArray(new Key[0]), test.keys().stream().toArray(Key[]::new));
+            Assertions.assertArrayEquals(canonical.keySet().toArray(new RoutingKey[0]), test.keys().stream().toArray(RoutingKey[]::new));
             for (Map.Entry<RoutingKey, NavigableSet<TxnId>> e : canonical.entrySet())
             {
                 List<TxnId> canonical = new ArrayList<>(e.getValue());
@@ -447,7 +446,7 @@ public class KeyDepsTest
             for (Map.Entry<TxnId, List<RoutingKey>> e : canonicalInverted.entrySet())
             {
                 Assertions.assertArrayEquals(toArray(e.getValue(), RoutingKey[]::new),
-                                             test.participatingKeys(e.getKey()).stream().toArray(Key[]::new));
+                                             test.participatingKeys(e.getKey()).stream().toArray(RoutingKey[]::new));
             }
 
             StringBuilder builder = new StringBuilder();

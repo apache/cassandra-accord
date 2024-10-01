@@ -95,7 +95,7 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
 
         public void ensureScheduled(long now)
         {
-            now = Math.max(lastNow, now);
+            lastNow = now = Math.max(lastNow, now);
             T next = peekIfSoonerThan(now + preciseDelayThreshold);
             long runAt;
             if (next == null)

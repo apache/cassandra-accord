@@ -25,6 +25,8 @@ import accord.primitives.Status;
 import accord.primitives.TxnId;
 import accord.utils.Invariants;
 
+import static accord.primitives.Status.Durability.NotDurable;
+
 public interface CommonAttributes
 {
     TxnId txnId();
@@ -51,6 +53,7 @@ public interface CommonAttributes
         {
             this.txnId = txnId;
             this.participants = StoreParticipants.empty(txnId);
+            this.durability = NotDurable;
         }
 
         public Mutable(CommonAttributes attributes)

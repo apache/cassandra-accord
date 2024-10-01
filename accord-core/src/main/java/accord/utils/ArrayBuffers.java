@@ -23,7 +23,9 @@ import accord.api.RoutingKey;
 import accord.primitives.Range;
 import accord.primitives.TxnId;
 
+import java.io.Closeable;
 import java.lang.reflect.Array;
+import java.util.AbstractList;
 import java.util.Arrays;
 import java.util.function.IntFunction;
 
@@ -783,4 +785,38 @@ public class ArrayBuffers
         }
     }
 
+    public static class BufferList<E> extends AbstractList<E> implements Closeable
+    {
+        private static final Object[] EMPTY = new Object[0];
+        private Object[] buffer = EMPTY;
+        private int size;
+
+        @Override
+        public E get(int index)
+        {
+            return (E) buffer[index];
+        }
+
+        @Override
+        public int size()
+        {
+            return size;
+        }
+
+        @Override
+        public boolean add(E e)
+        {
+            if (size == buffer.length)
+                buffer = cachedAny().resize(buffer, size, Math.max(8, size * 2));
+            buffer[size++] = e;
+            return true;
+        }
+
+        public void close()
+        {
+            if (buffer == null) return;
+            cachedAny().forceDiscard(buffer, size);
+            buffer = null;
+        }
+    }
 }

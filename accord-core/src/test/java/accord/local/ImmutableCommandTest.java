@@ -131,7 +131,7 @@ public class ImmutableCommandTest
             Assertions.assertNull(command.executeAt());
         }
         SafeCommandStore safeStore = commands.beginOperation(PreLoadContext.contextFor(txnId, keys.toParticipants()));
-        StoreParticipants participants = StoreParticipants.update(safeStore, keys.toParticipants(), txnId.epoch(), txnId, txnId.epoch());
+        StoreParticipants participants = StoreParticipants.update(safeStore, ROUTE, txnId.epoch(), txnId, txnId.epoch());
         SafeCommand  safeCommand = safeStore.get(txnId, participants);
         Commands.preaccept(safeStore, safeCommand, participants, txnId, txnId.epoch(), txn.slice(FULL_RANGES, true), ROUTE);
         Command command = safeStore.get(txnId).current();
@@ -161,7 +161,7 @@ public class ImmutableCommandTest
         ((TestableConfigurationService)node.configService()).reportTopology(TopologyUtils.withEpoch(support.local.get(), 2));
         Timestamp expectedTimestamp = Timestamp.fromValues(2, 110, ID1);
         getUninterruptibly(commands.execute(context, (Consumer<? super SafeCommandStore>) safeStore -> {
-            StoreParticipants participants = StoreParticipants.update(safeStore, keys.toParticipants(), txnId.epoch(), txnId, 2);
+            StoreParticipants participants = StoreParticipants.update(safeStore, ROUTE, txnId.epoch(), txnId, 2);
             Commands.preaccept(safeStore, safeStore.get(txnId, participants), participants, txnId, txnId.epoch(), txn.slice(FULL_RANGES, true), ROUTE);
         }));
         commands.execute(PreLoadContext.contextFor(txnId, txn.keys().toParticipants()), safeStore -> {

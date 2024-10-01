@@ -605,14 +605,12 @@ public class Commands
                                                                     .intersecting(executed.writes().keys);
                 if (executes == null || executes.isEmpty())
                 {
-                    // TODO (desirable, performance): Mark no-ops in CFK so we can notify later transactions immediately
                     logger.trace("{}: applying no-op", txnId);
                     safeCommand.applied(safeStore);
                     safeStore.notifyListeners(safeCommand, command);
                 }
                 else
                 {
-                    // TODO (now): we should set applying within apply to avoid applying multiple times
                     safeCommand.applying(safeStore);
                     safeStore.notifyListeners(safeCommand, command);
                     logger.trace("{}: applying", command.txnId());

@@ -197,18 +197,18 @@ public abstract class Command implements CommonAttributes
         {
             this.txnId = txnId;
             this.status = validateCommandClass(txnId, status, getClass());
-            this.durability = durability;
-            this.participants = participants;
-            this.promised = promised;
+            this.durability = Invariants.nonNull(durability);
+            this.participants = Invariants.nonNull(participants);
+            this.promised = Invariants.nonNull(promised);
         }
 
         private AbstractCommand(CommonAttributes common, SaveStatus status, Ballot promised)
         {
             this.txnId = common.txnId();
             this.status = validateCommandClass(txnId, status, getClass());
-            this.durability = common.durability();
-            this.participants = common.participants();
-            this.promised = promised;
+            this.durability = Invariants.nonNull(common.durability());
+            this.participants = Invariants.nonNull(common.participants());
+            this.promised = Invariants.nonNull(promised);
         }
 
         @Override
@@ -1020,6 +1020,8 @@ public abstract class Command implements CommonAttributes
         {
             super(common, status, promised, executeAt, accepted);
             this.waitingOn = waitingOn;
+            Invariants.nonNull(common.participants());
+            Invariants.nonNull(common.route());
             Invariants.checkState(common.route().kind().isFullRoute(), "Expected a full route but given %s", common.route().kind());
         }
 

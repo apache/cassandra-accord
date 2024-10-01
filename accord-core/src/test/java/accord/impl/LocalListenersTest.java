@@ -430,18 +430,20 @@ public class LocalListenersTest
         final TxnId txnId;
         final SaveStatus saveStatus;
         final Durability durability;
+        final StoreParticipants participants;
 
         TestCommand(TxnId txnId, SaveStatus saveStatus, Durability durability)
         {
             this.txnId = txnId;
             this.saveStatus = saveStatus;
             this.durability = durability;
+            this.participants = StoreParticipants.empty(txnId);
         }
 
         @Override
         public StoreParticipants participants()
         {
-            return null;
+            return participants;
         }
 
         @Override

@@ -47,7 +47,7 @@ public class LogGroupTimersTest
     @Test
     public void testOne()
     {
-        testOne(1269396034272574761L, 1000, 100);
+        testOne(5843168000636021001L, 1000, 100);
     }
 
     static class Timer extends LogGroupTimers.Timer
@@ -244,7 +244,7 @@ public class LogGroupTimersTest
         void updateNow(long epoch)
         {
             long prevAt = at;
-            now = epoch + rnd.nextLong(schedulerImpreciseLateTolerance) - schedulerPreciseLateTolerance/2;
+            now = Math.max(0, epoch + rnd.nextLong(schedulerImpreciseLateTolerance) - schedulerPreciseLateTolerance/2);
             maxNow = Math.max(now, maxNow);
             scheduling.ensureScheduled(now);
             check(prevAt);

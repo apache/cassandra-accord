@@ -132,8 +132,15 @@ abstract class HomeState extends WaitingState
     {
         Invariants.checkState(!isHomeDoneOrUninitialised());
         Command command = safeCommand.current();
+        if (command.hasBeen(Status.Truncated))
+        {
+            // TODO (required): validate this better
+            setHomeDone(instance);
+            return;
+        }
         Invariants.checkState(!command.hasBeen(Status.Truncated), "Command %s is truncated", command);
 
+        Invariants.checkState(command.durability() != null);
         // TODO (expected): when invalidated, safer to maintain HomeState until known to be globally invalidated
         // TODO (now): validate that we clear HomeState when we receive a Durable reply, to replace the token check logic
         Invariants.checkState(!command.durability().isDurableOrInvalidated(), "Command is durable or invalidated, but we have not cleared the ProgressLog");
@@ -149,6 +156,13 @@ abstract class HomeState extends WaitingState
         if (state == null)
             return;
 
+        Command command = safeCommand.current();
+        if (command.is(Status.Truncated))
+        {
+            state.setHomeDone(instance);
+            return;
+        }
+
         CoordinatePhase status = state.phase();
         if (status.isAtMostReadyToExecute() && state.homeProgress() == Querying)
         {
@@ -159,7 +173,6 @@ abstract class HomeState extends WaitingState
             }
             else
             {
-                Command command = safeCommand.current();
                 ProgressToken token = success.asProgressToken().merge(command);
                 if (prevProgressToken != null)
                     token = token.merge(prevProgressToken);
