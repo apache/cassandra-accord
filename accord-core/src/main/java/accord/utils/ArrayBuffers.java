@@ -18,17 +18,16 @@
 
 package accord.utils;
 
-import accord.api.Key;
-import accord.api.RoutingKey;
-import accord.primitives.Range;
-import accord.primitives.TxnId;
-
 import java.io.Closeable;
 import java.lang.reflect.Array;
 import java.util.AbstractList;
 import java.util.Arrays;
-import java.util.List;
 import java.util.function.IntFunction;
+
+import accord.api.Key;
+import accord.api.RoutingKey;
+import accord.primitives.Range;
+import accord.primitives.TxnId;
 
 import static accord.utils.Invariants.illegalState;
 
