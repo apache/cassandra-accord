@@ -18,8 +18,6 @@
 
 package accord.impl;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
@@ -93,19 +91,16 @@ public class DefaultRequestTimeouts implements RequestTimeouts
         @Override
         public void run()
         {
-            List<Timeout> timedOut = new ArrayList<>();
             lock.lock();
             try
             {
                 long now = node.elapsed(MILLISECONDS);
                 // TODO (expected): should we handle reentrancy? Or at least throw an exception?
-                timeouts.advance(now, this, (s, r) -> timedOut.add(r.timeout));
+                timeouts.advance(now, this, (s, r) -> r.timeout.timeout());
             }
             finally
             {
                 lock.unlock();
-                for (Timeout timeout : timedOut)
-                    timeout.timeout();
             }
         }
 
