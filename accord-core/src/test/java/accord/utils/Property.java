@@ -32,6 +32,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -212,9 +213,21 @@ public class Property
         String stateStr = state == null ? null : state.toString().replace("\n", "\n\t\t");
         sb.append("\tState: ").append(stateStr).append(": ").append(state == null ? "unknown type" : state.getClass().getCanonicalName()).append('\n');
         sb.append("\tHistory:").append('\n');
+        addList(sb, "\t\t", history);
+        return sb.toString();
+    }
+
+    private static void addList(StringBuilder sb, String prefix, List<String> list)
+    {
         int idx = 0;
-        for (var event : history)
-            sb.append("\t\t").append(++idx).append(": ").append(event).append('\n');
+        for (var event : list)
+            sb.append(prefix).append(++idx).append(": ").append(event).append('\n');
+    }
+
+    public static String formatList(String prefix, List<String> list)
+    {
+        StringBuilder sb = new StringBuilder();
+        addList(sb, prefix, list);
         return sb.toString();
     }
 
@@ -467,6 +480,7 @@ public class Property
                         }
                         commands.destroySut(sut, null);
                         commands.destroyState(state, null);
+                        commands.onSuccess(state, sut, history);
                     }
                     catch (Throwable t)
                     {
@@ -682,6 +696,7 @@ public class Property
     {
         Gen<State> genInitialState() throws Throwable;
         SystemUnderTest createSut(State state) throws Throwable;
+        default void onSuccess(State state, SystemUnderTest sut, List<String> history) throws Throwable {}
         default void destroyState(State state, @Nullable Throwable cause) throws Throwable {}
         default void destroySut(SystemUnderTest sut, @Nullable Throwable cause) throws Throwable {}
         Gen<Command<State, SystemUnderTest, ?>> commands(State state) throws Throwable;
@@ -695,6 +710,11 @@ public class Property
     public static <State> CommandsBuilder<State, Void> commands(Supplier<Gen<State>> stateGen)
     {
         return new CommandsBuilder<>(stateGen, ignore -> null);
+    }
+
+    public interface StatefulSuccess<State, SystemUnderTest>
+    {
+        void apply(State state, SystemUnderTest sut, List<String> history) throws Throwable;
     }
 
     public static class CommandsBuilder<State, SystemUnderTest>
@@ -717,6 +737,9 @@ public class Property
         private FailingBiConsumer<State, Throwable> destroyState = null;
         @Nullable
         private FailingBiConsumer<SystemUnderTest, Throwable> destroySut = null;
+        @Nullable
+        private BiFunction<State, Gen<Command<State, SystemUnderTest, ?>>, Gen<Command<State, SystemUnderTest, ?>>> commandsTransformer = null;
+        private final List<StatefulSuccess<State, SystemUnderTest>> onSuccess = new ArrayList<>();
 
         public CommandsBuilder(Supplier<Gen<State>> stateGen, Function<State, SystemUnderTest> sutFactory)
         {
@@ -837,6 +860,18 @@ public class Property
             return this;
         }
 
+        public CommandsBuilder<State, SystemUnderTest> commandsTransformer(BiFunction<State, Gen<Command<State, SystemUnderTest, ?>>, Gen<Command<State, SystemUnderTest, ?>>> commandsTransformer)
+        {
+            this.commandsTransformer = commandsTransformer;
+            return this;
+        }
+
+        public CommandsBuilder<State, SystemUnderTest> onSuccess(StatefulSuccess<State, SystemUnderTest> fn)
+        {
+            onSuccess.add(fn);
+            return this;
+        }
+
         public Commands<State, SystemUnderTest> build()
         {
             Gen<Setup<State, SystemUnderTest>> commandsGen;
@@ -917,7 +952,8 @@ public class Property
                 {
                     if (preCommands != null)
                         preCommands.accept(state);
-                    return commandsGen.map((rs, setup) -> setup.setup(rs, state));
+                    Gen<Command<State, SystemUnderTest, ?>> map = commandsGen.map((rs, setup) -> setup.setup(rs, state));
+                    return commandsTransformer == null ? map : commandsTransformer.apply(state, map);
                 }
 
                 @Override
@@ -933,6 +969,13 @@ public class Property
                 {
                     if (destroySut != null)
                         destroySut.accept(sut, cause);
+                }
+
+                @Override
+                public void onSuccess(State state, SystemUnderTest sut, List<String> history) throws Throwable
+                {
+                    for (var fn : onSuccess)
+                        fn.apply(state, sut, history);
                 }
             };
         }
