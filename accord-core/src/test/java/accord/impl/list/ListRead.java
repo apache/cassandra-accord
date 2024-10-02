@@ -70,7 +70,7 @@ public class ListRead implements Read
         ListStore s = (ListStore)store;
         logger.trace("submitting READ on {} at {} key:{}", s.node, executeAt, key);
         return executor.apply(safeStore.commandStore()).submit(() -> {
-            Ranges unavailable = safeStore.ranges().unsafeToReadAt(executeAt);
+            Ranges unavailable = safeStore.unsafeToReadAt(executeAt);
             ListData result = new ListData();
             switch (key.domain())
             {

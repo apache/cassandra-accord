@@ -1714,11 +1714,6 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         return i;
     }
 
-    public TxnId findFirst()
-    {
-        return byId.length > 0 ? byId[0] : null;
-    }
-
     @Override
     public boolean equals(Object o)
     {

@@ -20,7 +20,7 @@ package accord.impl;
 
 import accord.api.RoutingKey;
 import accord.api.VisibleForImplementation;
-import accord.local.CommandStore;
+import accord.local.SafeCommandStore;
 import accord.primitives.RoutingKeys;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -38,7 +38,7 @@ public class TimestampsForKeys
 
     private TimestampsForKeys() {}
 
-    public static TimestampsForKey updateLastExecutionTimestamps(CommandStore commandStore, SafeTimestampsForKey tfk, TxnId txnId, Timestamp executeAt, boolean isForWriteTxn)
+    public static TimestampsForKey updateLastExecutionTimestamps(SafeCommandStore safeStore, SafeTimestampsForKey tfk, TxnId txnId, Timestamp executeAt, boolean isForWriteTxn)
     {
         TimestampsForKey current = tfk.current();
 
@@ -46,7 +46,7 @@ public class TimestampsForKeys
 
         if (executeAt.compareTo(lastWrite) < 0)
         {
-            if (commandStore.redundantBefore().preBootstrapOrStale(TxnId.min(txnId, current.lastWriteId()), RoutingKeys.of(tfk.key().toUnseekable())) == FULLY)
+            if (safeStore.redundantBefore().preBootstrapOrStale(TxnId.min(txnId, current.lastWriteId()), RoutingKeys.of(tfk.key().toUnseekable())) == FULLY)
                 return current;
             throw illegalState("%s is less than the most recent write timestamp %s", executeAt, lastWrite);
         }
@@ -59,7 +59,7 @@ public class TimestampsForKeys
 
         if (cmp < 0)
         {
-            if (!commandStore.safeToReadAt(executeAt).contains(tfk.key().toUnseekable()))
+            if (!safeStore.safeToReadAt(executeAt).contains(tfk.key().toUnseekable()))
                 return current;
             throw illegalState("%s is less than the most recent executed timestamp %s", executeAt, lastExecuted);
         }
@@ -83,6 +83,6 @@ public class TimestampsForKeys
     @VisibleForImplementation
     public static <D> TimestampsForKey updateLastExecutionTimestamps(AbstractSafeCommandStore<?,?,?> safeStore, RoutingKey key, TxnId txnId, Timestamp executeAt, boolean isForWriteTxn)
     {
-        return updateLastExecutionTimestamps(safeStore.commandStore(), safeStore.timestampsForKey(key), txnId, executeAt, isForWriteTxn);
+        return updateLastExecutionTimestamps(safeStore, safeStore.timestampsForKey(key), txnId, executeAt, isForWriteTxn);
     }
 }

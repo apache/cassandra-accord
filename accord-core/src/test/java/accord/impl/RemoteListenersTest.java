@@ -45,9 +45,11 @@ import accord.api.RoutingKey;
 import accord.impl.LocalListenersTest.TestSafeCommand;
 import accord.local.CommandStore;
 import accord.local.CommandStores;
+import accord.local.DurableBefore;
 import accord.local.Node;
 import accord.local.NodeTimeService;
 import accord.local.PreLoadContext;
+import accord.local.RedundantBefore;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.primitives.SaveStatus;
@@ -418,6 +420,19 @@ public class RemoteListenersTest
         @Override protected SafeCommandsForKey getInternal(RoutingKey key) { return null;}
         @Override protected SafeCommandsForKey getInternalIfLoadedAndInitialised(RoutingKey key) { return null;}
         @Override public boolean canExecuteWith(PreLoadContext context) { return false;}
+
+        @Override
+        public void upsertRedundantBefore(RedundantBefore addRedundantBefore)
+        {
+            unsafeUpsertRedundantBefore(addRedundantBefore);
+        }
+
+        @Override
+        public void upsertDurableBefore(DurableBefore addDurableBefore)
+        {
+            unsafeUpsertDurableBefore(addDurableBefore);
+        }
+
         @Override public <P1, T> T mapReduceActive(Unseekables<?> keys, @Nullable Timestamp withLowerTxnId, Txn.Kind.Kinds kinds, CommandFunction<P1, T, T> map, P1 p1, T initialValue) { return null; }
         @Override public <P1, T> T mapReduceFull(Unseekables<?> keys, TxnId testTxnId, Txn.Kind.Kinds testKind, TestStartedAt testStartedAt, TestDep testDep, TestStatus testStatus, CommandFunction<P1, T, T> map, P1 p1, T initialValue) { return null; }
         @Override public DataStore dataStore() { return null; }

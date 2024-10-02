@@ -208,11 +208,6 @@ public abstract class CommandStores
             return allAt(txnId);
         }
 
-        public @Nonnull Ranges unsafeToReadAt(Timestamp at)
-        {
-            return allAt(at).without(store.safeToReadAt(at));
-        }
-
         public @Nonnull Ranges allAt(Timestamp at)
         {
             return allAt(at.epoch());

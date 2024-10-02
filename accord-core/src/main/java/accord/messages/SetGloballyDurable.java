@@ -48,7 +48,7 @@ public class SetGloballyDurable extends AbstractEpochRequest<SimpleReply>
     @Override
     public SimpleReply apply(SafeCommandStore safeStore)
     {
-        DurableBefore cur = safeStore.commandStore().durableBefore();
+        DurableBefore cur = safeStore.durableBefore();
         DurableBefore upd = DurableBefore.merge(durableBefore, cur);
         // This is done asynchronously
         safeStore.upsertDurableBefore(upd);

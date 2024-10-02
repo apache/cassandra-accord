@@ -164,7 +164,7 @@ public class KeyDepsTest
                 expectedTxnId.remove(txnId);
                 Assertions.assertEquals(expectedTxnId, without.txnIds());
 
-                Assertions.assertEquals(Keys.EMPTY, without.participatingKeys(txnId));
+                Assertions.assertEquals(RoutingKeys.EMPTY, without.participatingKeys(txnId));
                 // all other keys are fine?
                 for (TxnId other : deps.test.txnIds())
                 {

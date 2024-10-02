@@ -173,7 +173,7 @@ public class StoreParticipants
                         ? safeStore.ranges().all()
                         : safeStore.ranges().allAt(executeAt.epoch());
 
-        return safeStore.commandStore().redundantBefore().removePreBootstrap(txnId, ranges);
+        return safeStore.redundantBefore().removePreBootstrap(txnId, ranges);
     }
 
     public Participants<?> executes(SafeCommandStore safeStore, TxnId txnId, Timestamp executeAt)

@@ -105,7 +105,7 @@ public class PreAcceptTest
 
             commandStore.execute(PreLoadContext.contextFor(txnId, txn.keys().toParticipants()), safeStore -> {
                 CommandsForKey cfk = safeStore.get(key.toUnseekable()).current();
-                TxnId commandId = cfk.findFirst();
+                TxnId commandId = cfk.get(0).plainTxnId();
                 Command command = safeStore.ifInitialised(commandId).current();
                 Assertions.assertEquals(Status.PreAccepted, command.status());
             }).begin(new RethrowAgent());
@@ -274,7 +274,7 @@ public class PreAcceptTest
 
             commandStore.execute(PreLoadContext.contextFor(txnId, txn.keys().toParticipants()), safeStore -> {
                 CommandsForKey cfk = safeStore.get(key.toUnseekable()).current();
-                TxnId commandId = cfk.findFirst();
+                TxnId commandId = cfk.get(0).plainTxnId();
                 Command command = safeStore.ifInitialised(commandId).current();
                 Assertions.assertEquals(Status.PreAccepted, command.status());
             }).begin(new RethrowAgent());

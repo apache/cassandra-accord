@@ -113,6 +113,6 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
 
     public void refresh(SafeCommandStore safeStore)
     {
-        updateRedundantBefore(safeStore, safeStore.commandStore().redundantBefore().get(key));
+        updateRedundantBefore(safeStore, safeStore.redundantBefore().get(key));
     }
 }

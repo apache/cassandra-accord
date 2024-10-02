@@ -285,7 +285,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
     {
         Timestamp executeAt = command.executesAtLeast();
         // TODO (required): for awaitsOnlyDeps commands, if we cannot infer an actual executeAtLeast we should confirm no situation where txnId is not an adequately conservative value for unavailable/unsafeToRead
-        return safeStore.ranges().unsafeToReadAt(executeAt);
+        return safeStore.unsafeToReadAt(executeAt);
     }
 
     void read(SafeCommandStore safeStore, Command command)

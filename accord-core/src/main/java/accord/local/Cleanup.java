@@ -52,15 +52,19 @@ import static accord.utils.Invariants.illegalState;
 public enum Cleanup
 {
     NO(Uninitialised),
+    // we don't know if the command has been applied or invalidated as we have incomplete information
+    // so erase what information we don't need in future to decide this
+    // TODO (required): tighten up semantics here (and maybe infer more aggressively)
+    EXPUNGE_PARTIAL(TruncatedApplyWithOutcome),
     TRUNCATE_WITH_OUTCOME(TruncatedApplyWithOutcome),
     TRUNCATE(TruncatedApply),
     INVALIDATE(Invalidated),
     VESTIGIAL(ErasedOrVestigial),
     ERASE(Erased),
-    // erase all fields except any participants and committed executeAt
-    EXPUNGE_PARTIAL(Erased),
     // we can stop storing the record entirely
     EXPUNGE(Erased);
+
+    private static final Cleanup[] VALUES = values();
 
     public final SaveStatus appliesIfNot;
 
@@ -76,18 +80,19 @@ public enum Cleanup
 
     public static Cleanup shouldCleanup(SafeCommandStore safeStore, Command command)
     {
-        return shouldCleanup(safeStore.commandStore(), command, command.participants());
+        return shouldCleanup(safeStore, command, command.participants());
     }
 
     public static Cleanup shouldCleanup(SafeCommandStore safeStore, Command command, @Nonnull StoreParticipants participants)
     {
-        return shouldCleanup(safeStore.commandStore(), command, participants);
+        return shouldCleanup(command.txnId(), command.saveStatus(), command.durability(), participants,
+                             safeStore.redundantBefore(), safeStore.durableBefore());
     }
 
-    public static Cleanup shouldCleanup(CommandStore commandStore, Command command, @Nonnull StoreParticipants participants)
+    public static Cleanup shouldCleanup(Command command, RedundantBefore redundantBefore, DurableBefore durableBefore)
     {
-        return shouldCleanup(command.txnId(), command.saveStatus(), command.durability(), participants,
-                               commandStore.redundantBefore(), commandStore.durableBefore());
+        return shouldCleanup(command.txnId(), command.saveStatus(), command.durability(), command.participants(),
+                             redundantBefore, durableBefore);
     }
 
     public static Cleanup shouldCleanup(TxnId txnId, SaveStatus status, Durability durability, StoreParticipants participants, RedundantBefore redundantBefore, DurableBefore durableBefore)
@@ -237,5 +242,10 @@ public enum Cleanup
         //  i.e., if we know that the shard is remotely durable and we know we don't need it locally (e.g. due to bootstrap)
         //  then we can safely erase. Revisit as part of rationalising RedundantBefore registers.
         return redundantBefore.shardStatus(txnId) == SHARD_REDUNDANT;
+    }
+
+    public static Cleanup forOrdinal(int ordinal)
+    {
+        return VALUES[ordinal];
     }
 }

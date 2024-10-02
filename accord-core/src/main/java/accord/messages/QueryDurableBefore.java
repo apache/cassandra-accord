@@ -42,7 +42,7 @@ public class QueryDurableBefore extends AbstractEpochRequest<QueryDurableBefore.
     @Override
     public DurableBeforeReply apply(SafeCommandStore safeStore)
     {
-        return new DurableBeforeReply(safeStore.commandStore().durableBefore());
+        return new DurableBeforeReply(safeStore.durableBefore());
     }
 
     @Override

@@ -354,7 +354,7 @@ public class Propagate implements PreLoadContext, MapReduceConsume<SafeCommandSt
         if (participants.owns().isEmpty())
             return known.knownForAny();
 
-        RedundantStatus status = safeStore.commandStore().redundantBefore().status(txnId, participants.owns());
+        RedundantStatus status = safeStore.redundantBefore().status(txnId, participants.owns());
 
         // if our peers have truncated this command, then either:
         // 1) we have already applied it locally; 2) the command doesn't apply locally; 3) we are stale; or 4) the command is invalidated
@@ -367,7 +367,7 @@ public class Propagate implements PreLoadContext, MapReduceConsume<SafeCommandSt
             }
 
             Ranges ranges = safeStore.ranges().allSince(txnId.epoch());
-            ranges = safeStore.commandStore().redundantBefore().everExpectToExecute(txnId, ranges);
+            ranges = safeStore.redundantBefore().everExpectToExecute(txnId, ranges);
             if (!ranges.isEmpty())
             {
                 // even though command stores only lose ranges, we still adopt ranges as of some epoch, and re-bootstrap.
@@ -384,14 +384,14 @@ public class Propagate implements PreLoadContext, MapReduceConsume<SafeCommandSt
             return null;
 
         Participants<?> executes = participants.executes(safeStore, txnId, executeAtIfKnown);
-        status = safeStore.commandStore().redundantBefore().status(txnId, executes);
+        status = safeStore.redundantBefore().status(txnId, executes);
         if (tryPurge(safeStore, safeCommand, status))
             return null;
 
         // compute the ranges we expect to execute - i.e. those we own, and are not stale or pre-bootstrap
         // TODO (required): use StoreParticipants.executes
         Ranges ranges = safeStore.ranges().allAt(executeAtIfKnown.epoch());
-        ranges = safeStore.commandStore().redundantBefore().expectToExecute(txnId, executeAtIfKnown, ranges);
+        ranges = safeStore.redundantBefore().expectToExecute(txnId, executeAtIfKnown, ranges);
         if (ranges.isEmpty() || (executes = executes.slice(ranges, Minimal)).isEmpty())
         {
             // TODO (expected): we might prefer to adopt Redundant status, and permit ourselves to later accept the result of the execution and/or definition

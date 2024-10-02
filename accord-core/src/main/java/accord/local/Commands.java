@@ -634,10 +634,10 @@ public class Commands
 
     protected static WaitingOn.Update updateWaitingOn(SafeCommandStore safeStore, CommonAttributes waiting, Timestamp executeAt, WaitingOn.Update update, Participants<?> participants)
     {
-        CommandStore commandStore = safeStore.commandStore();
+        RedundantBefore redundantBefore = safeStore.redundantBefore();
         TxnId minWaitingOnTxnId = update.minWaitingOnTxnId();
-        if (minWaitingOnTxnId != null && commandStore.hasLocallyRedundantDependencies(update.minWaitingOnTxnId(), executeAt, participants))
-            safeStore.commandStore().removeRedundantDependencies(participants, update);
+        if (minWaitingOnTxnId != null && redundantBefore.hasLocallyRedundantDependencies(update.minWaitingOnTxnId(), executeAt, participants))
+            redundantBefore.removeRedundantDependencies(participants, update);
 
         update.forEachWaitingOnId(safeStore, update, waiting, executeAt, (store, upd, w, exec, i) -> {
             SafeCommand dep = store.ifLoadedAndInitialised(upd.txnId(i));
@@ -859,7 +859,7 @@ public class Commands
     {
         TxnId txnId = command.txnId();
         participants = command.participants().supplement(participants);
-        RedundantStatus status = safeStore.commandStore().redundantBefore().status(txnId, participants.owns());
+        RedundantStatus status = safeStore.redundantBefore().status(txnId, participants.owns());
         switch (status)
         {
             default: throw new AssertionError("Unhandled RedundantStatus: " + status);
@@ -937,7 +937,7 @@ public class Commands
                     depSafe = safeStore.ifInitialised(loadDepId);
                     if (depSafe == null)
                     {
-                        RedundantStatus redundantStatus = safeStore.commandStore().redundantBefore().status(waitingId, waiting.partialDeps().participants(loadDepId));
+                        RedundantStatus redundantStatus = safeStore.redundantBefore().status(waitingId, waiting.partialDeps().participants(loadDepId));
                         switch (redundantStatus)
                         {
                             default: throw new AssertionError("Unexpected redundant status: " + redundantStatus);
@@ -1013,7 +1013,7 @@ public class Commands
                         // TODO (desired): slightly costly to invert a large partialDeps collection
                         Participants<?> participants = waiting.partialDeps().participants(dep.txnId());
                         participants = waiting.participants().dependencyExecutesAtLeast(safeStore, participants, waitingId, waiting.executeAt());
-                        RedundantStatus redundantStatus = safeStore.commandStore().redundantBefore().status(dep.txnId(), participants);
+                        RedundantStatus redundantStatus = safeStore.redundantBefore().status(dep.txnId(), participants);
                         switch (redundantStatus)
                         {
                             default: throw new AssertionError("Unknown redundant status: " + redundantStatus);
@@ -1101,13 +1101,13 @@ public class Commands
 
     static Command removeRedundantDependencies(SafeCommandStore safeStore, SafeCommand safeCommand, @Nullable TxnId redundant)
     {
-        CommandStore commandStore = safeStore.commandStore();
         Command.Committed current = safeCommand.current().asCommitted();
 
+        RedundantBefore redundantBefore = safeStore.redundantBefore();
         WaitingOn.Update update = new WaitingOn.Update(current.waitingOn);
         TxnId minWaitingOnTxnId = update.minWaitingOnTxnId();
-        if (minWaitingOnTxnId != null && commandStore.hasLocallyRedundantDependencies(update.minWaitingOnTxnId(), current.executeAt(), current.participants().owns))
-            safeStore.commandStore().removeRedundantDependencies(current.participants().owns, update);
+        if (minWaitingOnTxnId != null && redundantBefore.hasLocallyRedundantDependencies(update.minWaitingOnTxnId(), current.executeAt(), current.participants().owns))
+            redundantBefore.removeRedundantDependencies(current.participants().owns, update);
 
         // if we are a range transaction, being redundant for this transaction does not imply we are redundant for all transactions
         if (redundant != null)
@@ -1248,7 +1248,7 @@ public class Commands
         {
             // TODO (required, later): in the event we are depending on a stale key for an insert into a non-stale key, we cannot proceed and must mark the new key stale
             //  I think today this is unsupported in practice, but must be addressed before we improve efficiency of result handling
-            Ranges staleRanges = permitStaleMissing.commandStore().redundantBefore().staleRanges();
+            Ranges staleRanges = permitStaleMissing.redundantBefore().staleRanges();
             required = required.without(staleRanges);
             return adding == null ? required.isEmpty() : covers.test(adding, required);
         }

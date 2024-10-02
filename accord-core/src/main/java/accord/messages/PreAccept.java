@@ -263,7 +263,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
                                       }, executeAt.equals(txnId) ? null : txnId, builder);
 
             // TODO (required): make sure any sync point is in the past
-            Deps redundant = safeStore.commandStore().redundantBefore().collectDeps(participants.touches(), redundantBuilder, minEpoch, executeAt).build();
+            Deps redundant = safeStore.redundantBefore().collectDeps(participants.touches(), redundantBuilder, minEpoch, executeAt).build();
             Deps result = builder.build().with(redundant);
             Invariants.checkState(!result.contains(txnId));
             return result;

@@ -1368,7 +1368,7 @@ public abstract class Command implements CommonAttributes
                         long maxEpoch = prevEpoch;
                         long epoch = rangesForEpoch.epochs[i];
                         Ranges ranges = rangesForEpoch.ranges[i];
-                        ranges = safeStore.commandStore().redundantBefore().removePreBootstrap(txnId, ranges);
+                        ranges = safeStore.redundantBefore().removePreBootstrap(txnId, ranges);
                         if (!ranges.isEmpty())
                         {
                             Unseekables<?> executionParticipants = participants.route.slice(ranges, Minimal);

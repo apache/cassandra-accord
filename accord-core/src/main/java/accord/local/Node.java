@@ -403,12 +403,23 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     private static Timestamp nowAtLeast(Timestamp current, Timestamp proposed)
     {
-        if (current.epoch() >= proposed.epoch() && current.hlc() >= proposed.hlc())
+        long currentEpoch = current.epoch(), proposedEpoch = proposed.epoch();
+        long maxEpoch = Math.max(currentEpoch, proposedEpoch);
+
+        long currentHlc = current.hlc(), proposedHlc = proposed.hlc();
+        if (currentHlc == proposedHlc)
+        {
+            // we want to produce a zero Hlc
+            int currentFlags = current.flags(), proposedFlags = proposed.flags();
+            if (proposedFlags > currentFlags) ++proposedHlc;
+            else if (proposedFlags == currentFlags && proposed.node.id > current.node.id) ++proposedHlc;
+        }
+        long maxHlc = Math.max(currentHlc, proposedHlc);
+
+        if (maxEpoch == currentEpoch && maxHlc == currentHlc)
             return current;
 
-        return proposed.withEpochAtLeast(proposed.epoch())
-                       .withHlcAtLeast(current.hlc())
-                       .withNode(current.node);
+        return Timestamp.fromValues(maxEpoch, maxHlc, current.flags(), current.node);
     }
 
     @Override

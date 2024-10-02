@@ -59,10 +59,12 @@ import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.CommandStores.RangesForEpoch;
 import accord.local.Commands;
+import accord.local.DurableBefore;
 import accord.local.KeyHistory;
 import accord.local.Node;
 import accord.local.NodeTimeService;
 import accord.local.PreLoadContext;
+import accord.local.RedundantBefore;
 import accord.local.RedundantStatus;
 import accord.local.RejectBefore;
 import accord.local.SafeCommand;
@@ -397,7 +399,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                 boolean done = command.hasBeen(Truncated);
                 if (!done)
                 {
-                    if (redundantBefore().status(txnId, command.route()) == RedundantStatus.PRE_BOOTSTRAP_OR_STALE)
+                    if (unsafeGetRedundantBefore().status(txnId, command.route()) == RedundantStatus.PRE_BOOTSTRAP_OR_STALE)
                         return;
 
                     Route<?> route = command.route().slice(allRanges);
@@ -759,7 +761,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                 return;
 
             Ranges slice = ranges(txnId, updated.executeAtOrTxnId());
-            slice = commandStore.redundantBefore().removeShardRedundant(txnId, updated.executeAtOrTxnId(), slice);
+            slice = commandStore.unsafeGetRedundantBefore().removeShardRedundant(txnId, updated.executeAtOrTxnId(), slice);
             commandStore.rangeCommands.computeIfAbsent(txnId, ignore -> new RangeCommand(commandStore.commands.get(txnId)))
                          .update(((AbstractRanges)updated.participants().touches()).toRanges().slice(slice, Minimal));
         }
@@ -799,6 +801,18 @@ public abstract class InMemoryCommandStore extends CommandStore
         {
             super.setRangesForEpoch(rangesForEpoch);
             ranges = rangesForEpoch;
+        }
+
+        @Override
+        public void upsertRedundantBefore(RedundantBefore addRedundantBefore)
+        {
+            unsafeUpsertRedundantBefore(addRedundantBefore);
+        }
+
+        @Override
+        public void upsertDurableBefore(DurableBefore addDurableBefore)
+        {
+            unsafeUpsertDurableBefore(addDurableBefore);
         }
 
         @Override
