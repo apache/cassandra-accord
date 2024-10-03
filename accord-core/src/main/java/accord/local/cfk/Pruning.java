@@ -275,7 +275,7 @@ public class Pruning
 
                     case APPLIED:
                         long epoch = txn.executeAt.epoch();
-                        if (epoch != activePruneEpoch)
+                        if (epoch != activePruneEpoch && epochPrunedBefores != null)
                         {
                             activePruneEpochBefore = epochPrunedBefores.get(epoch);
                             activePruneEpoch = epoch;
