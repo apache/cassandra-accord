@@ -252,6 +252,11 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         return mayExecute(txn, txn.isCommittedToExecute() ? txn.executeAt : null);
     }
 
+    public boolean mayExecute(TxnId txnId, InternalStatus status, Command command)
+    {
+        return mayExecute(txnId, status.isCommittedToExecute() ? command.executeAt() : null);
+    }
+
     public boolean mayExecute(TxnId txnId, @Nullable Timestamp committedToExecuteAt)
     {
         if (!mayExecute(boundsInfo, txnId)) return false;
@@ -1240,9 +1245,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         if (txnId.compareTo(redundantBefore()) < 0)
             return this;
 
-        boolean mayExecute = mayExecute(next.txnId());
-        if (mayExecute && next.saveStatus().known.isDecidedToExecute())
-            mayExecute = executes(boundsInfo, next.executeAt());
+        boolean mayExecute = mayExecute(txnId, newStatus, next);
         if (isOutOfRange && newStatus == INVALID_OR_TRUNCATED_OR_PRUNED) isOutOfRange = false; // invalidated is safe to use anywhere, and erases deps
 
         TxnId[] loadingAsPrunedFor = loadingPrunedFor(loadingPruned, txnId, null); // we default to null to distinguish between no match, and a match with NO_TXNIDS

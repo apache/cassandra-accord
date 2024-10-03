@@ -45,9 +45,9 @@ import accord.impl.DefaultRemoteListeners;
 import accord.impl.SizeOfIntersectionSorter;
 import accord.impl.TestAgent;
 import accord.local.AgentExecutor;
+import accord.local.DurableBefore;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
 import accord.messages.Callback;
 import accord.messages.Reply;
@@ -65,6 +65,7 @@ import accord.utils.ThreadPoolScheduler;
 
 import static accord.Utils.id;
 import static accord.Utils.idList;
+import static accord.local.NodeTimeService.elapsedWrapperFromNonMonotonicSource;
 import static accord.primitives.Routable.Domain.Key;
 import static accord.primitives.Txn.Kind.Write;
 import static accord.utils.async.AsyncChains.awaitUninterruptibly;
@@ -128,7 +129,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
                              messageSink,
                              configurationService,
                              nowSupplier,
-                             NodeTimeService.elapsedWrapperFromNonMonotonicSource(TimeUnit.MILLISECONDS, nowSupplier),
+                             elapsedWrapperFromNonMonotonicSource(TimeUnit.MILLISECONDS, nowSupplier),
                              () -> store,
                              new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()),
                              new TestAgent(),
@@ -141,6 +142,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
                              DefaultLocalListeners.Factory::new,
                              InMemoryCommandStores.SingleThread::new,
                              new CoordinationAdapter.DefaultFactory(),
+                             DurableBefore.NOOP_PERSISTER,
                              localConfig);
         awaitUninterruptibly(node.unsafeStart());
         node.onTopologyUpdate(topology, true);

@@ -59,9 +59,9 @@ import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.CommandStores.RangesForEpoch;
 import accord.local.Commands;
-import accord.local.DurableBefore;
 import accord.local.KeyHistory;
 import accord.local.Node;
+import accord.local.NodeCommandStoreService;
 import accord.local.NodeTimeService;
 import accord.local.PreLoadContext;
 import accord.local.RedundantBefore;
@@ -131,7 +131,7 @@ public abstract class InMemoryCommandStore extends CommandStore
 
     private InMemorySafeStore current;
 
-    public InMemoryCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
+    public InMemoryCommandStore(int id, NodeCommandStoreService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
     {
         super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder);
     }
@@ -366,7 +366,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         });
 
         // verify we're clearing the progress log
-        new VerifyProgressLogCleared(((Node)time), ranges, Arrays.asList(commands.headMap(syncId, false).keySet().toArray(TxnId[]::new))).run();
+        new VerifyProgressLogCleared(((Node) node), ranges, Arrays.asList(commands.headMap(syncId, false).keySet().toArray(TxnId[]::new))).run();
     }
 
     private class VerifyProgressLogCleared implements Runnable
@@ -565,7 +565,7 @@ public abstract class InMemoryCommandStore extends CommandStore
     @Override
     public String toString()
     {
-        return getClass().getSimpleName() + "{id=" + id + ",node=" + time.id().id  + '}';
+        return getClass().getSimpleName() + "{id=" + id + ",node=" + node.id().id + '}';
     }
 
     static class RangeCommand
@@ -810,15 +810,9 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        public void upsertDurableBefore(DurableBefore addDurableBefore)
-        {
-            unsafeUpsertDurableBefore(addDurableBefore);
-        }
-
-        @Override
         public NodeTimeService time()
         {
-            return commandStore.time;
+            return commandStore.node;
         }
 
         private static class TxnInfo
@@ -1039,7 +1033,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         Runnable active = null;
         final Queue<Runnable> queue = new ConcurrentLinkedQueue<>();
 
-        public Synchronized(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
+        public Synchronized(int id, NodeCommandStoreService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
         {
             super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder);
         }
@@ -1131,7 +1125,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         private Thread thread; // when run in the executor this will be non-null, null implies not running in this store
         private final ExecutorService executor;
 
-        public SingleThread(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
+        public SingleThread(int id, NodeCommandStoreService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
         {
             super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder);
             this.executor = Executors.newSingleThreadExecutor(r -> {
@@ -1215,7 +1209,7 @@ public abstract class InMemoryCommandStore extends CommandStore
             }
         }
 
-        public Debug(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
+        public Debug(int id, NodeCommandStoreService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
         {
             super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder);
         }
@@ -1308,7 +1302,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         {
             logger.info("Logging dependencies on for {}, verbose: {}", txnId, verbose);
             InMemoryCommandStore inMemoryCommandStore = (InMemoryCommandStore) commandStore;
-            logger.info("Node: {}, CommandStore #{}", inMemoryCommandStore.time.id(), commandStore.id());
+            logger.info("Node: {}, CommandStore #{}", inMemoryCommandStore.node.id(), commandStore.id());
             Set<TxnId> visited = new HashSet<>();
             logDependencyGraph(inMemoryCommandStore, txnId, visited, verbose, 0, false);
         }

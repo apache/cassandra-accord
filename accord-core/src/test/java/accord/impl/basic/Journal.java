@@ -89,7 +89,7 @@ public class Journal
                 Command command = reconstruct(diffs, Reconstruct.Last).get(0);
                 if (command.status() == Truncated || command.status() == Invalidated)
                     continue; // Already truncated
-                Cleanup cleanup = Cleanup.shouldCleanup(command, store.unsafeGetRedundantBefore(), store.unsafeGetDurableBefore());
+                Cleanup cleanup = Cleanup.shouldCleanup(command, store.unsafeGetRedundantBefore(), store.durableBefore());
                 switch (cleanup)
                 {
                     case NO:

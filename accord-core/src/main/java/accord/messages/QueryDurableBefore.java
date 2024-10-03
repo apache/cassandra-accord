@@ -18,37 +18,25 @@
 
 package accord.messages;
 
+import javax.annotation.Nullable;
+
+import accord.local.Node;
 import accord.local.PreLoadContext;
 import accord.local.DurableBefore;
-import accord.local.SafeCommandStore;
-import accord.utils.MapReduceConsume;
+import accord.primitives.TxnId;
 
-public class QueryDurableBefore extends AbstractEpochRequest<QueryDurableBefore.DurableBeforeReply>
-        implements Request, PreLoadContext, MapReduceConsume<SafeCommandStore, QueryDurableBefore.DurableBeforeReply>
+public class QueryDurableBefore implements Request, PreLoadContext
 {
     final long epoch;
     public QueryDurableBefore(long epoch)
     {
-        super(null);
         this.epoch = epoch;
     }
 
     @Override
-    public void process()
+    public void process(Node node, Node.Id replyTo, ReplyContext replyContext)
     {
-        node.mapReduceConsumeAllLocal(this, this);
-    }
-
-    @Override
-    public DurableBeforeReply apply(SafeCommandStore safeStore)
-    {
-        return new DurableBeforeReply(safeStore.durableBefore());
-    }
-
-    @Override
-    public DurableBeforeReply reduce(DurableBeforeReply r1, DurableBeforeReply r2)
-    {
-        return new DurableBeforeReply(DurableBefore.merge(r1.durableBeforeMap, r2.durableBeforeMap));
+        node.reply(replyTo, replyContext, new DurableBeforeReply(node.durableBefore()), null);
     }
 
     @Override
@@ -67,6 +55,13 @@ public class QueryDurableBefore extends AbstractEpochRequest<QueryDurableBefore.
     public long waitForEpoch()
     {
         return epoch;
+    }
+
+    @Nullable
+    @Override
+    public TxnId primaryTxnId()
+    {
+        return null;
     }
 
     public static class DurableBeforeReply implements Reply

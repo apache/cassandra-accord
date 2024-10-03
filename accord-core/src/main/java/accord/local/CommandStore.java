@@ -127,7 +127,7 @@ public abstract class CommandStore implements AgentExecutor
     public interface Factory
     {
         CommandStore create(int id,
-                            NodeTimeService time,
+                            NodeCommandStoreService node,
                             Agent agent,
                             DataStore store,
                             ProgressLog.Factory progressLogFactory,
@@ -138,7 +138,7 @@ public abstract class CommandStore implements AgentExecutor
     private static final ThreadLocal<CommandStore> CURRENT_STORE = new ThreadLocal<>();
 
     protected final int id;
-    protected final NodeTimeService time;
+    protected final NodeCommandStoreService node;
     protected final Agent agent;
     protected final DataStore store;
     protected final ProgressLog progressLog;
@@ -148,8 +148,6 @@ public abstract class CommandStore implements AgentExecutor
     // Used in markShardStale to make sure the staleness includes in progresss bootstraps
     private transient NavigableMap<TxnId, Ranges> bootstrapBeganAt = ImmutableSortedMap.of(TxnId.NONE, Ranges.EMPTY); // additive (i.e. once inserted, rolled-over until invalidated, and the floor entry contains additions)
     private RedundantBefore redundantBefore = RedundantBefore.EMPTY;
-    // TODO (expected): store this only once per node
-    private DurableBefore durableBefore = DurableBefore.EMPTY;
     private MaxConflicts maxConflicts = MaxConflicts.EMPTY;
     private int maxConflictsUpdates = 0;
     protected RangesForEpoch rangesForEpoch;
@@ -175,7 +173,7 @@ public abstract class CommandStore implements AgentExecutor
     @Nullable private RejectBefore rejectBefore;
 
     protected CommandStore(int id,
-                           NodeTimeService time,
+                           NodeCommandStoreService node,
                            Agent agent,
                            DataStore store,
                            ProgressLog.Factory progressLogFactory,
@@ -183,7 +181,7 @@ public abstract class CommandStore implements AgentExecutor
                            EpochUpdateHolder epochUpdateHolder)
     {
         this.id = id;
-        this.time = time;
+        this.node = node;
         this.agent = agent;
         this.store = store;
         this.progressLog = progressLogFactory.create(this);
@@ -209,8 +207,6 @@ public abstract class CommandStore implements AgentExecutor
             return;
 
         update = epochUpdateHolder.getAndSet(null);
-        if (!update.addGlobalRanges.isEmpty())
-            safeStore.upsertDurableBefore(DurableBefore.create(update.addGlobalRanges, TxnId.NONE, TxnId.NONE));
         if (update.addRedundantBefore.size() > 0)
             safeStore.upsertRedundantBefore(update.addRedundantBefore);
         if (update.newRangesForEpoch != null)
@@ -247,19 +243,9 @@ public abstract class CommandStore implements AgentExecutor
         this.rejectBefore = newRejectBefore;
     }
 
-    protected void unsafeSetDurableBefore(DurableBefore newDurableBefore)
-    {
-        durableBefore = newDurableBefore;
-    }
-
     protected void unsafeSetRedundantBefore(RedundantBefore newRedundantBefore)
     {
         redundantBefore = newRedundantBefore;
-    }
-
-    protected void unsafeUpsertDurableBefore(DurableBefore addDurableBefore)
-    {
-        durableBefore = DurableBefore.merge(durableBefore, addDurableBefore);
     }
 
     protected void unsafeUpsertRedundantBefore(RedundantBefore addRedundantBefore)
@@ -414,7 +400,7 @@ public abstract class CommandStore implements AgentExecutor
     @Override
     public String toString()
     {
-        return getClass().getSimpleName() + "{id=" + id + ", node=" + time.id().id + '}';
+        return getClass().getSimpleName() + "{id=" + id + ", node=" + node.id().id + '}';
     }
 
     @Nullable
@@ -541,8 +527,6 @@ public abstract class CommandStore implements AgentExecutor
         safeStore.setBootstrapBeganAt(bootstrap(globalSyncId, ranges, bootstrapBeganAt));
         RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, TxnId.NONE, globalSyncId);
         safeStore.upsertRedundantBefore(addRedundantBefore);
-        safeStore.upsertDurableBefore(DurableBefore.create(ranges, TxnId.NONE, TxnId.NONE));
-        // TODO: can we use `upsert` for notifications?
         updatedRedundantBefore(safeStore, globalSyncId, ranges);
     }
 
@@ -552,8 +536,6 @@ public abstract class CommandStore implements AgentExecutor
         final Ranges slicedRanges = durableRanges.slice(safeStore.ranges().allUntil(globalSyncId.epoch()), Minimal);
         RedundantBefore addShardRedundant = RedundantBefore.create(slicedRanges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, globalSyncId, TxnId.NONE, TxnId.NONE);
         safeStore.upsertRedundantBefore(addShardRedundant);
-        DurableBefore addDurableBefore = DurableBefore.create(slicedRanges, globalSyncId, globalSyncId);
-        safeStore.upsertDurableBefore(addDurableBefore);
         updatedRedundantBefore(safeStore, globalSyncId, slicedRanges);
         safeStore = safeStore; // make unusable in lambda
         safeStore.dataStore().snapshot(slicedRanges, globalSyncId).begin((success, fail) -> {
@@ -610,8 +592,6 @@ public abstract class CommandStore implements AgentExecutor
         return () -> {
             AsyncResult<Void> done = execute(empty(), (safeStore) -> {
                 // Merge in a base for any ranges that needs to be covered
-                DurableBefore addDurableBefore = DurableBefore.create(ranges, TxnId.NONE, TxnId.NONE);
-                safeStore.upsertDurableBefore(addDurableBefore);
                 // TODO (review): Convoluted check to not overwrite existing bootstraps with TxnId.NONE
                 // If loading from disk didn't finish before this then we might initialize the range at TxnId.NONE?
                 // Does CommandStores.topology ensure that doesn't happen? Is it fine if it does because it will get superseded?
@@ -640,9 +620,9 @@ public abstract class CommandStore implements AgentExecutor
         return redundantBefore;
     }
 
-    public DurableBefore unsafeGetDurableBefore()
+    public final DurableBefore durableBefore()
     {
-        return durableBefore;
+        return node.durableBefore();
     }
 
     @VisibleForTesting

@@ -80,7 +80,7 @@ public abstract class CommandStores
 
     public interface Factory
     {
-        CommandStores create(NodeTimeService time,
+        CommandStores create(NodeCommandStoreService time,
                              Agent agent,
                              DataStore store,
                              RandomSource random,
@@ -91,7 +91,7 @@ public abstract class CommandStores
 
     private static class StoreSupplier
     {
-        private final NodeTimeService time;
+        private final NodeCommandStoreService time;
         private final Agent agent;
         private final DataStore store;
         private final ProgressLog.Factory progressLogFactory;
@@ -99,7 +99,7 @@ public abstract class CommandStores
         private final CommandStore.Factory shardFactory;
         private final RandomSource random;
 
-        StoreSupplier(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, CommandStore.Factory shardFactory)
+        StoreSupplier(NodeCommandStoreService time, Agent agent, DataStore store, RandomSource random, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, CommandStore.Factory shardFactory)
         {
             this.time = time;
             this.agent = agent;
@@ -369,7 +369,7 @@ public abstract class CommandStores
         this.current = new Snapshot(new ShardHolder[0], Topology.EMPTY, Topology.EMPTY);
     }
 
-    public CommandStores(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor,
+    public CommandStores(NodeCommandStoreService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor,
                          ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, CommandStore.Factory shardFactory)
     {
         this(new StoreSupplier(time, agent, store, random, progressLogFactory, listenersFactory, shardFactory), shardDistributor);
@@ -412,6 +412,7 @@ public abstract class CommandStores
 
         Topology newLocalTopology = newTopology.forNode(supplier.time.id()).trim();
         Ranges addedGlobal = newTopology.ranges().without(prev.global.ranges());
+        node.addNewRangesToDurableBefore(addedGlobal);
         if (!addedGlobal.isEmpty())
         {
             for (ShardHolder shard : prev.shards)

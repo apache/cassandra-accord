@@ -45,7 +45,6 @@ import accord.api.RoutingKey;
 import accord.impl.LocalListenersTest.TestSafeCommand;
 import accord.local.CommandStore;
 import accord.local.CommandStores;
-import accord.local.DurableBefore;
 import accord.local.Node;
 import accord.local.NodeTimeService;
 import accord.local.PreLoadContext;
@@ -425,12 +424,6 @@ public class RemoteListenersTest
         public void upsertRedundantBefore(RedundantBefore addRedundantBefore)
         {
             unsafeUpsertRedundantBefore(addRedundantBefore);
-        }
-
-        @Override
-        public void upsertDurableBefore(DurableBefore addDurableBefore)
-        {
-            unsafeUpsertDurableBefore(addDurableBefore);
         }
 
         @Override public <P1, T> T mapReduceActive(Unseekables<?> keys, @Nullable Timestamp withLowerTxnId, Txn.Kind.Kinds kinds, CommandFunction<P1, T, T> map, P1 p1, T initialValue) { return null; }

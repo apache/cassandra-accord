@@ -18,9 +18,12 @@
 
 package accord.messages;
 
+import javax.annotation.Nullable;
+
 import accord.local.DurableBefore;
+import accord.local.Node;
 import accord.local.PreLoadContext;
-import accord.local.SafeCommandStore;
+import accord.primitives.TxnId;
 
 import static accord.messages.SimpleReply.Ok;
 
@@ -28,42 +31,21 @@ import static accord.messages.SimpleReply.Ok;
 //    finished executing on epoch 1, it may not be safe to mark durable on replicas on epoch 1. This is a very unlikely
 //    race condition, but must consider our behaviour - it may be simpler to wait for a sync point to execute on all epochs
 //    that haven't been closed off.
-public class SetGloballyDurable extends AbstractEpochRequest<SimpleReply>
-        implements Request, PreLoadContext
+public class SetGloballyDurable implements Request, PreLoadContext
 {
     public final DurableBefore durableBefore;
 
     public SetGloballyDurable(DurableBefore durableBefore)
     {
-        super(null);
         this.durableBefore = durableBefore;
     }
 
     @Override
-    public void process()
+    public void process(Node node, Node.Id from, ReplyContext replyContext)
     {
-        node.mapReduceConsumeAllLocal(this, this);
-    }
-
-    @Override
-    public SimpleReply apply(SafeCommandStore safeStore)
-    {
-        DurableBefore cur = safeStore.durableBefore();
-        DurableBefore upd = DurableBefore.merge(durableBefore, cur);
-        // This is done asynchronously
-        safeStore.upsertDurableBefore(upd);
-        return Ok;
-    }
-
-    @Override
-    public SimpleReply reduce(SimpleReply r1, SimpleReply r2)
-    {
-        return r1.merge(r2);
-    }
-
-    @Override
-    public void accept(SimpleReply ok, Throwable failure)
-    {
+        node.markDurable(durableBefore).addCallback((success, fail) -> {
+            node.reply(from, replyContext, fail == null ? Ok : null, fail);
+        });
     }
 
     @Override
@@ -76,5 +58,12 @@ public class SetGloballyDurable extends AbstractEpochRequest<SimpleReply>
     public MessageType type()
     {
         return MessageType.SET_GLOBALLY_DURABLE_REQ;
+    }
+
+    @Nullable
+    @Override
+    public TxnId primaryTxnId()
+    {
+        return null;
     }
 }

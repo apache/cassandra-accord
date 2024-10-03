@@ -40,7 +40,11 @@ public class SetShardDurable extends AbstractEpochRequest<SimpleReply>
     @Override
     public void process()
     {
-        node.mapReduceConsumeLocal(this, exclusiveSyncPoint.route, waitForEpoch(), waitForEpoch(), this);
+        node.markDurable(exclusiveSyncPoint.route.toRanges(), exclusiveSyncPoint.syncId, exclusiveSyncPoint.syncId)
+        .addCallback((success, fail) -> {
+            if (fail != null) node.reply(replyTo, replyContext, null, fail);
+            else node.mapReduceConsumeLocal(this, exclusiveSyncPoint.route, waitForEpoch(), waitForEpoch(), this);
+        });
     }
 
     @Override

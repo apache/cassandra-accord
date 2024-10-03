@@ -29,8 +29,11 @@ import accord.primitives.Participants;
 import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 import accord.utils.Invariants;
+import accord.utils.PersistentField;
 import accord.utils.ReducingIntervalMap;
 import accord.utils.ReducingRangeMap;
+import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
 
 import static accord.primitives.Status.Durability.MajorityOrInvalidated;
 import static accord.primitives.Status.Durability.NotDurable;
@@ -219,4 +222,10 @@ public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
             return new DurableBefore(inclusiveEnds, starts.toArray(new RoutingKey[0]), values.toArray(new Entry[0]));
         }
     }
+
+    public static final PersistentField.Persister<DurableBefore, DurableBefore> NOOP_PERSISTER = new PersistentField.Persister<DurableBefore, DurableBefore>()
+    {
+        @Override public AsyncResult<?> persist(DurableBefore addValue, DurableBefore newValue) { return AsyncResults.success(null); }
+        @Override public DurableBefore load() { return DurableBefore.EMPTY; }
+    };
 }

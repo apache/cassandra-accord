@@ -238,7 +238,6 @@ public abstract class SafeCommandStore
      */
 
     public abstract void upsertRedundantBefore(RedundantBefore addRedundantBefore);
-    public abstract void upsertDurableBefore(DurableBefore addDurableBefore);
 
     protected void unsafeSetRedundantBefore(RedundantBefore newRedundantBefore)
     {
@@ -248,16 +247,6 @@ public abstract class SafeCommandStore
     protected void unsafeUpsertRedundantBefore(RedundantBefore addRedundantBefore)
     {
         commandStore().unsafeUpsertRedundantBefore(addRedundantBefore);
-    }
-
-    protected void unsafeSetDurableBefore(DurableBefore newDurableBefore)
-    {
-        commandStore().unsafeSetDurableBefore(newDurableBefore);
-    }
-
-    protected void unsafeUpsertDurableBefore(DurableBefore addDurableBefore)
-    {
-        commandStore().unsafeUpsertDurableBefore(addDurableBefore);
     }
 
     public void setBootstrapBeganAt(NavigableMap<TxnId, Ranges> newBootstrapBeganAt)
@@ -386,7 +375,7 @@ public abstract class SafeCommandStore
 
     public DurableBefore durableBefore()
     {
-        return commandStore().unsafeGetDurableBefore();
+        return commandStore().node.durableBefore();
     }
 
     public Ranges futureRanges(TxnId txnId)

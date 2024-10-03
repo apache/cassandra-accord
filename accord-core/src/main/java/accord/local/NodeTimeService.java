@@ -28,21 +28,17 @@ import accord.primitives.Timestamp;
 
 public interface NodeTimeService
 {
-    Node.Id id();
     long epoch();
-
     /**
      * Current time in some time unit that may be simulated and not match system time
      */
     long now();
-
     /**
      * Return the current time since some arbitrary epoch in the specified time unit. May be simulated time and not
      * real time. This clock should not go backwards, nor should it generally correct for clock skew - it should
      * only track time elapsed between two points.
      */
     long elapsed(TimeUnit unit);
-
     Timestamp uniqueNow(Timestamp atLeast);
 
     static ToLongFunction<TimeUnit> elapsedWrapperFromMonotonicSource(TimeUnit sourceUnit, LongSupplier monotonicNowSupplier)
@@ -63,31 +59,31 @@ public interface NodeTimeService
 
     class MonotonicWrapper implements LongSupplier
     {
-       private final LongSupplier nowSupplier;
-       private long lastNow = Long.MIN_VALUE;
-       private long delta = 0;
+        private final LongSupplier nowSupplier;
+        private long lastNow = Long.MIN_VALUE;
+        private long delta = 0;
 
-       // Use an arbitrary epoch
-       private final long epoch;
+        // Use an arbitrary epoch
+        private final long epoch;
 
-       private MonotonicWrapper(TimeUnit nowUnit, LongSupplier nowSupplier)
-       {
-           this.nowSupplier = nowSupplier;
-           // pick an arbitrary epoch we can safely convert back to any time unit from the source unit
-           this.epoch = nowUnit.convert(Long.MAX_VALUE / 4, TimeUnit.NANOSECONDS);
-       }
+        private MonotonicWrapper(TimeUnit nowUnit, LongSupplier nowSupplier)
+        {
+            this.nowSupplier = nowSupplier;
+            // pick an arbitrary epoch we can safely convert back to any time unit from the source unit
+            this.epoch = nowUnit.convert(Long.MAX_VALUE / 4, TimeUnit.NANOSECONDS);
+        }
 
-       @Override
-       public synchronized long getAsLong()
-       {
-           // Only use now as a source of forward progression
-           long now = nowSupplier.getAsLong();
-           // If it moves backwards, remember how far backwards and always add that
-           if (now < lastNow)
-               delta = lastNow - now;
-           lastNow = now;
+        @Override
+        public synchronized long getAsLong()
+        {
+            // Only use now as a source of forward progression
+            long now = nowSupplier.getAsLong();
+            // If it moves backwards, remember how far backwards and always add that
+            if (now < lastNow)
+                delta = lastNow - now;
+            lastNow = now;
 
-           return now + delta + epoch;
-       }
-    };
+            return now + delta + epoch;
+        }
+    }
 }

@@ -55,7 +55,6 @@ import accord.local.Command.AbstractCommand;
 import accord.local.CommandStore;
 import accord.local.CommandStores;
 import accord.local.CommonAttributes;
-import accord.local.DurableBefore;
 import accord.local.Node;
 import accord.local.NodeTimeService;
 import accord.local.PreLoadContext;
@@ -772,12 +771,6 @@ public class CommandsForKeyTest
         public void upsertRedundantBefore(RedundantBefore addRedundantBefore)
         {
             unsafeUpsertRedundantBefore(addRedundantBefore);
-        }
-
-        @Override
-        public void upsertDurableBefore(DurableBefore addDurableBefore)
-        {
-            unsafeUpsertDurableBefore(addDurableBefore);
         }
 
         @Override
