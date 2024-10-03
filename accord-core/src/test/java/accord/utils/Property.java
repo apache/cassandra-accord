@@ -515,7 +515,7 @@ public class Property
                 cmd.process(state, sut);
                 return;
             }
-            TimeoutUtils.runBlocking(stepTimeout, "Stateful Step " + id, () -> cmd.process(state, sut));
+            TimeoutUtils.runBlocking(stepTimeout, "Stateful Step " + id + ": " + cmd.detailed(state), () -> cmd.process(state, sut));
         }
     }
 

@@ -59,7 +59,9 @@ public class TimeoutUtils
         catch (TimeoutException e)
         {
             t.interrupt();
-            throw e;
+            TimeoutException e2 = new TimeoutException(threadName);
+            e2.setStackTrace(e.getStackTrace());
+            throw e2;
         }
     }
 }
