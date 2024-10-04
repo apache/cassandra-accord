@@ -217,7 +217,10 @@ public class StoreParticipants
         if (!(obj instanceof StoreParticipants)) return false;
         if (obj == this) return true;
         StoreParticipants that = (StoreParticipants) obj;
-        return Objects.equals(route, that.route) && owns.equals(that.owns) && touches.equals(that.touches);
+        return Objects.equals(route, that.route)
+               && owns.equals(that.owns)
+               && touches.equals(that.touches)
+               && hasTouched.equals(that.hasTouched);
     }
 
     public String toString()
