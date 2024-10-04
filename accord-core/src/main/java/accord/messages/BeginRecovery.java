@@ -215,7 +215,7 @@ public class BeginRecovery extends TxnRequest.WithUnsynced<BeginRecovery.Recover
     @Override
     public KeyHistory keyHistory()
     {
-        return KeyHistory.COMMANDS;
+        return KeyHistory.RECOVERY;
     }
 
     @Override

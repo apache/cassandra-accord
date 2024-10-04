@@ -102,11 +102,7 @@ public class PersistentField<Input, Saved>
         Saved newValue = merge.apply(inputValue, startingValue);
         this.latestPending = newValue;
         int id = ++nextId;
-
-        synchronized (this)
-        {
-            pending.add(new Pending<>(id, newValue));
-        }
+        pending.add(new Pending<>(id, newValue));
 
         AsyncResult<?> pendingWrite = persister.persist(inputValue, newValue);
         pendingWrite.addCallback((success, fail) -> {

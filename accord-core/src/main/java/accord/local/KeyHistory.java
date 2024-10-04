@@ -26,6 +26,7 @@ public enum KeyHistory
 {
     TIMESTAMPS,
     COMMANDS,
+    RECOVERY,
     NONE;
 
     public boolean isNone()

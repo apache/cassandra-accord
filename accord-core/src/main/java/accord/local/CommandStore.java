@@ -69,6 +69,7 @@ import static accord.primitives.Routables.Slice.Minimal;
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static accord.utils.Invariants.checkState;
 import static accord.utils.Invariants.illegalState;
+import static accord.utils.Invariants.nonNull;
 
 /**
  * Single threaded internal shard of accord transaction metadata
@@ -220,7 +221,7 @@ public abstract class CommandStore implements AgentExecutor
 
     protected void unsafeSetRangesForEpoch(RangesForEpoch newRangesForEpoch)
     {
-        rangesForEpoch = newRangesForEpoch;
+        rangesForEpoch = nonNull(newRangesForEpoch);
     }
 
     public abstract boolean inStore();

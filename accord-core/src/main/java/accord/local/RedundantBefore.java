@@ -299,6 +299,17 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
             return safeToRead;
         }
 
+        static TxnId minGcBefore(Entry entry, @Nullable TxnId minGcBefore)
+        {
+            if (entry == null)
+                return minGcBefore;
+
+            if (minGcBefore == null)
+                return entry.gcBefore;
+
+            return TxnId.min(minGcBefore, entry.gcBefore);
+        }
+
         static Ranges expectToExecute(Entry entry, @Nonnull Ranges executeRanges, TxnId txnId, @Nullable Timestamp executeAt)
         {
             if (entry == null || (executeAt == null ? entry.outOfBounds(txnId) : entry.outOfBounds(txnId, executeAt)))
@@ -572,6 +583,11 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
     public Ranges validateSafeToRead(Timestamp forBootstrapAt, Ranges ranges)
     {
         return foldl(ranges, Entry::validateSafeToRead, ranges, forBootstrapAt, null, r -> false);
+    }
+
+    public TxnId minGcBefore(Routables<?> participants)
+    {
+        return TxnId.nonNullOrMax(TxnId.NONE, foldl(participants, Entry::minGcBefore, null, ignore -> false));
     }
 
     /**

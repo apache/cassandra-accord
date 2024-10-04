@@ -43,6 +43,7 @@ import accord.primitives.Participants;
 import accord.primitives.ProgressToken;
 import accord.primitives.Ranges;
 import accord.primitives.Route;
+import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.utils.Invariants;
 import accord.utils.LogGroupTimers;
@@ -355,7 +356,9 @@ public class DefaultProgressLog implements ProgressLog, Runnable
         if (update != command)
             command = blockedBy.updateAttributes(safeStore, update);
 
-        Invariants.checkState(safeStore.ranges().allSince(command.txnId().epoch()).intersects(command.participants().hasTouched()));
+        // TODO (required): tighten up ExclusiveSyncPoint range bounds
+        Invariants.checkState((command.txnId().is(Txn.Kind.ExclusiveSyncPoint) ? safeStore.ranges().all()
+                                                                               : safeStore.ranges().allSince(command.txnId().epoch())).intersects(command.participants().hasTouched()));
 
         // TODO (consider): consider triggering a preemption of existing coordinator (if any) in some circumstances;
         //                  today, an LWT can pre-empt more efficiently (i.e. instantly) a failed operation whereas Accord will

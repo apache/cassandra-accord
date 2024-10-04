@@ -465,6 +465,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                         case NONE:
                             continue;
                         case COMMANDS:
+                        case RECOVERY:
                             commandsForKey.put(key, commandsForKey((RoutingKey) key).createSafeReference());
                             break;
                         case TIMESTAMPS:
