@@ -20,6 +20,7 @@ package accord.coordinate;
 
 import accord.coordinate.ExecuteSyncPoint.ExecuteExclusiveSyncPoint;
 import accord.coordinate.tracking.AllTracker;
+import accord.coordinate.tracking.RequestStatus;
 import accord.local.Node;
 import accord.messages.Callback;
 import accord.messages.ReadData.ReadReply;
@@ -27,6 +28,8 @@ import accord.messages.SetShardDurable;
 import accord.messages.WaitUntilApplied;
 import accord.primitives.Range;
 import accord.primitives.SyncPoint;
+import accord.utils.Invariants;
+import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.async.AsyncResult;
 
 public class CoordinateShardDurable extends ExecuteExclusiveSyncPoint implements Callback<ReadReply>
@@ -52,6 +55,18 @@ public class CoordinateShardDurable extends ExecuteExclusiveSyncPoint implements
 
     protected void start()
     {
-        node.send(tracker.nodes(), to -> new WaitUntilApplied(to, tracker.topologies(), syncPoint.syncId, syncPoint.route, syncPoint.syncId.epoch()), this);
+        SortedArrayList<Node.Id> contact = tracker.filterAndRecordFaulty();
+        SortedArrayList<Node.Id> allStaleNodes = tracker.topologies().staleNodes();
+        SortedArrayList<Node.Id> allCurrentNodes = tracker.topologies().current().nodes();
+        SortedArrayList<Node.Id> staleNodes = contact.without(id -> !allStaleNodes.contains(id))
+                                                     .without(id -> !allCurrentNodes.contains(id));
+        contact = contact.without(staleNodes);
+        for (Node.Id id :staleNodes)
+        {
+            RequestStatus newStatus = tracker.recordSuccess(id);
+            Invariants.checkState(newStatus != RequestStatus.Success);
+        }
+        if (contact == null) tryFailure(new Exhausted(syncPoint.syncId, syncPoint.route.homeKey(), null));
+        else node.send(contact, to -> new WaitUntilApplied(to, tracker.topologies(), syncPoint.syncId, syncPoint.route, syncPoint.syncId.epoch()), this);
     }
 }

@@ -27,8 +27,6 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import accord.api.Scheduler;
-
 import static java.util.concurrent.TimeUnit.DAYS;
 import static java.util.concurrent.TimeUnit.HOURS;
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
@@ -40,14 +38,14 @@ public class LogGroupTimersTest
     public void test()
     {
         Random random = new Random();
-        for (int i = 0 ; i < 100 ; ++i)
+        for (int i = 0 ; i < 10000 ; ++i)
             testOne(random.nextLong(), 1000, 100);
     }
 
     @Test
     public void testOne()
     {
-        testOne(5843168000636021001L, 1000, 100);
+        testOne(-9121426382346619484L, 1000, 100);
     }
 
     static class Timer extends LogGroupTimers.Timer
@@ -106,7 +104,6 @@ public class LogGroupTimersTest
             LogGroupTimers<Timer> test = new LogGroupTimers<>(MICROSECONDS);
             TreeSet<Timer> canonical = new TreeSet<>(Timer::compareDeadline);
             List<Timer> readTest = new ArrayList<>(), readCanonical = new ArrayList<>();
-            TestScheduler testScheduler = new TestScheduler(rnd, test, globalMaxDeadline, canonical);
             TreeSet<Timer> randomOrder = new TreeSet<>(Timer::compareRandom);
             int timerId = 0;
             for (int round = 0 ; round < rounds ; ++round)
@@ -118,9 +115,6 @@ public class LogGroupTimersTest
                 long minDeadline = test.curEpoch + rnd.nextLong(globalMaxDeadline - deadlineClustering);
                 long maxDeadline = minDeadline + deadlineClustering;
 
-                if (rnd.nextBoolean())
-                    testScheduler.updateNow(test.curEpoch);
-
                 while (adds > 0 || ((removes + updates) > 0 && !canonical.isEmpty()))
                 {
                     boolean shouldAdd = adds > 0 && ((removes + updates == 0) || canonical.isEmpty() || rnd.nextBoolean());
@@ -129,7 +123,6 @@ public class LogGroupTimersTest
                         --adds;
                         Timer add = new Timer(rnd.nextLong(minDeadline, maxDeadline), rnd.nextInt(), ++timerId);
                         test.add(add.deadline, add);
-                        testScheduler.add(add.deadline);
                         canonical.add(add);
                         randomOrder.add(add);
                     }
@@ -144,7 +137,6 @@ public class LogGroupTimersTest
                             int newWeight = rnd.nextInt();
                             timer.update(newDeadline, newWeight);
                             test.update(newDeadline, timer);
-                            testScheduler.add(newDeadline);
                             randomOrder.add(timer);
                             canonical.add(timer);
                         }
@@ -156,8 +148,22 @@ public class LogGroupTimersTest
                     }
                 }
 
+                if (!canonical.isEmpty())
+                {
+                    Timer first = canonical.first();
+                    Assertions.assertTrue(test.wakeAt() <= first.deadline);
+                    Assertions.assertTrue(test.wakeAt() >= test.curEpoch);
+                }
+
                 if (rnd.decide(readChance))
                     testAdvance(test, canonical, randomOrder, readTest, readCanonical, maxBatchSize, rnd);
+
+                if (!canonical.isEmpty())
+                {
+                    Timer first = canonical.first();
+                    Assertions.assertTrue(test.wakeAt() <= first.deadline);
+                    Assertions.assertTrue(test.wakeAt() >= test.curEpoch);
+                }
             }
 
             while (!canonical.isEmpty())
@@ -201,12 +207,6 @@ public class LogGroupTimersTest
                 nextCanonical.add(canonical.pollFirst());
 
             long advanceTo = nextCanonical.get(nextCanonical.size() - 1).deadline;
-            if (rnd.nextBoolean())
-            {
-                Timer first = nextCanonical.get(0);
-                Assertions.assertTrue(test.nextDeadlineEpoch() <= first.deadline);
-                Assertions.assertEquals(first, test.peekIfSoonerThan(first.deadline));
-            }
             test.advance(advanceTo, nextTest, List::add);
         }
 
@@ -217,87 +217,4 @@ public class LogGroupTimersTest
         nextTest.clear();
         ++i;
     }
-
-    static class TestScheduler implements Scheduler
-    {
-        final RandomSource rnd;
-        final long schedulerImpreciseLateTolerance;
-        final long schedulerPreciseLateTolerance;
-        final long schedulerPreciseDelayThreshold;
-        final LogGroupTimers<Timer>.Scheduling scheduling;
-        final TreeSet<Timer> canonical;
-
-        long now;
-        long maxNow;
-        long at;
-
-        TestScheduler(RandomSource rnd, LogGroupTimers<Timer> test, long globalMaxDeadline, TreeSet<Timer> canonical)
-        {
-            this.rnd = rnd;
-            this.canonical = canonical;
-            schedulerImpreciseLateTolerance = rnd.nextLong(globalMaxDeadline / 128);
-            schedulerPreciseLateTolerance = rnd.nextLong(globalMaxDeadline / 128);
-            schedulerPreciseDelayThreshold = rnd.nextLong(globalMaxDeadline / 128);
-            scheduling = test.new Scheduling(this, timer -> null, schedulerImpreciseLateTolerance, schedulerPreciseLateTolerance, schedulerPreciseDelayThreshold);
-        }
-
-        void updateNow(long epoch)
-        {
-            long prevAt = at;
-            now = Math.max(0, epoch + rnd.nextLong(schedulerImpreciseLateTolerance) - schedulerPreciseLateTolerance/2);
-            maxNow = Math.max(now, maxNow);
-            scheduling.ensureScheduled(now);
-            check(prevAt);
-        }
-
-        @Override
-        public Scheduled recurring(Runnable run, long delay, TimeUnit units)
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public Scheduled once(Runnable run, long delay, TimeUnit units)
-        {
-            at = maxNow + delay;
-            return new Scheduled()
-            {
-                @Override
-                public void cancel()
-                {
-                    at = 0;
-                }
-
-                @Override
-                public boolean isDone()
-                {
-                    return false;
-                }
-            };
-        }
-
-        @Override
-        public void now(Runnable run)
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        public void add(long deadline)
-        {
-            long prev = at;
-            scheduling.maybeReschedule(now, deadline);
-            check(prev);
-        }
-
-        private void check(long prevAt)
-        {
-            if (canonical.isEmpty())
-                return;
-
-            Timer first = canonical.first();
-            Assertions.assertTrue(at <= prevAt || prevAt < first.deadline);
-            Assertions.assertEquals(at, scheduling.scheduledAt());
-        }
-    }
-
 }

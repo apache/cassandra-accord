@@ -68,6 +68,8 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
     @Override
     void onPreAccepted(Topologies topologies, Timestamp executeAt, List<PreAcceptOk> oks)
     {
+        // TODO (expected): this condition is too strong - we only need fast path _votes_ in the proposal epoch
+        //  but must have replied from a fast path quorum in earlier epochs
         if (tracker.hasFastPathAccepted())
         {
             Deps deps = Deps.merge(oks, oks.size(), List::get, ok -> ok.witnessedAt.equals(txnId) ? ok.deps : null);

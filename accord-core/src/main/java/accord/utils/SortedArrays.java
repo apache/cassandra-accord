@@ -18,12 +18,14 @@
 
 package accord.utils;
 
+import java.lang.reflect.Array;
 import java.util.AbstractList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.function.IntBinaryOperator;
 import java.util.function.IntFunction;
+import java.util.function.Predicate;
 
 import accord.utils.ArrayBuffers.ObjectBuffers;
 import accord.utils.ArrayBuffers.IntBufferAllocator;
@@ -32,6 +34,7 @@ import net.nicoulaj.compilecommand.annotations.Inline;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import static accord.utils.ArrayBuffers.cachedAny;
 import static accord.utils.ArrayBuffers.uncached;
 import static accord.utils.Invariants.checkArgument;
 import static accord.utils.Invariants.illegalState;
@@ -64,13 +67,13 @@ public class SortedArrays
             return new SortedArrayList<>(items);
         }
 
-        public static <T extends Comparable<? super T>> SortedArrayList<T> copySorted(Collection<T> copy, IntFunction<T[]> allocator)
+        public static <T extends Comparable<? super T>> SortedArrayList<T> copySorted(Collection<? extends T> copy, IntFunction<T[]> allocator)
         {
             T[] array = copy.toArray(allocator);
             return new SortedArrayList<>(array);
         }
 
-        public static <T extends Comparable<? super T>> SortedArrayList<T> copyUnsorted(Collection<T> copy, IntFunction<T[]> allocator)
+        public static <T extends Comparable<? super T>> SortedArrayList<T> copyUnsorted(Collection<? extends T> copy, IntFunction<T[]> allocator)
         {
             T[] array = copy.toArray(allocator);
             Arrays.sort(array);
@@ -135,8 +138,47 @@ public class SortedArrays
 
         public SortedArrayList<T> without(SortedArrayList<T> without)
         {
-            T[] array = (T[])SortedArrays.linearSubtract(Comparable::compareTo, this.array, without.array, ArrayBuffers.cachedAny());
+            // TODO (expected): wrap cachedAny with a complete() method that copies to an array of the source type.
+            T[] array = (T[])SortedArrays.linearSubtract(Comparable::compareTo, this.array, without.array, ArrayBuffers.uncached(this.array));
             return array == this.array ? this : new SortedArrayList<>(array);
+        }
+
+        public SortedArrayList<T> with(SortedArrayList<T> with)
+        {
+            T[] array = (T[])SortedArrays.linearUnion(this.array, this.array.length, with.array, with.array.length, Comparable::compareTo, ArrayBuffers.uncached(this.array));
+            return array == this.array ? this : new SortedArrayList<>(array);
+        }
+
+        public SortedArrayList<T> without(Predicate<T> remove)
+        {
+            Object[] buffer = null;
+            int bufferCount = 0;
+            int previ = 0;
+            for (int i = 0 ; i < size() ; ++i)
+            {
+                T test = get(i);
+                if (remove.test(test))
+                {
+                    if (buffer == null)
+                        buffer = cachedAny().get(size());
+
+                    int copyCount = i - previ;
+                    System.arraycopy(array, previ, buffer, bufferCount, copyCount);
+                    previ = i + 1;
+                    bufferCount += copyCount;
+                }
+            }
+
+            if (buffer == null)
+                return this;
+
+            int copyCount = size() - previ;
+            System.arraycopy(array, previ, buffer, bufferCount, copyCount);
+            bufferCount += copyCount;
+
+            T[] newArray = (T[]) Array.newInstance(this.array.getClass().getComponentType(), bufferCount);
+            System.arraycopy(buffer, 0, newArray, 0, bufferCount);
+            return SortedArrayList.ofSorted(newArray);
         }
     }
 
@@ -183,17 +225,17 @@ public class SortedArrays
         return linearUnion(left, leftLength, right, rightLength, Comparable::compareTo, buffers);
     }
 
-    public static <T> T[] linearUnion(T[] left, int leftLength, T[] right, int rightLength, AsymmetricComparator<? super T, ? super T> comparator, ObjectBuffers<T> buffers)
+    public static <O, T extends O> O[] linearUnion(T[] left, int leftLength, T[] right, int rightLength, AsymmetricComparator<? super T, ? super T> comparator, ObjectBuffers<O> buffers)
     {
         return linearUnion(left, 0, leftLength, right, 0, rightLength, comparator, buffers);
     }
 
-    public static <T> T[] linearUnion(T[] left, int leftStart, int leftEnd, T[] right, int rightStart, int rightEnd, AsymmetricComparator<? super T, ? super T> comparator, ObjectBuffers<T> buffers)
+    public static <O, T extends O> O[] linearUnion(T[] left, int leftStart, int leftEnd, T[] right, int rightStart, int rightEnd, AsymmetricComparator<? super T, ? super T> comparator, ObjectBuffers<O> buffers)
     {
         int leftIdx = leftStart;
         int rightIdx = rightStart;
 
-        T[] result = null;
+        O[] result = null;
         int resultSize = 0;
 
         // first, pick the superset candidate and merge the two until we find the first missing item

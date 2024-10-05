@@ -46,7 +46,7 @@ import accord.impl.LocalListenersTest.TestSafeCommand;
 import accord.local.CommandStore;
 import accord.local.CommandStores;
 import accord.local.Node;
-import accord.local.NodeTimeService;
+import accord.local.NodeCommandStoreService;
 import accord.local.PreLoadContext;
 import accord.local.RedundantBefore;
 import accord.local.SafeCommand;
@@ -431,7 +431,7 @@ public class RemoteListenersTest
         @Override public DataStore dataStore() { return null; }
         @Override public Agent agent() { return null; }
         @Override public ProgressLog progressLog() { return null; }
-        @Override public NodeTimeService time() { return null; }
+        @Override public NodeCommandStoreService node() { return null; }
         @Override public CommandStores.RangesForEpoch ranges() { return null; }
         @Override public void registerHistoricalTransactions(Deps deps) { }
     }

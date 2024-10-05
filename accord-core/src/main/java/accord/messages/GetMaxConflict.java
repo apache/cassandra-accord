@@ -65,7 +65,7 @@ public class GetMaxConflict extends TxnRequest.WithUnsynced<GetMaxConflict.GetMa
     public GetMaxConflictOk apply(SafeCommandStore safeStore)
     {
         Timestamp maxConflict = safeStore.commandStore().maxConflict(scope);
-        return new GetMaxConflictOk(maxConflict, Math.max(safeStore.time().epoch(), node.epoch()));
+        return new GetMaxConflictOk(maxConflict, Math.max(safeStore.node().epoch(), node.epoch()));
     }
 
     @Override

@@ -35,6 +35,7 @@ import accord.messages.BeginInvalidation.InvalidateReply;
 import accord.messages.Callback;
 import accord.topology.Topology;
 import accord.utils.Invariants;
+import accord.utils.SortedArrays;
 
 import javax.annotation.Nullable;
 
@@ -92,7 +93,9 @@ public class Invalidate implements Callback<InvalidateReply>
 
     private void start()
     {
-        node.send(tracker.nodes(), to -> new BeginInvalidation(to, tracker.topologies(), txnId, invalidateWith, ballot), this);
+        SortedArrays.SortedArrayList<Node.Id> contact = tracker.filterAndRecordFaulty();
+        if (contact == null) callback.accept(null, new Exhausted(null, null, null));
+        else node.send(contact, to -> new BeginInvalidation(to, tracker.topologies(), txnId, invalidateWith, ballot), this);
     }
 
     @Override

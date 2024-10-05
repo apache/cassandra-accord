@@ -24,22 +24,42 @@ import java.util.function.ToLongFunction;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import accord.primitives.Timestamp;
-
-public interface NodeTimeService
+public interface TimeService
 {
-    long epoch();
     /**
      * Current time in some time unit that may be simulated and not match system time
      */
     long now();
+
     /**
      * Return the current time since some arbitrary epoch in the specified time unit. May be simulated time and not
      * real time. This clock should not go backwards, nor should it generally correct for clock skew - it should
      * only track time elapsed between two points.
      */
     long elapsed(TimeUnit unit);
-    Timestamp uniqueNow(Timestamp atLeast);
+
+    static TimeService ofNonMonotonic(LongSupplier now, TimeUnit units)
+    {
+        return of(now, elapsedWrapperFromNonMonotonicSource(units, now));
+    }
+
+    static TimeService of(LongSupplier now, ToLongFunction<TimeUnit> elapsed)
+    {
+        return new TimeService()
+        {
+            @Override
+            public long now()
+            {
+                return now.getAsLong();
+            }
+
+            @Override
+            public long elapsed(TimeUnit unit)
+            {
+                return elapsed.applyAsLong(unit);
+            }
+        };
+    }
 
     static ToLongFunction<TimeUnit> elapsedWrapperFromMonotonicSource(TimeUnit sourceUnit, LongSupplier monotonicNowSupplier)
     {

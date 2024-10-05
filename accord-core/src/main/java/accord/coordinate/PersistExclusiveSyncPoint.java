@@ -28,6 +28,7 @@ import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.topology.Topologies;
+import accord.utils.SortedArrays;
 
 public class PersistExclusiveSyncPoint extends Persist
 {
@@ -40,13 +41,21 @@ public class PersistExclusiveSyncPoint extends Persist
     public void start(Apply.Factory factory, Apply.Kind kind, Topologies all, Writes writes, Result result)
     {
         factory = Apply.wrapForExclusiveSyncPoint(factory);
-        for (Node.Id to : topologies.nodes())
+        SortedArrays.SortedArrayList<Node.Id> contact = tracker.filterAndRecordFaulty();
+        if (contact == null)
         {
-            Apply apply = factory.create(kind, to, all, txnId, route, txn, executeAt, stableDeps, writes, result);
-            if (apply == null)
-                tracker.recordSuccess(to);
-            else
-                node.send(to, apply, this);
+            // TODO (expected): we should report this somewhere?
+        }
+        else
+        {
+            for (Node.Id to : contact)
+            {
+                Apply apply = factory.create(kind, to, all, txnId, route, txn, executeAt, stableDeps, writes, result);
+                if (apply == null)
+                    tracker.recordSuccess(to);
+                else
+                    node.send(to, apply, this);
+            }
         }
     }
 }

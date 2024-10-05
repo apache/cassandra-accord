@@ -18,27 +18,31 @@
 
 package accord.coordinate.tracking;
 
+import accord.api.TopologySorter;
 import accord.local.Node.Id;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.topology.Topology;
 
 import accord.utils.Invariants;
+import accord.utils.SortedArrays.SortedArrayList;
+
 import com.google.common.annotations.VisibleForTesting;
 
-import java.util.*;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.IntFunction;
 import java.util.function.Predicate;
 
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.NoChange;
+import static accord.coordinate.tracking.RequestStatus.Failed;
+import static accord.utils.ArrayBuffers.cachedAny;
 
 public abstract class AbstractTracker<ST extends ShardTracker>
 {
     public enum ShardOutcomes implements ShardOutcome<AbstractTracker<?>>
     {
-        Fail(RequestStatus.Failed),
+        Fail(Failed),
         Success(RequestStatus.Success),
         SendMore(null),
         NoChange(RequestStatus.NoChange);
@@ -115,6 +119,8 @@ public abstract class AbstractTracker<ST extends ShardTracker>
         this.waitingOnShards = shardCount;
     }
 
+    protected abstract RequestStatus recordFailure(Id from);
+
     protected int topologyOffset(int topologyIdx)
     {
         return topologyIdx * maxShardsPerEpoch();
@@ -175,14 +181,24 @@ public abstract class AbstractTracker<ST extends ShardTracker>
         return true;
     }
 
-    public Collection<Id> nodes()
+    public SortedArrayList<Id> nodes()
     {
         return topologies.nodes();
     }
 
-    public Collection<Id> nonStaleNodes()
+    public SortedArrayList<Id> filterAndRecordFaulty()
     {
-        return topologies.nonStaleNodes();
+        return filterAndRecordFaulty(topologies.nodes());
+    }
+
+    public SortedArrayList<Id> filterAndRecordFaulty(SortedArrayList<Id> ids)
+    {
+        return filterAndRecordFaulty(ids, topologies, this);
+    }
+
+    public SortedArrayList<Id> filterAndRecordStale(SortedArrayList<Id> ids)
+    {
+        return filterAndRecordFaulty(ids, topologies, this);
     }
 
     public ST get(int shardIndex)
@@ -202,5 +218,39 @@ public abstract class AbstractTracker<ST extends ShardTracker>
     protected int maxShardsPerEpoch()
     {
         return maxShardsPerEpoch;
+    }
+
+    public static SortedArrayList<Id> filterAndRecordFaulty(SortedArrayList<Id> nodes, TopologySorter sorter, AbstractTracker<?> reportTo)
+    {
+        Object[] buffer = null;
+        int bufferCount = 0;
+        int previ = 0;
+        for (int i = 0 ; i < nodes.size() ; ++i)
+        {
+            Id node = nodes.get(i);
+            if (sorter.isFaulty(node))
+            {
+                if (Failed == reportTo.recordFailure(node))
+                    return null;
+
+                if (buffer == null)
+                    buffer = cachedAny().get(nodes.size());
+
+                int count = i - previ;
+                System.arraycopy(nodes.backingArrayUnsafe(), previ, buffer, bufferCount, count);
+                previ = i + 1;
+                bufferCount += count;
+            }
+        }
+        if (buffer == null)
+            return nodes;
+
+        int count = nodes.size() - previ;
+        System.arraycopy(nodes.backingArrayUnsafe(), previ, buffer, bufferCount, count);
+        bufferCount += count;
+
+        Id[] newIds = new Id[bufferCount];
+        System.arraycopy(buffer, 0, newIds, 0, bufferCount);
+        return SortedArrayList.ofSorted(newIds);
     }
 }

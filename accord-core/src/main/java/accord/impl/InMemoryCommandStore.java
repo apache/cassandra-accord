@@ -62,7 +62,6 @@ import accord.local.Commands;
 import accord.local.KeyHistory;
 import accord.local.Node;
 import accord.local.NodeCommandStoreService;
-import accord.local.NodeTimeService;
 import accord.local.PreLoadContext;
 import accord.local.RedundantBefore;
 import accord.local.RedundantStatus;
@@ -811,7 +810,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        public NodeTimeService time()
+        public NodeCommandStoreService node()
         {
             return commandStore.node;
         }

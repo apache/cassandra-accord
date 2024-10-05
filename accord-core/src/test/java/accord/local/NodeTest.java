@@ -37,7 +37,7 @@ public class NodeTest
     void uniqueNowTest()
     {
         MockCluster.Clock clock = new MockCluster.Clock(100);
-        try (MockCluster cluster = MockCluster.builder().nowSupplier(clock).build())
+        try (MockCluster cluster = MockCluster.builder().time(clock).build())
         {
             Node node = cluster.get(1);
 
@@ -60,7 +60,7 @@ public class NodeTest
     void uniqueNowEpochUpdate()
     {
         MockCluster.Clock clock = new MockCluster.Clock(100);
-        try (MockCluster cluster = MockCluster.builder().nowSupplier(clock).build())
+        try (MockCluster cluster = MockCluster.builder().time(clock).build())
         {
             Node node = cluster.get(1);
             MockConfigurationService configService = (MockConfigurationService) node.configService();
@@ -79,7 +79,7 @@ public class NodeTest
     void uniqueNowAtLeastTest()
     {
         MockCluster.Clock clock = new MockCluster.Clock(100);
-        try (MockCluster cluster = MockCluster.builder().nowSupplier(clock).build())
+        try (MockCluster cluster = MockCluster.builder().time(clock).build())
         {
             Node node = cluster.get(1);
 

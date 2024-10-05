@@ -341,14 +341,14 @@ public abstract class CommandStore implements AgentExecutor
      */
     final Timestamp preaccept(TxnId txnId, Routables<?> keys, SafeCommandStore safeStore, boolean permitFastPath)
     {
-        NodeTimeService time = safeStore.time();
+        NodeCommandStoreService node = safeStore.node();
 
-        boolean isExpired = time.now() - txnId.hlc() >= safeStore.preAcceptTimeout() && !txnId.isSyncPoint();
+        boolean isExpired = node.now() - txnId.hlc() >= safeStore.preAcceptTimeout() && !txnId.isSyncPoint();
         if (rejectBefore != null && !isExpired)
             isExpired = rejectBefore.rejects(txnId, keys);
 
         if (isExpired)
-            return time.uniqueNow(txnId).asRejected();
+            return node.uniqueNow(txnId).asRejected();
 
         if (txnId.is(ExclusiveSyncPoint))
             return txnId;
@@ -357,10 +357,10 @@ public abstract class CommandStore implements AgentExecutor
         //   this permits us to agree fast path decisions across epoch changes
         // TODO (expected): we should (perhaps) separate conflicts for reads and writes
         Timestamp min = TxnId.max(txnId, maxConflicts.get(keys));
-        if (permitFastPath && txnId == min && txnId.epoch() >= time.epoch())
+        if (permitFastPath && txnId == min && txnId.epoch() >= node.epoch())
             return txnId;
 
-        return time.uniqueNow(min);
+        return node.uniqueNow(min);
     }
 
     public Timestamp maxConflict(Routables<?> keysOrRanges)

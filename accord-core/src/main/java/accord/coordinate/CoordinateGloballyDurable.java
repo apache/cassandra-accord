@@ -27,6 +27,7 @@ import accord.messages.QueryDurableBefore;
 import accord.messages.QueryDurableBefore.DurableBeforeReply;
 import accord.messages.SetGloballyDurable;
 import accord.topology.Topologies;
+import accord.utils.SortedArrays;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults.SettableResult;
 
@@ -55,7 +56,9 @@ public class CoordinateGloballyDurable extends SettableResult<Void> implements C
 
     private void start()
     {
-        node.send(tracker.nodes(), to -> new QueryDurableBefore(tracker.topologies().currentEpoch()), this);
+        SortedArrays.SortedArrayList<Node.Id> contact = tracker.filterAndRecordFaulty();
+        if (contact == null) tryFailure(new Exhausted(null, null, null));
+        else node.send(contact, to -> new QueryDurableBefore(tracker.topologies().currentEpoch()), this);
     }
 
     @Override

@@ -20,7 +20,6 @@ package accord.local;
 
 import java.util.List;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -64,7 +63,6 @@ import accord.utils.DefaultRandom;
 import static accord.Utils.id;
 import static accord.Utils.writeTxn;
 import static accord.impl.InMemoryCommandStore.inMemory;
-import static accord.local.NodeTimeService.elapsedWrapperFromNonMonotonicSource;
 import static accord.primitives.Routable.Domain.Key;
 import static accord.primitives.Txn.Kind.Write;
 import static accord.utils.async.AsyncChains.awaitUninterruptibly;
@@ -104,7 +102,7 @@ public class ImmutableCommandTest
         MockCluster.Clock clock = new MockCluster.Clock(100);
         LocalConfig localConfig = LocalConfig.DEFAULT;
         Node node = new Node(id, null, new MockConfigurationService(null, (epoch, service) -> { }, storeSupport.local.get()),
-                             clock, elapsedWrapperFromNonMonotonicSource(TimeUnit.MICROSECONDS, clock),
+                             clock,
                              () -> storeSupport.data, new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()), new TestAgent(), new DefaultRandom(), Scheduler.NEVER_RUN_SCHEDULED,
                              SizeOfIntersectionSorter.SUPPLIER, DefaultRemoteListeners::new, DefaultRequestTimeouts::new, ignore -> ignore2 -> new NoOpProgressLog(), DefaultLocalListeners.Factory::new,
                              InMemoryCommandStores.Synchronized::new,
@@ -147,7 +145,7 @@ public class ImmutableCommandTest
         Node node = createNode(ID1, support);
         CommandStore commands = node.unsafeByIndex(0);
         TxnId txnId = node.nextTxnId(Write, Key);
-        ((MockCluster.Clock)node.unsafeGetNowSupplier()).increment(10);
+        ((MockCluster.Clock)node.time()).increment(10);
         Keys keys = Keys.of(KEY);
         Txn txn = writeTxn(keys);
 

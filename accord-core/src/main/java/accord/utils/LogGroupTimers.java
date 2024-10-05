@@ -21,9 +21,6 @@ package accord.utils;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
-import java.util.function.Function;
-
-import accord.api.Scheduler;
 
 /**
  * Basic idea is we collect timers in buckets that are logarithmically/exponentially spaced,
@@ -63,88 +60,9 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
     public static class Timer extends IntrusivePriorityHeap.Node
     {
         private long deadline;
-        protected long deadline()
+        protected final long deadline()
         {
             return deadline;
-        }
-    }
-
-    public class Scheduling
-    {
-        final Scheduler scheduler;
-        final Function<T, Runnable> taskFactory;
-        final long schedulerImpreciseLateTolerance;
-        final long schedulerPreciseLateTolerance;
-        final long preciseDelayThreshold;
-
-        Scheduler.Scheduled scheduled = Scheduler.CANCELLED;
-        long lastNow; // now can go backwards in time since we calculate it before taking the lock
-        long scheduledAt = Long.MAX_VALUE;
-
-        /**
-         * Note that the parameter to taskFactory may be null
-         */
-        public Scheduling(Scheduler scheduler, Function<T, Runnable> taskFactory, long schedulerImpreciseLateTolerance, long schedulerPreciseLateTolerance, long preciseDelayThreshold)
-        {
-            this.scheduler = scheduler;
-            this.taskFactory = taskFactory;
-            this.schedulerImpreciseLateTolerance = schedulerImpreciseLateTolerance;
-            this.schedulerPreciseLateTolerance = schedulerPreciseLateTolerance;
-            this.preciseDelayThreshold = preciseDelayThreshold;
-        }
-
-        public void ensureScheduled(long now)
-        {
-            lastNow = now = Math.max(lastNow, now);
-            T next = peekIfSoonerThan(now + preciseDelayThreshold);
-            long runAt;
-            if (next == null)
-            {
-                runAt = nextDeadlineEpoch();
-                if (runAt < 0)
-                    return;
-
-                // when scheduling an imprecise run time, we don't mind if we're late by some amount
-                // (often we will be early)
-                runAt = Math.max(now, runAt + schedulerImpreciseLateTolerance);
-            }
-            else
-            {
-                runAt = Math.max(now, next.deadline());
-            }
-
-            if (!scheduled.isDone())
-            {
-                if (runAt > scheduledAt - schedulerPreciseLateTolerance)
-                    return;
-
-                scheduled.cancel();
-            }
-
-            scheduledAt = runAt;
-            lastNow = now;
-            long delay = Math.max(0, runAt - now);
-            scheduled = scheduler.once(taskFactory.apply(next), delay, TimeUnit.MICROSECONDS);
-        }
-
-        public void maybeReschedule(long now, long newDeadline)
-        {
-            if (scheduled.isDone() || newDeadline < scheduledAt - schedulerPreciseLateTolerance)
-                ensureScheduled(now);
-        }
-
-        public void clear()
-        {
-            if (!scheduled.isDone())
-                scheduled.cancel();
-            scheduled = Scheduler.CANCELLED;
-            lastNow = 0;
-            scheduledAt = Long.MAX_VALUE;
-        }
-
-        public long scheduledAt()
-        {
-            return scheduledAt;
         }
     }
 
@@ -242,7 +160,7 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
 
     int bucketsStart, bucketsEnd;
     int timerCount;
-    long curEpoch;
+    long curEpoch, wakeAt;
 
     public LogGroupTimers(TimeUnit units)
     {
@@ -274,59 +192,35 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
         }
     }
 
-    public T peekIfSoonerThan(long deadlineThreshold)
-    {
-        while (bucketsStart < bucketsEnd)
-        {
-            Bucket<T> head = buckets[bucketsStart];
-            if (head.epoch >= deadlineThreshold)
-                return null;
-
-            head.ensureHeapified();
-            if (!head.isEmpty())
-                return head.peekNode();
-
-            buckets[bucketsStart++] = null;
-            if (head == addFinger) addFinger = null;
-        }
-
-        return null;
-    }
-
-    /**
-     * Return the epoch of the next timer we have to schedule
-     */
-    public long nextDeadlineEpoch()
-    {
-        int i = bucketsStart;
-        while (i < bucketsEnd)
-        {
-            Bucket<T> head = buckets[i++];
-            if (!head.isEmpty())
-                return head.epoch;
-        }
-
-        return -1L;
-    }
-
     // unsafe for reentry during advance
     public T poll()
     {
-        while (bucketsStart < bucketsEnd)
+        if (bucketsStart == bucketsEnd)
+            return null;
+
+        Bucket<T> head = buckets[bucketsStart];
+        while (true)
         {
-            Bucket<T> head = buckets[bucketsStart];
-            head.ensureHeapified();
+            head.ensureHeapified(); // must heapify before testing if empty, as may redistribute during heapify
             if (!head.isEmpty())
             {
                 --timerCount;
-                return head.pollNode();
+                T result = head.pollNode();
+                T next = head.peekNode();
+                if (next == null) wakeAt = head.end();
+                else wakeAt = next.deadline();
+                return result;
             }
 
             buckets[bucketsStart++] = null;
             if (head == addFinger) addFinger = null;
+            if (bucketsStart == bucketsEnd)
+            {
+                wakeAt = Long.MAX_VALUE;
+                return null;
+            }
+            head = buckets[bucketsStart];
         }
-
-        return null;
     }
 
     /**
@@ -343,26 +237,38 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
         curEpoch = nextEpoch;
         while (bucketsStart < bucketsEnd)
         {
-            // drain buckets that are wholly contained by our new time
             Bucket<T> head = buckets[bucketsStart];
+            if (head.epoch > now)
+            {
+                wakeAt = Math.max(wakeAt, head.epoch);
+                return;
+            }
+
             if (head.epoch + head.span <= now)
             {
+               // drain buckets that are wholly contained by our new time, without sorting
                 timerCount -= head.size;
                 head.drain(param, expiredTimers);
             }
             else
             {
+                head.ensureHeapified();
                 T timer;
                 while (null != (timer = head.peekNode()))
                 {
-                    if (timer.deadline() > now)
+                    long deadline = timer.deadline();
+                    if (deadline > now)
+                    {
+                        wakeAt = deadline;
                         return;
+                    }
 
                     --timerCount;
                     Invariants.checkState(timer == head.pollNode());
                     Invariants.checkState(!timer.isInHeap());
                     expiredTimers.accept(param, timer);
                 }
+                wakeAt = head.end();
             }
 
             Invariants.checkState(head.isEmpty());
@@ -371,23 +277,23 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
             if (head == addFinger)
                 addFinger = null;
         }
-
+        wakeAt = Long.MAX_VALUE;
         Invariants.checkState(addFinger == null || addFinger == findBucket(addFinger.epoch));
     }
 
     public void add(long deadline, T timer)
     {
-        Invariants.checkState(deadline >= curEpoch);
         addInternal(deadline, timer);
         ++timerCount;
+        refreshWakeAt(Long.MAX_VALUE, deadline);
     }
 
     public void update(long deadline, T timer)
     {
-        Invariants.checkState(deadline >= curEpoch);
         Timer t = timer; // cast to access private field
         Bucket<T> bucket = findBucket(t.deadline);
         Invariants.checkState(bucket != null);
+        long prevDeadline = t.deadline;
         if (bucket.contains(deadline))
         {
             t.deadline = deadline;
@@ -398,6 +304,7 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
             bucket.remove(timer);
             addInternal(deadline, timer);
         }
+        refreshWakeAt(prevDeadline, deadline);
     }
 
     private void addInternal(long deadline, T timer)
@@ -417,10 +324,78 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
     public void remove(T timer)
     {
         Timer t = timer; // cast to access private field
+        long prevDeadline = t.deadline;
         Bucket<T> bucket = findBucket(t.deadline);
         Invariants.checkState(bucket != null);
         bucket.remove(timer);
         --timerCount;
+        refreshWakeAt(prevDeadline, Long.MAX_VALUE);
+    }
+
+    private void refreshWakeAt(long prevDeadline, long deadline)
+    {
+        if (deadline < wakeAt)
+        {
+            wakeAt = deadline;
+        }
+        else if (prevDeadline == wakeAt && bucketsStart != bucketsEnd)
+        {
+            Bucket<T> head = buckets[bucketsStart];
+            if (!head.isHeapified())
+                head.heapify();
+
+            Timer next = head.peekNode();
+            if (next == null)
+            {
+                if (head.end() >= curEpoch)
+                {
+                    wakeAt = head.end();
+                }
+                else
+                {
+                    while (true)
+                    {
+                        buckets[bucketsStart++] = null;
+                        if (head == addFinger) addFinger = null;
+                        if (bucketsStart == bucketsEnd)
+                        {
+                            wakeAt = Long.MAX_VALUE;
+                            return;
+                        }
+                        head = buckets[bucketsStart];
+                        if (head.end() >= curEpoch)
+                        {
+                            if (head.epoch >= curEpoch)
+                            {
+                                wakeAt = head.epoch;
+                                return;
+                            }
+                            else
+                            {
+                                head.heapify();
+                                if (!head.isEmpty())
+                                {
+                                    wakeAt = head.peekNode().deadline();
+                                    return;
+                                }
+                            }
+                        }
+                        Invariants.checkState(head.isEmpty());
+                    }
+                }
+            }
+            else wakeAt = next.deadline;
+        }
+    }
+
+    public boolean shouldWake(long now)
+    {
+        return now >= wakeAt;
+    }
+
+    public long wakeAt()
+    {
+        return wakeAt;
     }
 
     public int size()
@@ -628,6 +603,7 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
         }
         bucketsStart = bucketsEnd = 0;
         curEpoch = 0;
+        wakeAt = Long.MAX_VALUE;
         addFinger = null;
     }
 }

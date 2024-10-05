@@ -110,23 +110,19 @@ public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node
 
     protected N peekNode()
     {
-        if (heapifiedSize < size)
-            heapify();
-
         if (size == 0)
             return null;
 
+        Invariants.checkState(heapifiedSize == size);
         return (N) heap[0];
     }
 
     protected N pollNode()
     {
-        if (heapifiedSize < size)
-            heapify();
-
         if (size == 0)
             return null;
 
+        Invariants.checkState(isHeapified());
         N result = (N) heap[0];
         result.heapIndex = -1;
 
@@ -249,6 +245,11 @@ public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node
     {
         if (heapifiedSize != size)
             heapify();
+    }
+
+    protected boolean isHeapified()
+    {
+        return heapifiedSize == size;
     }
 
     protected void clear()

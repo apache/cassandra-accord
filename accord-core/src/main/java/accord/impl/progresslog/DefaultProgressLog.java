@@ -22,7 +22,6 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
@@ -34,7 +33,6 @@ import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.CommonAttributes;
 import accord.local.Node;
-import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.primitives.SaveStatus;
@@ -68,8 +66,6 @@ import static accord.primitives.Status.PreCommitted;
 import static accord.utils.ArrayBuffers.cachedAny;
 import static accord.utils.btree.UpdateFunction.noOpReplace;
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
-import static java.util.concurrent.TimeUnit.SECONDS;
 
 public class DefaultProgressLog implements ProgressLog, Runnable
 {
@@ -82,7 +78,6 @@ public class DefaultProgressLog implements ProgressLog, Runnable
     private Object[] progressTokenMap = BTree.empty();
 
     final LogGroupTimers<TxnState> timers = new LogGroupTimers<>(MICROSECONDS);
-    final LogGroupTimers<TxnState>.Scheduling timerScheduling;
 
     /**
      * A collection of active callbacks (waiting remote replies) or submitted run invocations
@@ -109,13 +104,6 @@ public class DefaultProgressLog implements ProgressLog, Runnable
     {
         this.node = node;
         this.commandStore = commandStore;
-        Function<TxnState, Runnable> taskFactory = next -> {
-            PreLoadContext context = next == null ? PreLoadContext.empty() : PreLoadContext.contextFor(next.txnId);
-            return () -> commandStore.execute(context, safeStore -> run())
-                                     .begin(commandStore.agent());
-        };
-        this.timerScheduling = timers.new Scheduling(node.scheduler(), taskFactory,
-                                                     MILLISECONDS.toMicros(10), 100, SECONDS.toMicros(1L));
     }
 
     Node node()
@@ -125,19 +113,12 @@ public class DefaultProgressLog implements ProgressLog, Runnable
 
     void update(long deadline, TxnState timer)
     {
-        update(node.elapsed(MICROSECONDS), deadline, timer);
-    }
-
-    void update(long nowMicros, long deadline, TxnState timer)
-    {
         timers.update(deadline, timer);
-        maybeReschedule(nowMicros, deadline);
     }
 
-    void add(long nowMicros, long deadline, TxnState timer)
+    void add(long deadline, TxnState timer)
     {
         timers.add(deadline, timer);
-        maybeReschedule(nowMicros, deadline);
     }
 
     @Nullable TxnState get(TxnId txnId)
@@ -292,7 +273,6 @@ public class DefaultProgressLog implements ProgressLog, Runnable
     public void clear()
     {
         timers.clear();
-        timerScheduling.clear();
 
         stateMap = BTree.empty();
         progressTokenMap = BTree.empty();
@@ -371,16 +351,6 @@ public class DefaultProgressLog implements ProgressLog, Runnable
         state.waiting().setBlockedUntil(safeStore, this, blockedUntil);
     }
 
-    void ensureScheduled(long nowMicros)
-    {
-        timerScheduling.ensureScheduled(nowMicros);
-    }
-
-    void maybeReschedule(long nowMicros, long newDeadlineMicros)
-    {
-        timerScheduling.maybeReschedule(nowMicros, newDeadlineMicros);
-    }
-
     @Override
     public void run()
     {
@@ -403,11 +373,6 @@ public class DefaultProgressLog implements ProgressLog, Runnable
         catch (Throwable t)
         {
             node.agent().onUncaughtException(t);
-        }
-        finally
-        {
-            if (!timers.isEmpty())
-                ensureScheduled(nowMicros);
         }
     }
 
@@ -572,5 +537,19 @@ public class DefaultProgressLog implements ProgressLog, Runnable
     {
         TxnState state = get(txnId);
         return state != null && !state.isWaitingDone();
+    }
+
+    public void maybeNotify()
+    {
+        if (commandStore.inStore())
+        {
+            run();
+        }
+        else
+        {
+            long now = node.elapsed(MICROSECONDS);
+            if (timers.shouldWake(now))
+                commandStore.execute(this);
+        }
     }
 }

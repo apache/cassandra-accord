@@ -187,6 +187,11 @@ public interface ProgressLog
 
     void clear();
 
+    /**
+     * Should be thread-safe
+     */
+    default void maybeNotify() {}
+
     class NoOpProgressLog implements ProgressLog
     {
         @Override public void update(SafeCommandStore safeStore, TxnId txnId, Command before, Command after) {}

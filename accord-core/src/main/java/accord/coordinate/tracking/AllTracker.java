@@ -70,7 +70,7 @@ public class AllTracker extends AbstractSimpleTracker<AllTracker.AllShardTracker
 
     public AllTracker(Topologies topologies)
     {
-        super(topologies, AllShardTracker[]::new, shard -> new AllShardTracker(shard));
+        super(topologies, AllShardTracker[]::new, AllShardTracker::new);
     }
 
     public RequestStatus recordSuccess(Node.Id node)

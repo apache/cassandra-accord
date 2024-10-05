@@ -138,7 +138,7 @@ public abstract class ReadCoordinator<Reply extends accord.messages.Reply> exten
                 break;
 
             case Reject:
-                handle(recordReadFailure(from));
+                handle(recordFailure(from));
                 break;
 
             case ApproveIfQuorum:
@@ -173,7 +173,7 @@ public abstract class ReadCoordinator<Reply extends accord.messages.Reply> exten
         if (this.failure == null) this.failure = failure;
         else this.failure.addSuppressed(failure);
 
-        handle(recordReadFailure(from));
+        handle(recordFailure(from));
     }
 
     @Override
@@ -263,10 +263,17 @@ public abstract class ReadCoordinator<Reply extends accord.messages.Reply> exten
 
     public void start()
     {
-        List<Id> contact = new ArrayList<>(maxShardsPerEpoch());
-        if (trySendMore(List::add, contact) != RequestStatus.NoChange)
-            throw new IllegalStateException();
-        start(contact);
+        if (!initialise())
+        {
+            finishOnExhaustion();
+        }
+        else
+        {
+            List<Id> contact = new ArrayList<>(maxShardsPerEpoch());
+            if (trySendMore(List::add, contact) != RequestStatus.NoChange)
+                throw new IllegalStateException();
+            start(contact);
+        }
     }
 
     @Override

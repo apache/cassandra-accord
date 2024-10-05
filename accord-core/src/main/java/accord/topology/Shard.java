@@ -43,6 +43,7 @@ public class Shard
     public final int maxFailures;
     public final int recoveryFastPathSize;
     public final int fastPathQuorumSize;
+    public final int fastPathRejectSize;
     public final int slowPathQuorumSize;
     public final boolean pendingRemoval;
 
@@ -58,6 +59,7 @@ public class Shard
         this.recoveryFastPathSize = (maxFailures+1)/2;
         this.slowPathQuorumSize = slowPathQuorumSize(nodes.size());
         this.fastPathQuorumSize = fastPathQuorumSize(nodes.size(), e, maxFailures);
+        this.fastPathRejectSize = 1 + fastPathElectorate.size() - fastPathQuorumSize;
         this.pendingRemoval = pendingRemoval;
     }
 
@@ -82,11 +84,6 @@ public class Shard
     {
         checkArgument(electorate >= replicas - f);
         return (f + electorate)/2 + 1;
-    }
-
-    public boolean rejectsFastPath(int rejectCount)
-    {
-        return rejectCount > fastPathElectorate.size() - fastPathQuorumSize;
     }
 
     public static int slowPathQuorumSize(int replicas)

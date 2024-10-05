@@ -342,7 +342,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         private TxnInfo(TxnId txnId, int encodedStatus, Timestamp executeAt)
         {
             super(txnId);
-            Invariants.checkState(executeAt == txnId || executeAt.getClass() != TxnId.class);
+            Invariants.checkState(executeAt == txnId || !executeAt.equals(txnId));
             this.encodedStatus = encodedStatus;
             this.executeAt = executeAt == txnId ? this : executeAt;
         }
@@ -351,7 +351,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         {
             Timestamp executeAt = txnId;
             if (status.hasExecuteAt()) executeAt = command.executeAt();
-            if (executeAt.getClass() == TxnId.class) executeAt = txnId;
+            if (executeAt.equals(txnId)) executeAt = txnId;
             Ballot ballot;
             int encodedStatus = encode(txnId, status, mayExecute);
             if (!status.hasBallot || (ballot = command.acceptedOrCommitted()).equals(Ballot.ZERO))

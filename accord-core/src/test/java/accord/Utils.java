@@ -70,7 +70,6 @@ import accord.utils.ThreadPoolScheduler;
 import org.awaitility.Awaitility;
 import org.awaitility.core.ThrowingRunnable;
 
-import static accord.local.NodeTimeService.elapsedWrapperFromNonMonotonicSource;
 import static accord.utils.async.AsyncChains.awaitUninterruptibly;
 
 public class Utils
@@ -185,7 +184,6 @@ public class Utils
                              messageSink,
                              new MockConfigurationService(messageSink, EpochFunction.noop(), topology),
                              clock,
-                             elapsedWrapperFromNonMonotonicSource(TimeUnit.MICROSECONDS, clock),
                              () -> store,
                              new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()),
                              agent,
@@ -221,6 +219,6 @@ public class Utils
 
     public static TopologyManager testTopologyManager(TopologySorter.Supplier sorter, Id node)
     {
-        return new TopologyManager(sorter, new TestAgent.RethrowAgent(), node, Scheduler.NEVER_RUN_SCHEDULED, elapsedWrapperFromNonMonotonicSource(TimeUnit.MILLISECONDS, () -> 0), LocalConfig.DEFAULT);
+        return new TopologyManager(sorter, new TestAgent.RethrowAgent(), node, Scheduler.NEVER_RUN_SCHEDULED, new MockCluster.Clock(0), LocalConfig.DEFAULT);
     }
 }

@@ -82,6 +82,7 @@ import accord.local.CommandStore;
 import accord.local.DurableBefore;
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.local.TimeService;
 import accord.primitives.SaveStatus;
 import accord.local.ShardDistributor;
 import accord.primitives.Seekables;
@@ -111,7 +112,6 @@ import static accord.impl.basic.Cluster.OverrideLinksKind.NONE;
 import static accord.impl.basic.Cluster.OverrideLinksKind.RANDOM_BIDIRECTIONAL;
 import static accord.impl.basic.NodeSink.Action.DELIVER;
 import static accord.impl.basic.NodeSink.Action.DROP;
-import static accord.local.NodeTimeService.elapsedWrapperFromNonMonotonicSource;
 import static accord.utils.AccordGens.keysInsideRanges;
 import static accord.utils.AccordGens.rangeInsideRange;
 import static accord.utils.Gens.mixedDistribution;
@@ -469,7 +469,7 @@ public class Cluster implements Scheduler
                 journalMap.put(id, journal);
                 BurnTestConfigurationService configService = new BurnTestConfigurationService(id, nodeExecutor, randomSupplier, topology, nodeMap::get, topologyUpdates);
                 BooleanSupplier isLoadedCheck = Gens.supplier(Gens.bools().mixedDistribution().next(random), random);
-                Node node = new Node(id, messageSink, configService, nowSupplier, elapsedWrapperFromNonMonotonicSource(TimeUnit.MILLISECONDS, nowSupplier),
+                Node node = new Node(id, messageSink, configService, TimeService.ofNonMonotonic(nowSupplier, MILLISECONDS),
                                      () -> new ListStore(sinks, random, id), new ShardDistributor.EvenSplit<>(8, ignore -> new PrefixedIntHashKey.Splitter()),
                                      nodeExecutor.agent(),
                                      randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER, DefaultRemoteListeners::new, DefaultRequestTimeouts::new,

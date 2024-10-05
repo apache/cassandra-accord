@@ -34,4 +34,5 @@ public interface RequestTimeouts
     }
 
     RegisteredTimeout register(Timeout timeout, long delay, TimeUnit units);
+    void maybeNotify();
 }

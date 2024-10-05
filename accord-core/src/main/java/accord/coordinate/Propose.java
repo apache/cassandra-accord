@@ -41,6 +41,7 @@ import accord.primitives.TxnId;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
+import accord.utils.SortedArrays;
 import accord.utils.SortedListMap;
 
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Fail;
@@ -81,7 +82,9 @@ abstract class Propose<R> implements Callback<AcceptReply>
 
     void start()
     {
-        node.send(acceptTracker.nodes(), to -> new Accept(to, acceptTracker.topologies(), ballot, txnId, route, executeAt, deps), this);
+        SortedArrays.SortedArrayList<Node.Id> contact = acceptTracker.filterAndRecordFaulty();
+        if (contact == null) callback.accept(null, new Timeout(null, null));
+        else node.send(contact, to -> new Accept(to, acceptTracker.topologies(), ballot, txnId, route, executeAt, deps), this);
     }
 
     @Override

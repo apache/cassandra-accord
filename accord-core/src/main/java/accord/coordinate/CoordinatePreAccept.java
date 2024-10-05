@@ -120,6 +120,13 @@ abstract class CoordinatePreAccept<T> extends AbstractCoordinatePreAccept<T, Pre
     }
 
     @Override
+    void onSlowResponseInternal(Id from)
+    {
+        if (tracker.recordDelayed(from) == Success)
+            onPreAcceptedOrNewEpoch();
+    }
+
+    @Override
     boolean onExtraSuccessInternal(Id from, PreAcceptReply reply)
     {
         if (!reply.isOk())

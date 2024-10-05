@@ -53,7 +53,7 @@ public class ReadTrackerTest
         @Override
         public RequestStatus trySendMore()
         {
-            return super.trySendMore(Set::add, inflight);
+            return super.trySendMore((s, i) -> s.add(i.id), inflight);
         }
     }
 
@@ -101,7 +101,7 @@ public class ReadTrackerTest
         tracker.recordInFlightRead(ids[0]);
         assertResponseState(tracker, false, false);
 
-        tracker.recordReadFailure(ids[0]);
+        tracker.recordFailure(ids[0]);
         assertResponseState(tracker, false, false);
 
         tracker.recordInFlightRead(ids[1]);
@@ -118,15 +118,15 @@ public class ReadTrackerTest
         ReadTracker tracker = new TestReadTracker(topologies(subTopology));
 
         tracker.recordInFlightRead(ids[0]);
-        tracker.recordReadFailure(ids[0]);
+        tracker.recordFailure(ids[0]);
         assertResponseState(tracker, false, false);
 
         tracker.recordInFlightRead(ids[1]);
-        tracker.recordReadFailure(ids[1]);
+        tracker.recordFailure(ids[1]);
         assertResponseState(tracker, false, false);
 
         tracker.recordInFlightRead(ids[2]);
-        tracker.recordReadFailure(ids[2]);
+        tracker.recordFailure(ids[2]);
         assertResponseState(tracker, false, true);
     }
 
@@ -159,13 +159,13 @@ public class ReadTrackerTest
 
         assertResponseState(responses, false, false);
 
-        responses.recordReadFailure(ids[2]);
+        responses.recordFailure(ids[2]);
         assertResponseState(responses, false, false);
 
         assertContacts(Sets.newHashSet(ids[1], ids[3]), responses);
         assertResponseState(responses, false, false);
 
-        responses.recordReadFailure(ids[1]);
+        responses.recordFailure(ids[1]);
         assertContacts(Sets.newHashSet(ids[0]), responses);
 
         responses.recordReadSuccess(ids[3]);

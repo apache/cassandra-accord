@@ -37,6 +37,7 @@ import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.topology.Topologies;
 import accord.topology.Topology;
+import accord.utils.SortedArrays;
 
 import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.primitives.Status.Durability.Majority;
@@ -103,18 +104,27 @@ public abstract class Persist implements Callback<ApplyReply>
     public void onFailure(Id from, Throwable failure)
     {
         // TODO (desired, consider): send knowledge of partial persistence?
+        // TODO (expected): we should presumably report total request failure somewhere?
     }
 
     @Override
     public void onCallbackFailure(Id from, Throwable failure)
     {
-        // TODO (required): handle exception
+        // TODO (expected): handle exception
     }
 
     public void start(Apply.Factory factory, Apply.Kind kind, Topologies all, Writes writes, Result result)
     {
         // applyMinimal is used for transaction execution by the original coordinator so it's important to use
         // Node's Apply factory in case the factory has to do synchronous Apply.
-        node.send(all.nodes(), to -> factory.create(kind, to, all, txnId, route, txn, executeAt, stableDeps, writes, result), this);
+        SortedArrays.SortedArrayList<Node.Id> contact = tracker.filterAndRecordFaulty();
+        if (contact == null)
+        {
+            // TODO (expected): we should presumably report this somewhere?
+        }
+        else
+        {
+            node.send(contact, to -> factory.create(kind, to, all, txnId, route, txn, executeAt, stableDeps, writes, result), this);
+        }
     }
 }

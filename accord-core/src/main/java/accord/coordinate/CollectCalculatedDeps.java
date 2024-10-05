@@ -30,6 +30,7 @@ import accord.messages.CalculateDeps;
 import accord.messages.CalculateDeps.CalculateDepsOk;
 import accord.primitives.*;
 import accord.topology.Topologies;
+import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.SortedListMap;
 
 import static accord.coordinate.tracking.RequestStatus.Failed;
@@ -65,8 +66,10 @@ public class CollectCalculatedDeps implements Callback<CalculateDepsOk>
         CommandStore store = CommandStore.maybeCurrent();
         if (store == null)
             store = node.commandStores().select(fullRoute);
-        node.send(collect.tracker.nodes(), to -> new CalculateDeps(to, topologies, fullRoute, txnId, executeAt),
-                  store, collect);
+
+        SortedArrayList<Id> contact = collect.tracker.filterAndRecordFaulty();
+        if (contact == null) callback.accept(null, new Exhausted(txnId, collect.homeKey, null));
+        else node.send(contact, to -> new CalculateDeps(to, topologies, fullRoute, txnId, executeAt), store, collect);
     }
 
     @Override

@@ -71,7 +71,7 @@ public class ReadTrackerReconciler extends TrackerReconciler<ReadShardTracker, R
             default: throw new AssertionError();
             case DATA:   inflight.remove(from); return tracker.recordReadSuccess(from);
             case QUORUM: inflight.remove(from); return tracker.recordQuorumReadSuccess(from);
-            case FAIL:   inflight.remove(from); return tracker.recordReadFailure(from);
+            case FAIL:   inflight.remove(from); return tracker.recordFailure(from);
             case SLOW:   return tracker.recordSlowResponse(from);
         }
     }

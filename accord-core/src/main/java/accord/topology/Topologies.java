@@ -30,7 +30,6 @@ import accord.utils.IndexedConsumer;
 import accord.utils.Invariants;
 import accord.utils.SortedArrays;
 import accord.utils.SortedArrays.SortedArrayList;
-import accord.utils.SortedList;
 
 import static accord.utils.Invariants.illegalState;
 import static accord.utils.SortedArrays.isSortedUnique;
@@ -72,12 +71,9 @@ public interface Topologies extends TopologySorter
      */
     SortedArrayList<Id> nodes();
 
-    default SortedList<Node.Id> nonStaleNodes()
+    default SortedArrayList<Id> staleNodes()
     {
-        SortedArrayList<Node.Id> staleIds = current().staleIds;
-        if (staleIds.isEmpty())
-            return nodes();
-        return nodes().without(staleIds);
+        return current().staleNodes;
     }
 
     Ranges computeRangesForNode(Id node);
@@ -253,6 +249,12 @@ public interface Topologies extends TopologySorter
         {
             return sorter.compare(node1, node2, shards);
         }
+
+        @Override
+        public boolean isFaulty(Id node)
+        {
+            return sorter.isFaulty(node);
+        }
     }
 
     class Multi implements Topologies
@@ -425,6 +427,12 @@ public interface Topologies extends TopologySorter
         public int compare(Id node1, Id node2, ShardSelection shards)
         {
             return sorter.compare(node1, node2, shards);
+        }
+
+        @Override
+        public boolean isFaulty(Id node)
+        {
+            return sorter.isFaulty(node);
         }
     }
 

@@ -18,8 +18,13 @@
 
 package accord.local;
 
-public interface NodeCommandStoreService extends NodeTimeService
+import accord.primitives.Timestamp;
+
+public interface NodeCommandStoreService extends TimeService
 {
+    long epoch();
     Node.Id id();
     DurableBefore durableBefore();
+    Timestamp uniqueNow();
+    Timestamp uniqueNow(Timestamp atLeast);
 }

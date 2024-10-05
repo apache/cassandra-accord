@@ -538,6 +538,13 @@ public abstract class CommandStores
         return AsyncChains.reduce(list, (a, b) -> null);
     }
 
+    public void forEachCommandStore(Consumer<CommandStore> forEach)
+    {
+        Snapshot snapshot = current;
+        for (ShardHolder shard : snapshot.shards)
+            forEach.accept(shard.store);
+    }
+
     public AsyncChain<Void> ifLocal(PreLoadContext context, RoutingKey key, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach)
     {
         return forEach(context, RoutingKeys.of(key), minEpoch, maxEpoch, forEach, false);

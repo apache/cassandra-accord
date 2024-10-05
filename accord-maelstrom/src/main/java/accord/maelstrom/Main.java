@@ -46,6 +46,7 @@ import accord.local.DurableBefore;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.ShardDistributor;
+import accord.local.TimeService;
 import accord.maelstrom.Packet.Type;
 import accord.messages.Callback;
 import accord.messages.Reply;
@@ -56,7 +57,6 @@ import accord.topology.Topology;
 import accord.utils.DefaultRandom;
 import accord.utils.ThreadPoolScheduler;
 
-import static accord.local.NodeTimeService.elapsedWrapperFromNonMonotonicSource;
 import static accord.utils.async.AsyncChains.awaitUninterruptibly;
 
 public class Main
@@ -180,7 +180,7 @@ public class Main
             sink = new StdoutSink(System::currentTimeMillis, scheduler, start, init.self, out, err);
             LocalConfig localConfig = LocalConfig.DEFAULT;
             on = new Node(init.self, sink, new SimpleConfigService(topology),
-                          System::currentTimeMillis, elapsedWrapperFromNonMonotonicSource(TimeUnit.MILLISECONDS, System::currentTimeMillis),
+                          TimeService.ofNonMonotonic(System::currentTimeMillis, TimeUnit.MILLISECONDS),
                           MaelstromStore::new, new ShardDistributor.EvenSplit(8, ignore -> new MaelstromKey.Splitter()),
                           MaelstromAgent.INSTANCE, new DefaultRandom(), scheduler, SizeOfIntersectionSorter.SUPPLIER,
                           DefaultRemoteListeners::new, DefaultRequestTimeouts::new, DefaultProgressLogs::new, DefaultLocalListeners.Factory::new,

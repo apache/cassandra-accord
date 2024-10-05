@@ -39,10 +39,15 @@ public interface TopologySorter
         default TopologySorter get(Topology topologies) { return this; }
         @Override
         default TopologySorter get(Topologies topologies) { return this; }
+
+        @Override
+        default boolean isFaulty(Node.Id node) { return false; }
     }
 
     /**
      * Compare two nodes that occur in some topologies, so that the one that is *least* preferable sorts first
      */
     int compare(Node.Id node1, Node.Id node2, ShardSelection shards);
+
+    boolean isFaulty(Node.Id node);
 }

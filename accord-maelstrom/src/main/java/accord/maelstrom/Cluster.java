@@ -54,6 +54,7 @@ import accord.local.DurableBefore;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.ShardDistributor;
+import accord.local.TimeService;
 import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.Reply.FailureReply;
@@ -65,7 +66,7 @@ import accord.utils.RandomSource;
 import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResult;
 
-import static accord.local.NodeTimeService.elapsedWrapperFromNonMonotonicSource;
+import static accord.local.TimeService.elapsedWrapperFromNonMonotonicSource;
 import static java.util.stream.Collectors.toList;
 
 // TODO (low priority, testing): merge with accord.impl.basic.Cluster
@@ -330,7 +331,7 @@ public class Cluster implements Scheduler
                 LongSupplier nowSupplier = nowSupplierSupplier.get();
                 LocalConfig localConfig = LocalConfig.DEFAULT;
                 lookup.put(node, new Node(node, messageSink, new SimpleConfigService(topology),
-                                          nowSupplier, elapsedWrapperFromNonMonotonicSource(TimeUnit.MICROSECONDS, nowSupplier),
+                                          TimeService.of(nowSupplier, elapsedWrapperFromNonMonotonicSource(TimeUnit.MICROSECONDS, nowSupplier)),
                                           MaelstromStore::new, new ShardDistributor.EvenSplit(8, ignore -> new MaelstromKey.Splitter()),
                                           MaelstromAgent.INSTANCE,
                                           randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER, DefaultRemoteListeners::new, DefaultRequestTimeouts::new,

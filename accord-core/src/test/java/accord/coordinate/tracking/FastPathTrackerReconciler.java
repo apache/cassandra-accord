@@ -18,7 +18,7 @@
 
 package accord.coordinate.tracking;
 
-import accord.coordinate.tracking.FastPathTracker.FastPathQuorumShardTracker;
+import accord.coordinate.tracking.FastPathTracker.FastPathShardTracker;
 import accord.utils.RandomSource;
 import accord.local.Node;
 import accord.topology.Topologies;
@@ -26,7 +26,7 @@ import org.junit.jupiter.api.Assertions;
 
 import java.util.ArrayList;
 
-public class FastPathTrackerReconciler extends TrackerReconciler<FastPathQuorumShardTracker, FastPathTracker, FastPathTrackerReconciler.Rsp>
+public class FastPathTrackerReconciler extends TrackerReconciler<FastPathShardTracker, FastPathTracker, FastPathTrackerReconciler.Rsp>
 {
     enum Rsp { FAST, SLOW, FAIL }
 
@@ -58,19 +58,19 @@ public class FastPathTrackerReconciler extends TrackerReconciler<FastPathQuorumS
         switch (status)
         {
             case Failed:
-                Assertions.assertTrue(tracker.any(FastPathQuorumShardTracker::hasFailed));
-                Assertions.assertFalse(tracker.all(FastPathQuorumShardTracker::hasReachedQuorum));
+                Assertions.assertTrue(tracker.any(FastPathShardTracker::hasFailed));
+                Assertions.assertFalse(tracker.all(FastPathShardTracker::hasReachedQuorum));
                 break;
 
             case Success:
-                Assertions.assertTrue(tracker.all(FastPathQuorumShardTracker::hasReachedQuorum));
+                Assertions.assertTrue(tracker.all(FastPathShardTracker::hasReachedQuorum));
                 Assertions.assertTrue(tracker.all(shard -> shard.hasRejectedFastPath() || shard.hasMetFastPathCriteria()));
-                Assertions.assertFalse(tracker.any(FastPathQuorumShardTracker::hasFailed));
+                Assertions.assertFalse(tracker.any(FastPathShardTracker::hasFailed));
                 break;
 
             case NoChange:
-                Assertions.assertFalse(tracker.all(shard -> shard.hasRejectedFastPath() || shard.hasMetFastPathCriteria()) && tracker.all(FastPathQuorumShardTracker::hasReachedQuorum));
-                Assertions.assertFalse(tracker.any(FastPathQuorumShardTracker::hasFailed));
+                Assertions.assertFalse(tracker.all(shard -> shard.hasRejectedFastPath() || shard.hasMetFastPathCriteria()) && tracker.all(FastPathShardTracker::hasReachedQuorum));
+                Assertions.assertFalse(tracker.any(FastPathShardTracker::hasFailed));
         }
     }
 }

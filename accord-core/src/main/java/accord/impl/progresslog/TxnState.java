@@ -115,20 +115,20 @@ final class TxnState extends HomeState
             if (otherDeadline == 0)
             {
                 setScheduledTimer(updated);
-                if (previousDeadline > 0) instance.update(nowMicros, newDeadline, this);
-                else instance.add(nowMicros, newDeadline, this);
+                if (previousDeadline > 0) instance.update(newDeadline, this);
+                else instance.add(newDeadline, this);
             }
             else if (newDeadline < otherDeadline)
             {
                 setScheduledTimer(updated);
                 setPendingTimerDelay(Ints.saturatedCast(otherDeadline - newDeadline));
-                instance.update(nowMicros, newDeadline, this);
+                instance.update(newDeadline, this);
             }
             else
             {
                 setScheduledTimer(updated.other());
                 setPendingTimerDelay(Ints.saturatedCast(Math.max(1, newDeadline - otherDeadline)));
-                instance.update(nowMicros, otherDeadline, this);
+                instance.update(otherDeadline, this);
             }
         }
     }

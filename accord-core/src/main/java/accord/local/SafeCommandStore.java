@@ -355,7 +355,7 @@ public abstract class SafeCommandStore
     public abstract DataStore dataStore();
     public abstract Agent agent();
     public abstract ProgressLog progressLog();
-    public abstract NodeTimeService time();
+    public abstract NodeCommandStoreService node();
     public abstract CommandStores.RangesForEpoch ranges();
 
     protected NavigableMap<TxnId, Ranges> bootstrapBeganAt()

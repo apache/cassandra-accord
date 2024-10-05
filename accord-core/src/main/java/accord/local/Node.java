@@ -32,9 +32,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.LongSupplier;
 import java.util.function.Supplier;
-import java.util.function.ToLongFunction;
 import javax.annotation.Nonnull;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -100,6 +98,8 @@ import net.nicoulaj.compilecommand.annotations.Inline;
 
 import static accord.utils.Invariants.illegalState;
 import static java.lang.String.format;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
 public class Node implements ConfigurationService.Listener, NodeCommandStoreService
 {
@@ -162,8 +162,7 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
     private final CommandStores commandStores;
     private final CoordinationAdapter.Factory coordinationAdapters;
 
-    private final LongSupplier nowSupplier;
-    private final ToLongFunction<TimeUnit> elapsed;
+    private final TimeService time;
     private final AtomicReference<Timestamp> now;
     private final Agent agent;
     private final RandomSource random;
@@ -180,7 +179,7 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
     private final PersistentField<DurableBefore, DurableBefore> persistDurableBefore;
 
     public Node(Id id, MessageSink messageSink,
-                ConfigurationService configService, LongSupplier nowSupplier, ToLongFunction<TimeUnit> elapsed,
+                ConfigurationService configService, TimeService time,
                 Supplier<DataStore> dataSupplier, ShardDistributor shardDistributor, Agent agent, RandomSource random, Scheduler scheduler, TopologySorter.Supplier topologySorter,
                 Function<Node, RemoteListeners> remoteListenersFactory, Function<Node, RequestTimeouts> requestTimeoutsFactory, Function<Node, ProgressLog.Factory> progressLogFactory,
                 Function<Node, LocalListeners.Factory> localListenersFactory, CommandStores.Factory factory, CoordinationAdapter.Factory coordinationAdapters,
@@ -193,18 +192,19 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
         this.messageSink = messageSink;
         this.configService = configService;
         this.coordinationAdapters = coordinationAdapters;
-        this.topology = new TopologyManager(topologySorter, agent, id, scheduler, elapsed, localConfig);
+        this.topology = new TopologyManager(topologySorter, agent, id, scheduler, time, localConfig);
         topology.scheduleTopologyUpdateWatchdog();
         this.listeners = remoteListenersFactory.apply(this);
         this.timeouts = requestTimeoutsFactory.apply(this);
-        this.nowSupplier = nowSupplier;
-        this.elapsed = elapsed;
-        this.now = new AtomicReference<>(Timestamp.fromValues(topology.epoch(), nowSupplier.getAsLong(), id));
+        this.time = time;
+        this.now = new AtomicReference<>(Timestamp.fromValues(topology.epoch(), time.now(), id));
         this.agent = agent;
         this.random = random;
         this.persistDurableBefore = new PersistentField<>(() -> durableBefore, DurableBefore::merge, durableBeforePersister, this::setPersistedDurableBefore);
         this.commandStores = factory.create(this, agent, dataSupplier.get(), random.fork(), shardDistributor, progressLogFactory.apply(this), localListenersFactory.apply(this));
-        // TODO review these leak a reference to an object that hasn't finished construction, possibly to other threads
+        // TODO (desired): make frequency configurable
+        scheduler.recurring(() -> commandStores.forEachCommandStore(store -> store.progressLog.maybeNotify()), 1, SECONDS);
+        scheduler.recurring(timeouts::maybeNotify, 100, MILLISECONDS);
         configService.registerListener(this);
     }
 
@@ -432,7 +432,7 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
         while (true)
         {
             Timestamp cur = now.get();
-            Timestamp next = cur.withNextHlc(nowSupplier.getAsLong())
+            Timestamp next = cur.withNextHlc(time.now())
                                 .withEpochAtLeast(topology.epoch());
 
             if (now.compareAndSet(cur, next))
@@ -452,12 +452,6 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
             now.accumulateAndGet(atLeast, Node::nowAtLeast);
         }
         return uniqueNow();
-    }
-
-    @Override
-    public long elapsed(TimeUnit timeUnit)
-    {
-        return elapsed.applyAsLong(timeUnit);
     }
 
     private static Timestamp nowAtLeast(Timestamp current, Timestamp proposed)
@@ -484,7 +478,13 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
     @Override
     public long now()
     {
-        return nowSupplier.getAsLong();
+        return time.now();
+    }
+
+    @Override
+    public long elapsed(TimeUnit timeUnit)
+    {
+        return time.elapsed(timeUnit);
     }
 
     public AsyncChain<Void> forEachLocal(PreLoadContext context, Unseekables<?> unseekables, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach)
@@ -832,8 +832,8 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
         return commandStores.current.shards[index].store;
     }
 
-    public LongSupplier unsafeGetNowSupplier()
+    public TimeService time()
     {
-        return nowSupplier;
+        return time;
     }
 }

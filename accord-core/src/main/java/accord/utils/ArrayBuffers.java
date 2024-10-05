@@ -91,6 +91,12 @@ public class ArrayBuffers
         return OBJECTS.get();
     }
 
+    public static <T> ObjectBuffers<T> uncached(T[] ofType)
+    {
+        Class<T> clazz = (Class<T>) ofType.getClass().getComponentType();
+        return uncached(size -> (T[])Array.newInstance(clazz, size));
+    }
+
     public static <T> ObjectBuffers<T> uncached(IntFunction<T[]> allocator) { return new UncachedObjectBuffers<>(allocator); }
 
     public static IntBuffers uncachedInts() { return UncachedIntBuffers.INSTANCE; }
@@ -795,6 +801,16 @@ public class ArrayBuffers
         public E get(int index)
         {
             return (E) buffer[index];
+        }
+
+        @Override
+        public E set(int index, E value)
+        {
+            if (index >= size)
+                throw new IndexOutOfBoundsException();
+            E prev = (E) buffer[index];
+            buffer[index] = value;
+            return prev;
         }
 
         @Override

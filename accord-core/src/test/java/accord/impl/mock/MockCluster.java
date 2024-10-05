@@ -27,7 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiFunction;
-import java.util.function.LongSupplier;
+import java.util.function.ToLongFunction;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,6 +49,7 @@ import accord.local.DurableBefore;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.ShardDistributor;
+import accord.local.TimeService;
 import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.Request;
@@ -65,7 +66,7 @@ import accord.utils.ThreadPoolScheduler;
 
 import static accord.Utils.id;
 import static accord.Utils.idList;
-import static accord.local.NodeTimeService.elapsedWrapperFromNonMonotonicSource;
+import static accord.local.TimeService.elapsedWrapperFromNonMonotonicSource;
 import static accord.primitives.Routable.Domain.Key;
 import static accord.primitives.Txn.Kind.Write;
 import static accord.utils.async.AsyncChains.awaitUninterruptibly;
@@ -76,7 +77,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
 
     private final RandomSource random;
     private final Config config;
-    private final LongSupplier nowSupplier;
+    private final TimeService time;
     private final Map<Id, Node> nodes = new ConcurrentHashMap<>();
     private final BiFunction<Id, Network, MessageSink> messageSinkFactory;
     private int nextNodeId = 1;
@@ -90,7 +91,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
     {
         this.config = new Config(builder);
         this.random = new DefaultRandom(config.seed);
-        this.nowSupplier = builder.nowSupplier;
+        this.time = builder.time;
         this.messageSinkFactory = builder.messageSinkFactory;
         this.onFetchTopology = builder.onFetchTopology;
 
@@ -128,8 +129,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         Node node = new Node(id,
                              messageSink,
                              configurationService,
-                             nowSupplier,
-                             elapsedWrapperFromNonMonotonicSource(TimeUnit.MILLISECONDS, nowSupplier),
+                             time,
                              () -> store,
                              new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()),
                              new TestAgent(),
@@ -321,7 +321,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         private int replication = 3;
         private int maxKey = 10000;
         private Topology topology = null;
-        private LongSupplier nowSupplier = System::currentTimeMillis;
+        private TimeService time = TimeService.ofNonMonotonic(System::currentTimeMillis, TimeUnit.MILLISECONDS);
         private BiFunction<Id, Network, MessageSink> messageSinkFactory = SimpleMessageSink::new;
         private EpochFunction<MockConfigurationService> onFetchTopology = EpochFunction.noop();
 
@@ -349,9 +349,9 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
             return this;
         }
 
-        public Builder nowSupplier(LongSupplier supplier)
+        public Builder time(TimeService time)
         {
-            nowSupplier = supplier;
+            this.time = time;
             return this;
         }
 
@@ -387,9 +387,10 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         return new Builder();
     }
 
-    public static class Clock implements LongSupplier
+    public static class Clock implements TimeService
     {
         private final AtomicLong now;
+        private final ToLongFunction<TimeUnit> elapsed = elapsedWrapperFromNonMonotonicSource(TimeUnit.MILLISECONDS, this::now);
 
         public Clock(long now)
         {
@@ -412,10 +413,11 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         }
 
         @Override
-        public long getAsLong()
+        public long elapsed(TimeUnit unit)
         {
-            return now();
+            return elapsed.applyAsLong(unit);
         }
+
 
         public TxnId idForNode(long epoch, Id id)
         {

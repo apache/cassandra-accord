@@ -28,7 +28,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import java.util.function.ToLongFunction;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.GuardedBy;
 
@@ -46,6 +45,7 @@ import accord.coordinate.TopologyMismatch;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.local.CommandStore;
 import accord.local.Node.Id;
+import accord.local.TimeService;
 import accord.primitives.EpochSupplier;
 import accord.primitives.Ranges;
 import accord.primitives.Routables;
@@ -251,12 +251,12 @@ public class TopologyManager
             this(epochs, new ArrayList<>(), new ArrayList<>());
         }
 
-        private FutureEpoch awaitEpoch(long epoch, Agent agent, ToLongFunction<TimeUnit> nowTimeUnit, LocalConfig localConfig)
+        private FutureEpoch awaitEpoch(long epoch, Agent agent, TimeService time, LocalConfig localConfig)
         {
             if (epoch <= currentEpoch)
                 return SUCCESS;
 
-            long now = nowTimeUnit.applyAsLong(TimeUnit.MILLISECONDS);
+            long now = time.elapsed(TimeUnit.MILLISECONDS);
             long deadline = now + localConfig.epochFetchInitialTimeout().toMillis();
             int diff = (int) (epoch - currentEpoch);
             long epochIndex = epoch - diff + 1;
@@ -444,19 +444,19 @@ public class TopologyManager
     private final Agent agent;
     private final Id node;
     private final Scheduler scheduler;
-    private final ToLongFunction<TimeUnit> nowTimeUnit;
+    private final TimeService time;
     private volatile Epochs epochs;
     private Scheduler.Scheduled topologyUpdateWatchdog;
 
     private final LocalConfig localConfig;
 
-    public TopologyManager(TopologySorter.Supplier sorter, Agent agent, Id node, Scheduler scheduler, ToLongFunction<TimeUnit> nowTimeUnit, LocalConfig localConfig)
+    public TopologyManager(TopologySorter.Supplier sorter, Agent agent, Id node, Scheduler scheduler, TimeService time, LocalConfig localConfig)
     {
         this.sorter = sorter;
         this.agent = agent;
         this.node = node;
         this.scheduler = scheduler;
-        this.nowTimeUnit = nowTimeUnit;
+        this.time = time;
         this.epochs = Epochs.EMPTY;
         this.localConfig = localConfig;
     }
@@ -475,7 +475,7 @@ public class TopologyManager
                 if (current.futureEpochs.isEmpty())
                     return;
 
-                long now = nowTimeUnit.applyAsLong(TimeUnit.MILLISECONDS);
+                long now = time.elapsed(TimeUnit.MILLISECONDS);
                 if (now > current.futureEpochs.get(0).deadlineMillis)
                 {
                     for (int i = 0; i < current.futureEpochs.size(); i++)
@@ -523,7 +523,7 @@ public class TopologyManager
         AsyncResult<Void> result = null;
         synchronized (this)
         {
-            result = epochs.awaitEpoch(epoch, agent, nowTimeUnit, localConfig).future;
+            result = epochs.awaitEpoch(epoch, agent, time, localConfig).future;
         }
         CommandStore current = CommandStore.maybeCurrent();
         return current == null || result.isDone() ? result : result.withExecutor(current);

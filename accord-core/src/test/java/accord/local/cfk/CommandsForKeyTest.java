@@ -56,7 +56,7 @@ import accord.local.CommandStore;
 import accord.local.CommandStores;
 import accord.local.CommonAttributes;
 import accord.local.Node;
-import accord.local.NodeTimeService;
+import accord.local.NodeCommandStoreService;
 import accord.local.PreLoadContext;
 import accord.local.RedundantBefore;
 import accord.local.SafeCommand;
@@ -824,7 +824,7 @@ public class CommandsForKeyTest
         }
 
         @Override
-        public NodeTimeService time()
+        public NodeCommandStoreService node()
         {
             throw new UnsupportedOperationException();
         }

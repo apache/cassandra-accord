@@ -126,6 +126,7 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
 
     abstract void contact(Collection<Id> nodes, Topologies topologies, Callback<R> callback);
     abstract void onSuccessInternal(Id from, R reply);
+    void onSlowResponseInternal(Id from) {}
     /**
      * The tracker for the extra rounds only is provided by the AbstractCoordinatePreAccept, so we expect a boolean back
      * indicating if the "success" reply was actually a good response or a failure (i.e. preempted)
@@ -155,11 +156,19 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
     }
 
     @Override
+    // TODO (expected): shouldn't need synchronized
     public final synchronized void onSuccess(Id from, R reply)
     {
         if (debug != null) debug.putIfAbsent(from, reply);
         if (!initialRoundIsDone)
             onSuccessInternal(from, reply);
+    }
+
+    @Override
+    public final synchronized void onSlowResponse(Id from)
+    {
+        if (!initialRoundIsDone)
+            onSlowResponseInternal(from);
     }
 
     @Override
@@ -228,6 +237,7 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
         // TODO (desired, efficiency): check if we have already have a valid quorum for the future epoch
         //  (noting that nodes may have adopted new ranges, in which case they should be discounted, and quorums may have changed shape)
         node.withEpoch(latestEpoch, (ignored, withEpochFailure) -> {
+            // TODO (required): this isn't synchronized, and isn't submitted back to the calling executor.
             if (withEpochFailure != null)
             {
                 tryFailure(CoordinationFailed.wrap(withEpochFailure));

@@ -31,11 +31,12 @@ import accord.utils.Invariants;
 
 import accord.local.Node.Id;
 import accord.topology.Topologies;
+import accord.utils.SortedArrays.SortedArrayList;
+import org.agrona.collections.IntHashSet;
 
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.*;
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.utils.Invariants.illegalState;
-import static com.google.common.collect.Sets.newHashSetWithExpectedSize;
 
 public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker>
 {
@@ -201,23 +202,33 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker>
         }
     }
 
-    final Set<Id> inflight;    // TODO (easy, efficiency): use Agrona's IntHashSet as soon as Node.Id switches from long to int
-    final List<Id> candidates; // TODO (easy, efficiency): use Agrona's IntArrayList as soon as Node.Id switches from long to int
-    private Set<Id> slow;      // TODO (easy, efficiency): use Agrona's IntHashSet as soon as Node.Id switches from long to int
+    final IntHashSet inflight;
+    final List<Id> candidates; // TODO (easy, efficiency): use Agrona's IntArrayList
+    private IntHashSet slow;
     protected int waitingOnData;
 
     public ReadTracker(Topologies topologies)
     {
         super(topologies, ReadShardTracker[]::new, ReadShardTracker::new);
-        this.candidates = new ArrayList<>(topologies.nodes()); // TODO (low priority, efficiency): copyOfNodesAsList to avoid unnecessary copies
-        this.inflight = newHashSetWithExpectedSize(maxShardsPerEpoch());
+        this.candidates = new ArrayList<>(topologies.nodes().size());
+        this.inflight = new IntHashSet(topologies.nodes().size());
         this.waitingOnData = waitingOnShards;
+    }
+
+    public boolean initialise()
+    {
+        SortedArrayList<Id> candidates = filterAndRecordFaulty();
+        if (candidates == null)
+            return false;
+
+        this.candidates.addAll(candidates);
+        return true;
     }
 
     @VisibleForTesting
     protected void recordInFlightRead(Id node)
     {
-        if (!inflight.add(node))
+        if (!inflight.add(node.id))
             throw illegalState(node + " already in flight");
 
         recordResponse(this, node, ReadShardTracker::recordInFlightRead, false);
@@ -225,10 +236,10 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker>
 
     private boolean receiveResponseIsSlow(Id node)
     {
-        if (!inflight.remove(node))
+        if (!inflight.remove(node.id))
             throw illegalState("Nothing in flight for " + node);
 
-        return slow != null && slow.remove(node);
+        return slow != null && slow.remove(node.id);
     }
 
     /**
@@ -236,13 +247,13 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker>
      */
     protected RequestStatus recordSlowResponse(Id from)
     {
-        if (!inflight.contains(from))
+        if (!inflight.contains(from.id))
             throw new IllegalStateException();
 
         if (slow == null)
-            slow = newHashSetWithExpectedSize(maxShardsPerEpoch());
+            slow = new IntHashSet(topologies.nodes().size());
 
-        if (!slow.add(from)) // we can mark slow responses due to ReadCoordinator.TryAlternative OR onSlowResponse
+        if (!slow.add(from.id)) // we can mark slow responses due to ReadCoordinator.TryAlternative OR onSlowResponse
             return RequestStatus.NoChange;
 
         return recordResponse(this, from, ReadShardTracker::recordSlowResponse, true);
@@ -276,7 +287,7 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker>
     /**
      * Record a failure response
      */
-    protected RequestStatus recordReadFailure(Id from)
+    protected RequestStatus recordFailure(Id from)
     {
         return recordResponse(from, ReadShardTracker::recordReadFailure);
     }

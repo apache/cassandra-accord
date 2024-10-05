@@ -40,6 +40,7 @@ import accord.primitives.Unseekable;
 import accord.primitives.Writes;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
+import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.async.AsyncResults.SettableResult;
 
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
@@ -94,7 +95,9 @@ public abstract class ExecuteSyncPoint<U extends Unseekable> extends SettableRes
         @Override
         protected void start()
         {
-            node.send(tracker.nodes(), to -> new WaitUntilApplied(to, tracker.topologies(), syncPoint.syncId, syncPoint.route, syncPoint.syncId.epoch()), this);
+            SortedArrayList<Node.Id> contact = tracker.filterAndRecordFaulty();
+            if (contact == null) tryFailure(new Exhausted(syncPoint.syncId, syncPoint.route.homeKey(), null));
+            else node.send(contact, to -> new WaitUntilApplied(to, tracker.topologies(), syncPoint.syncId, syncPoint.route, syncPoint.syncId.epoch()), this);
         }
 
         @Override
