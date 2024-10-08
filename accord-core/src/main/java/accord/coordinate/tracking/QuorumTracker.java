@@ -24,7 +24,7 @@ import accord.topology.Topologies;
 
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.*;
 
-public class QuorumTracker extends AbstractSimpleTracker<QuorumTracker.QuorumShardTracker> implements ResponseTracker
+public class QuorumTracker extends SimpleTracker<QuorumTracker.QuorumShardTracker> implements ResponseTracker
 {
     public static class QuorumShardTracker extends ShardTracker
     {

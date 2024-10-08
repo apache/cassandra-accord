@@ -119,7 +119,7 @@ public abstract class AbstractTracker<ST extends ShardTracker>
         this.waitingOnShards = shardCount;
     }
 
-    protected abstract RequestStatus recordFailure(Id from);
+    public abstract RequestStatus recordFailure(Id from);
 
     protected int topologyOffset(int topologyIdx)
     {

@@ -239,7 +239,7 @@ public class CoordinateDurabilityScheduling
         }), txnIdLagMicros, MICROSECONDS);
     }
 
-    private void coordinateShardDurableAfterExclusiveSyncPoint(Node node, SyncPoint exclusiveSyncPoint)
+    private void coordinateShardDurableAfterExclusiveSyncPoint(Node node, SyncPoint<Range> exclusiveSyncPoint)
     {
         node.scheduler().once(() -> {
             node.commandStores().any().execute(() -> {

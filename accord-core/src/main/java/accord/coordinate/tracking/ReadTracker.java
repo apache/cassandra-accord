@@ -287,7 +287,7 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker>
     /**
      * Record a failure response
      */
-    protected RequestStatus recordFailure(Id from)
+    public RequestStatus recordFailure(Id from)
     {
         return recordResponse(from, ReadShardTracker::recordReadFailure);
     }

@@ -21,8 +21,10 @@ package accord.coordinate;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.function.Function;
 
 import accord.coordinate.tracking.FastPathTracker;
+import accord.coordinate.tracking.PreAcceptTracker;
 import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
@@ -50,7 +52,8 @@ import static accord.utils.Functions.foldl;
  */
 abstract class CoordinatePreAccept<T> extends AbstractCoordinatePreAccept<T, PreAcceptReply>
 {
-    final FastPathTracker tracker;
+    // TODO (required): do not use FastPathTracker for coordinating exclusive sync points - these always take the slow path
+    final PreAcceptTracker<?> tracker;
     // TODO (expected): this can be cleared after preaccept
     // TODO (expected): back by SortedListMap; must handle additional preaccepts (but this is no longer ordinarily enabled)
     private final List<PreAcceptOk> oks;
@@ -63,8 +66,13 @@ abstract class CoordinatePreAccept<T> extends AbstractCoordinatePreAccept<T, Pre
 
     CoordinatePreAccept(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Topologies topologies)
     {
+        this(node, txnId, txn, route, topologies, FastPathTracker::new);
+    }
+
+    CoordinatePreAccept(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Topologies topologies, Function<Topologies, PreAcceptTracker<?>> trackerFactory)
+    {
         super(node, route, txnId, topologies);
-        this.tracker = new FastPathTracker(topologies);
+        this.tracker = trackerFactory.apply(topologies);
         this.oks = new ArrayList<>(topologies.nodes().size());
         this.txn = txn;
     }
@@ -154,6 +162,7 @@ abstract class CoordinatePreAccept<T> extends AbstractCoordinatePreAccept<T, Pre
     @Override
     void onPreAccepted(Topologies topologies)
     {
+        // TODO (expected): we do not have to take max here if we have enough fast path votes (this may unnecessarily force us onto the slow path)
         Timestamp executeAt = foldl(oks, (ok, prev) -> mergeMax(ok.witnessedAt, prev), Timestamp.NONE);
         node.withEpoch(executeAt.epoch(), (ignored, withEpochFailure) -> {
             if (withEpochFailure != null)

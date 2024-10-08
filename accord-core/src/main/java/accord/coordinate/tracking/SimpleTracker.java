@@ -25,17 +25,23 @@ import accord.local.Node.Id;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 
-public abstract class AbstractSimpleTracker<ST extends ShardTracker> extends AbstractTracker<ST>
+import static accord.coordinate.tracking.RequestStatus.NoChange;
+
+public abstract class SimpleTracker<ST extends ShardTracker> extends PreAcceptTracker<ST>
 {
-    public AbstractSimpleTracker(Topologies topologies, IntFunction<ST[]> arrayFactory, Function<Shard, ST> trackerFactory)
+    public SimpleTracker(Topologies topologies, IntFunction<ST[]> arrayFactory, Function<Shard, ST> trackerFactory)
     {
         super(topologies, arrayFactory, trackerFactory);
     }
 
-    public AbstractSimpleTracker(Topologies topologies, IntFunction<ST[]> arrayFactory, ShardFactory<ST> trackerFactory)
+    public SimpleTracker(Topologies topologies, IntFunction<ST[]> arrayFactory, ShardFactory<ST> trackerFactory)
     {
         super(topologies, arrayFactory, trackerFactory);
     }
+
+    public RequestStatus recordSuccess(Id from, boolean withFastPathTimestamp) { return recordSuccess(from); }
+    public RequestStatus recordDelayed(Id from) { return NoChange; }
+    public boolean hasFastPathAccepted() { return false; }
 
     public abstract RequestStatus recordSuccess(Id from);
     public abstract RequestStatus recordFailure(Id from);

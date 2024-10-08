@@ -22,7 +22,7 @@ import java.util.function.Function;
 
 import accord.api.Result;
 import accord.coordinate.CoordinationAdapter.Adapters;
-import accord.coordinate.tracking.AbstractSimpleTracker;
+import accord.coordinate.tracking.SimpleTracker;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.coordinate.tracking.RequestStatus;
 import accord.local.Node;
@@ -52,7 +52,7 @@ public abstract class ExecuteSyncPoint<U extends Unseekable> extends SettableRes
     public static class ExecuteBlocking<U extends Unseekable> extends ExecuteSyncPoint<U>
     {
         private final Timestamp executeAt;
-        public ExecuteBlocking(Node node, SyncPoint<U> syncPoint, AbstractSimpleTracker<?> tracker, Timestamp executeAt)
+        public ExecuteBlocking(Node node, SyncPoint<U> syncPoint, SimpleTracker<?> tracker, Timestamp executeAt)
         {
             super(node, syncPoint, tracker);
             Invariants.checkArgument(!syncPoint.syncId.awaitsOnlyDeps());
@@ -80,13 +80,13 @@ public abstract class ExecuteSyncPoint<U extends Unseekable> extends SettableRes
     public static class ExecuteExclusiveSyncPoint extends ExecuteSyncPoint<Range>
     {
         private long retryInFutureEpoch;
-        public ExecuteExclusiveSyncPoint(Node node, SyncPoint<Range> syncPoint, Function<Topologies, AbstractSimpleTracker<?>> trackerSupplier)
+        public ExecuteExclusiveSyncPoint(Node node, SyncPoint<Range> syncPoint, Function<Topologies, SimpleTracker<?>> trackerSupplier)
         {
             super(node, syncPoint, Adapters.exclusiveSyncPoint().forExecution(node, syncPoint.route(), syncPoint.syncId, syncPoint.syncId, syncPoint.waitFor), trackerSupplier);
             Invariants.checkArgument(syncPoint.syncId.kind() == ExclusiveSyncPoint);
         }
 
-        public ExecuteExclusiveSyncPoint(Node node, SyncPoint<Range> syncPoint, Function<Topologies, AbstractSimpleTracker<?>> trackerSupplier, AbstractSimpleTracker<?> tracker)
+        public ExecuteExclusiveSyncPoint(Node node, SyncPoint<Range> syncPoint, Function<Topologies, SimpleTracker<?>> trackerSupplier, SimpleTracker<?> tracker)
         {
             super(node, syncPoint, trackerSupplier, tracker);
             Invariants.checkArgument(syncPoint.syncId.kind() == ExclusiveSyncPoint);
@@ -131,11 +131,11 @@ public abstract class ExecuteSyncPoint<U extends Unseekable> extends SettableRes
     final Node node;
     final SyncPoint<U> syncPoint;
 
-    final Function<Topologies, AbstractSimpleTracker<?>> trackerSupplier;
-    final AbstractSimpleTracker<?> tracker;
+    final Function<Topologies, SimpleTracker<?>> trackerSupplier;
+    final SimpleTracker<?> tracker;
     private Throwable failures = null;
 
-    ExecuteSyncPoint(Node node, SyncPoint<U> syncPoint, AbstractSimpleTracker<?> tracker)
+    ExecuteSyncPoint(Node node, SyncPoint<U> syncPoint, SimpleTracker<?> tracker)
     {
         this.node = node;
         this.syncPoint = syncPoint;
@@ -143,12 +143,12 @@ public abstract class ExecuteSyncPoint<U extends Unseekable> extends SettableRes
         this.tracker = tracker;
     }
 
-    ExecuteSyncPoint(Node node, SyncPoint<U> syncPoint, Topologies topologies, Function<Topologies, AbstractSimpleTracker<?>> trackerSupplier)
+    ExecuteSyncPoint(Node node, SyncPoint<U> syncPoint, Topologies topologies, Function<Topologies, SimpleTracker<?>> trackerSupplier)
     {
         this(node, syncPoint, trackerSupplier, trackerSupplier.apply(topologies));
     }
 
-    ExecuteSyncPoint(Node node, SyncPoint<U> syncPoint, Function<Topologies, AbstractSimpleTracker<?>> trackerSupplier, AbstractSimpleTracker<?> tracker)
+    ExecuteSyncPoint(Node node, SyncPoint<U> syncPoint, Function<Topologies, SimpleTracker<?>> trackerSupplier, SimpleTracker<?> tracker)
     {
         this.node = node;
         this.syncPoint = syncPoint;

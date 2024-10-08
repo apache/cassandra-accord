@@ -62,9 +62,9 @@ public class CoordinateSyncPoint<U extends Unseekable> extends CoordinatePreAcce
 
     final CoordinationAdapter<SyncPoint<U>> adapter;
 
-    private CoordinateSyncPoint(Node node, TxnId txnId, Topologies topologies, Txn txn, FullRoute<?> route, CoordinationAdapter<SyncPoint<U>> adapter)
+    private CoordinateSyncPoint(Node node, TxnId txnId, Topologies topologies, Txn txn, FullRoute<?> route, SyncPointAdapter<U> adapter)
     {
-        super(node, txnId, txn, route, topologies);
+        super(node, txnId, txn, route, topologies, adapter.preacceptTrackerFactory);
         this.adapter = adapter;
     }
 
@@ -159,7 +159,7 @@ public class CoordinateSyncPoint<U extends Unseekable> extends CoordinatePreAcce
         }
         else
         {
-            if (tracker.hasFastPathAccepted() && txnId.kind() == Kind.SyncPoint)
+            if (tracker.hasFastPathAccepted())
                 adapter.execute(node, topologies, route, FAST, txnId, txn, txnId, deps, this);
             else
                 adapter.propose(node, topologies, route, Ballot.ZERO, txnId, txn, executeAt, deps, this);

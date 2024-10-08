@@ -19,11 +19,15 @@
 package accord.coordinate;
 
 import java.util.function.BiConsumer;
+import java.util.function.Function;
 import javax.annotation.Nullable;
 
 import accord.api.ProtocolModifiers;
 import accord.api.Result;
 import accord.coordinate.ExecuteSyncPoint.ExecuteBlocking;
+import accord.coordinate.tracking.FastPathTracker;
+import accord.coordinate.tracking.PreAcceptTracker;
+import accord.coordinate.tracking.QuorumTracker;
 import accord.local.Node;
 import accord.messages.Apply;
 import accord.primitives.Ballot;
@@ -182,6 +186,13 @@ public interface CoordinationAdapter<R>
 
         public static abstract class SyncPointAdapter<U extends Unseekable> implements CoordinationAdapter<SyncPoint<U>>
         {
+            final Function<Topologies, PreAcceptTracker<?>> preacceptTrackerFactory;
+
+            protected SyncPointAdapter(Function<Topologies, PreAcceptTracker<?>> preacceptTrackerFactory)
+            {
+                this.preacceptTrackerFactory = preacceptTrackerFactory;
+            }
+
             abstract Topologies forDecision(Node node, FullRoute<?> route, TxnId txnId);
             abstract Topologies forExecution(Node node, FullRoute<?> route, TxnId txnId, Timestamp executeAt, Deps deps);
 
@@ -227,6 +238,11 @@ public interface CoordinationAdapter<R>
         {
             private static final ExclusiveSyncPointAdapter INSTANCE = new ExclusiveSyncPointAdapter();
 
+            public ExclusiveSyncPointAdapter()
+            {
+                super(QuorumTracker::new);
+            }
+
             @Override
             Topologies forDecision(Node node, FullRoute<?> route, TxnId txnId)
             {
@@ -253,7 +269,7 @@ public interface CoordinationAdapter<R>
         {
             protected AbstractInclusiveSyncPointAdapter()
             {
-                super();
+                super(FastPathTracker::new);
             }
 
             @Override

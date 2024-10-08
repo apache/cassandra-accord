@@ -31,7 +31,7 @@ import java.util.function.BiFunction;
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.*;
 
 // TODO (desired, efficiency): if any shard *cannot* take the fast path, and all shards have accepted, terminate
-public class FastPathTracker extends AbstractTracker<FastPathTracker.FastPathShardTracker>
+public class FastPathTracker extends PreAcceptTracker<FastPathTracker.FastPathShardTracker>
 {
     private static final ShardOutcome<FastPathTracker> NewFastPathSuccess = (tracker, shardIndex) -> {
         --tracker.waitingOnFastPathSuccess;
