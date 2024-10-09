@@ -28,6 +28,14 @@ public class TimestampsForKey
 {
     public static final long NO_LAST_EXECUTED_HLC = Long.MIN_VALUE;
 
+    // TODO (required): this isn't safe - we won't reproduce the same timestamps on replay
+    private static volatile boolean replay;
+
+    public static void unsafeSetReplay(boolean newReplay)
+    {
+        replay = newReplay;
+    }
+
     public static class SerializerSupport
     {
         public static TimestampsForKey create(RoutingKey key,
@@ -115,24 +123,28 @@ public class TimestampsForKey
         return this;
     }
 
-    public void validateExecuteAtTime(Timestamp executeAt, boolean isForWriteTxn)
+    public boolean validateExecuteAtTime(Timestamp executeAt, boolean isForWriteTxn)
     {
         if (executeAt.compareTo(lastWriteTimestamp) < 0)
+        {
+            if (replay) return false;
             throw new IllegalArgumentException(String.format("%s is less than the most recent write timestamp %s", executeAt, lastWriteTimestamp));
+        }
 
         int cmp = executeAt.compareTo(lastExecutedTimestamp);
         // execute can be in the past if it's for a read and after the most recent write
         if (cmp == 0 || (!isForWriteTxn && cmp < 0))
-            return;
-        if (cmp < 0)
-            throw new IllegalArgumentException(String.format("%s is less than the most recent executed timestamp %s", executeAt, lastExecutedTimestamp));
-        else
-            throw new IllegalArgumentException(String.format("%s is greater than the most recent executed timestamp, cfk should be updated", executeAt, lastExecutedTimestamp));
+            return true;
+
+        if (replay) return false;
+        else if (cmp < 0) throw new IllegalArgumentException(String.format("%s is less than the most recent executed timestamp %s", executeAt, lastExecutedTimestamp));
+        else throw new IllegalArgumentException(String.format("%s is greater than the most recent executed timestamp, cfk should be updated", executeAt, lastExecutedTimestamp));
     }
 
     public long hlcFor(Timestamp executeAt, boolean isForWriteTxn)
     {
-        validateExecuteAtTime(executeAt, isForWriteTxn);
+        if (!validateExecuteAtTime(executeAt, isForWriteTxn))
+            return executeAt.hlc();
         return rawLastExecutedHlc == NO_LAST_EXECUTED_HLC ? lastExecutedTimestamp.hlc() : rawLastExecutedHlc;
     }
 
