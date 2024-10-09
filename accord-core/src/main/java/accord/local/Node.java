@@ -375,7 +375,7 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
 
     public void withEpoch(long epoch, BiConsumer<Void, Throwable> callback)
     {
-        if (topology.hasEpoch(epoch))
+        if (topology.hasAtLeastEpoch(epoch))
         {
             callback.accept(null, null);
         }

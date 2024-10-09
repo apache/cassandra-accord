@@ -276,11 +276,9 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
         }
 
         @Override
-        protected void onAllSuccess(@Nullable Ranges unavailable, @Nullable Data data, @Nullable Throwable fail)
+        protected ReadOk constructReadOk(Ranges unavailable, Data data)
         {
-            // TODO (review): If the fetch response actually does some streaming, but we send back the error
-            // it is a lot of work and data that might move and be unaccounted for at the coordinator
-            node.reply(replyTo, replyContext, fail == null ? new FetchResponse(unavailable, data, maxApplied()) : null, fail);
+            return new FetchResponse(unavailable, data, maxApplied());
         }
 
         protected Timestamp maxApplied()

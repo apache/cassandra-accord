@@ -36,6 +36,7 @@ import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
+import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.SortedListMap;
 
 import static accord.coordinate.ExecutePath.SLOW;
@@ -77,7 +78,12 @@ public abstract class Stabilise<R> implements Callback<ReadReply>
 
     void start()
     {
-        Commit.commitMinimal(node, stableTracker.topologies(), ballot, txnId, txn, route, executeAt, stabiliseDeps, this);
+        SortedArrayList<Node.Id> contact = stableTracker.filterAndRecordFaulty();
+        if (allTopologies.size() > 1)
+            contact = contact.with(allTopologies.nodes().without(stableTracker.nodes()).without(allTopologies::isFaulty));
+
+        if (contact == null) callback.accept(null, new Exhausted(txnId, route.homeKey(), null));
+        else Commit.commitMinimal(contact, node, stableTracker.topologies(), allTopologies, ballot, txnId, txn, route, executeAt, stabiliseDeps, this);
     }
 
     @Override

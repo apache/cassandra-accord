@@ -120,6 +120,8 @@ public abstract class AbstractTracker<ST extends ShardTracker>
     }
 
     public abstract RequestStatus recordFailure(Id from);
+    // record failure before starting up; can skip any in-flight validation, and perhaps be cheaper
+    public RequestStatus prerecordFailure(Id from) { return recordFailure(from); }
 
     protected int topologyOffset(int topologyIdx)
     {
@@ -230,7 +232,7 @@ public abstract class AbstractTracker<ST extends ShardTracker>
             Id node = nodes.get(i);
             if (sorter.isFaulty(node))
             {
-                if (Failed == reportTo.recordFailure(node))
+                if (Failed == reportTo.prerecordFailure(node))
                     return null;
 
                 if (buffer == null)

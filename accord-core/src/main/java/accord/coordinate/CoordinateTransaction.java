@@ -47,12 +47,9 @@ import static accord.coordinate.Propose.Invalidate.proposeAndCommitInvalidate;
  */
 public class CoordinateTransaction extends CoordinatePreAccept<Result>
 {
-    final Txn txn;
-
     private CoordinateTransaction(Node node, TxnId txnId, Txn txn, FullRoute<?> route)
     {
         super(node, txnId, txn, route);
-        this.txn = txn;
     }
 
     public static AsyncResult<Result> coordinate(Node node, FullRoute<?> route, TxnId txnId, Txn txn)

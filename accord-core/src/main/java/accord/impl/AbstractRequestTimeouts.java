@@ -34,8 +34,8 @@ public class AbstractRequestTimeouts<S extends AbstractRequestTimeouts.Stripe> i
 {
     protected interface Expiring
     {
-        Expiring prepareToExpire(Stripe stripe, long now);
-        void onExpire(long now);
+        Expiring prepareToExpire();
+        void onExpire();
     }
 
     protected static class Stripe implements Runnable, Function<Stripe.AbstractRegistered, Runnable>
@@ -69,13 +69,13 @@ public class AbstractRequestTimeouts<S extends AbstractRequestTimeouts.Stripe> i
 
 
             @Override
-            public void onExpire(long now)
+            public void onExpire()
             {
                 timeout.timeout();
             }
 
             @Override
-            public Expiring prepareToExpire(Stripe stripe, long now)
+            public Expiring prepareToExpire()
             {
                 return this;
             }
@@ -93,57 +93,9 @@ public class AbstractRequestTimeouts<S extends AbstractRequestTimeouts.Stripe> i
         @Override
         public void run()
         {
-            long now = 0;
-            try (BufferList<Expiring> collect = new BufferList<>())
-            {
-                int i = 0;
-                try
-                {
-                    lock.lock();
-                    try
-                    {
-                        now = time.elapsed(MICROSECONDS);
-                        timeouts.advance(now, collect, BufferList::add);
-
-                        // prepare expiration while we hold the lock - this is to permit expiring objects to
-                        // reschedule themselves while returning some immediate expiry work to do
-                        for (int j = 0 ; j < collect.size() ; ++j)
-                        {
-                            Expiring in = collect.get(j);
-                            Expiring out = in.prepareToExpire(this, now);
-                            if (in != out)
-                                collect.set(j, out);
-                        }
-                    }
-                    finally
-                    {
-                        lock.unlock();
-                    }
-
-                    while (i < collect.size())
-                        collect.get(i++).onExpire(now);
-                }
-                catch (Throwable t)
-                {
-                    while (i < collect.size())
-                    {
-                        try
-                        {
-                            collect.get(i++).onExpire(now);
-                        }
-                        catch (Throwable t2)
-                        {
-                            t.addSuppressed(t2);
-                        }
-                    }
-                    throw t;
-                }
-            }
-        }
-
-        protected void register(AbstractRegistered register, long deadline)
-        {
-            timeouts.add(deadline, register);
+            long now = time.elapsed(MICROSECONDS);
+            lock();
+            unlock(now);
         }
 
         @Override
@@ -160,7 +112,7 @@ public class AbstractRequestTimeouts<S extends AbstractRequestTimeouts.Stripe> i
             try
             {
                 Registered registered = new Registered(timeout);
-                register(registered, deadline);
+                timeouts.add(deadline, registered);
                 return registered;
             }
             finally
@@ -171,6 +123,7 @@ public class AbstractRequestTimeouts<S extends AbstractRequestTimeouts.Stripe> i
 
         protected void lock()
         {
+            //noinspection LockAcquiredButNotSafelyReleased
             lock.lock();
         }
 
@@ -179,29 +132,60 @@ public class AbstractRequestTimeouts<S extends AbstractRequestTimeouts.Stripe> i
             return lock.tryLock();
         }
 
-        protected void unlock()
-        {
-            try
-            {
-                if (timeouts.shouldWake(time.elapsed(MICROSECONDS)))
-                    run();
-            }
-            finally
-            {
-                lock.unlock();
-            }
-        }
-
         protected void unlock(long now)
         {
+            int i = 0;
+            BufferList<Expiring> expire = null;
             try
             {
-                if (timeouts.shouldWake(now))
-                    run();
+                try
+                {
+                    if (!timeouts.shouldWake(now))
+                        return;
+
+                    expire = new BufferList<>();
+                    timeouts.advance(now, expire, BufferList::add);
+
+                    // prepare expiration while we hold the lock - this is to permit expiring objects to
+                    // reschedule themselves while returning some immediate expiry work to do
+                    for (int j = 0; j < expire.size(); ++j)
+                    {
+                        Expiring in = expire.get(j);
+                        Expiring out = in.prepareToExpire();
+                        if (in != out)
+                            expire.set(j, out);
+                    }
+                }
+                finally
+                {
+                    lock.unlock();
+                }
+
+                // we want to process these without the lock
+                while (i < expire.size())
+                    expire.get(i++).onExpire();
+            }
+            catch (Throwable t)
+            {
+                if (expire != null)
+                {
+                    while (i < expire.size())
+                    {
+                        try
+                        {
+                            expire.get(i++).onExpire();
+                        }
+                        catch (Throwable t2)
+                        {
+                            t.addSuppressed(t2);
+                        }
+                    }
+                }
             }
             finally
             {
-                lock.unlock();
+                if (expire != null)
+                    expire.close();
             }
         }
     }
@@ -228,7 +212,7 @@ public class AbstractRequestTimeouts<S extends AbstractRequestTimeouts.Stripe> i
     public RegisteredTimeout register(Timeout timeout, long delay, TimeUnit units)
     {
         long now = time.elapsed(MICROSECONDS);
-        long deadline = now + Math.max(1, MICROSECONDS.convert(delay, units));
+        long deadline = now + Math.max(1, units.toMicros(delay));
         int i = timeout.stripe() & (stripes.length - 1);
         while (true)
         {

@@ -508,6 +508,7 @@ public class Commands
         CommandStore unsafeStore = safeStore.commandStore();
         // TODO (required, API): do we care about tracking the write persistence latency, when this is just a memtable write?
         //  the only reason it will be slow is because Memtable flushes are backed-up (which will be reported elsewhere)
+        // TODO (required): this is anyway non-monotonic and milliseconds granularity
         long t0 = safeStore.node().now();
         return command.writes().apply(safeStore, applyRanges(safeStore, command.executeAt()), command.partialTxn())
                .flatMap(unused -> unsafeStore.submit(context, ss -> {

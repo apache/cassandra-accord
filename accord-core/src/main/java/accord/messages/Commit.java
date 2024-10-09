@@ -46,6 +46,7 @@ import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.utils.Invariants;
+import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.TriFunction;
 import org.agrona.collections.IntHashSet;
 
@@ -156,16 +157,13 @@ public class Commit extends TxnRequest.WithUnsynced<CommitOrReadNack>
         this.readData = readData;
     }
 
-    public static void commitMinimal(Node node, Topologies coordinateEpochOnly, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps unstableDeps, Callback<ReadReply> callback)
+    public static void commitMinimal(SortedArrayList<Id> contact, Node node, Topologies stabilise, Topologies all, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps unstableDeps, Callback<ReadReply> callback)
     {
-        Invariants.checkArgument(coordinateEpochOnly.size() == 1, "Invalid coordinate epochs: %s", coordinateEpochOnly);
+        Invariants.checkArgument(stabilise.size() == 1, "Invalid coordinate epochs: %s", stabilise);
         // we want to send to everyone, and we want to include all of the relevant data, but we stabilise on the coordination epoch replica responses
-        Topology coordinates = coordinateEpochOnly.forEpoch(txnId.epoch());
-        Topologies all = coordinateEpochOnly;
-        if (txnId.epoch() != executeAt.epoch())
-            all = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
+        Topology coordinates = stabilise.forEpoch(txnId.epoch());
 
-        send(null, (i1, i2) -> true, null, node, coordinates, coordinates, all, Kind.CommitSlowPath, ballot,
+        send(contact, null, (i1, i2) -> true, null, node, coordinates, coordinates, all, Kind.CommitSlowPath, ballot,
              txnId, txn, route, executeAt, unstableDeps, callback);
     }
 
@@ -179,35 +177,33 @@ public class Commit extends TxnRequest.WithUnsynced<CommitOrReadNack>
         Topology executes = executeEpochOnly.forEpoch(executeAt.epoch());
         Topology coordinates = all.forEpoch(txnId.epoch());
 
-        send(readSet, (set, id) -> set.contains(id.id), readScope, node, coordinates, executes, all, kind, Ballot.ZERO,
+        SortedArrayList<Id> contact = all.nodes().without(all::isFaulty);
+        send(contact, readSet, (set, id) -> set.contains(id.id), readScope, node, coordinates, executes, all, kind, Ballot.ZERO,
              txnId, txn, route, executeAt, stableDeps, callback);
     }
 
-    private static <P> void send(P param, BiPredicate<P, Id> shouldRegisterCallback, @Nullable Participants<?> readScopeIfCallback,
+    private static <P> void send(SortedArrayList<Id> contact, P param, BiPredicate<P, Id> shouldRegisterCallback, @Nullable Participants<?> readScopeIfCallback,
                                  Node node, Topology coordinates, Topology primary, Topologies all, Kind kind, Ballot ballot,
                                  TxnId txnId, @Nullable Txn txn, FullRoute<?> route, Timestamp executeAt, @Nullable Deps deps,
                                  Callback<ReadReply> callback)
     {
-        for (Node.Id to : primary.nodes())
+        for (Node.Id to : contact)
         {
-            boolean registerCallback = shouldRegisterCallback.test(param, to);
-            // if we register a callback, supply the provided readScope (which may be null)
-            Participants<?> readScope = registerCallback ? readScopeIfCallback : null;
-            Commit send = new Commit(kind, to, coordinates, all, txnId, txn, route, ballot, executeAt, deps, readScope);
-            if (registerCallback) node.send(to, send, callback);
-            else node.send(to, send);
-        }
-        if (all.size() > 1)
-        {
-            for (Node.Id to : all.nodes())
+            if (all.size() == 1 || primary.contains(to))
             {
-                if (!primary.contains(to))
-                {
-                    boolean registerCallback = shouldRegisterCallback.test(param, to);
-                    Commit send = new Commit(kind, to, coordinates, all, txnId, txn, route, ballot, executeAt, deps, (ReadTxnData) null);
-                    if (registerCallback) node.send(to, send, callback);
-                    else node.send(to, send);
-                }
+                boolean registerCallback = shouldRegisterCallback.test(param, to);
+                // if we register a callback, supply the provided readScope (which may be null)
+                Participants<?> readScope = registerCallback ? readScopeIfCallback : null;
+                Commit send = new Commit(kind, to, coordinates, all, txnId, txn, route, ballot, executeAt, deps, readScope);
+                if (registerCallback) node.send(to, send, callback);
+                else node.send(to, send);
+            }
+            else
+            {
+                boolean registerCallback = shouldRegisterCallback.test(param, to);
+                Commit send = new Commit(kind, to, coordinates, all, txnId, txn, route, ballot, executeAt, deps, (ReadTxnData) null);
+                if (registerCallback) node.send(to, send, callback);
+                else node.send(to, send);
             }
         }
     }

@@ -60,7 +60,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
     private static final Logger logger = LoggerFactory.getLogger(ReadData.class);
 
     private enum State { PENDING, RETURNED, OBSOLETE }
-    protected enum Action { WAIT, EXECUTE, OBSOLETE }
+    protected enum StoreAction { WAIT, EXECUTE, OBSOLETE }
 
     public enum ReadType
     {
@@ -165,108 +165,120 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
 
 
     @Override
-    public synchronized CommitOrReadNack apply(SafeCommandStore safeStore)
+    public CommitOrReadNack apply(SafeCommandStore safeStore)
     {
         StoreParticipants participants = StoreParticipants.execute(safeStore, readScope, txnId, executeAtEpoch);
         SafeCommand safeCommand = safeStore.get(txnId, participants);
         return apply(safeStore, safeCommand, participants);
     }
 
-    protected synchronized CommitOrReadNack apply(SafeCommandStore safeStore, SafeCommand safeCommand, StoreParticipants participants)
+    protected CommitOrReadNack apply(SafeCommandStore safeStore, SafeCommand safeCommand, StoreParticipants participants)
     {
-        if (state != State.PENDING)
-            return null;
-
-        Command command = safeCommand.current();
-        SaveStatus status = command.saveStatus();
-        int storeId = safeStore.commandStore().id();
-
-        logger.trace("{}: setting up read with status {} on {}", txnId, status, safeStore);
-        switch (actionForStatus(status))
+        synchronized (this)
         {
-            default: throw new AssertionError();
-            case WAIT:
-                registrations.put(storeId, safeStore.register(txnId, this));
-                waitingOn.set(storeId);
-                ++waitingOnCount;
-
-                int c = status.compareTo(SaveStatus.Stable);
-                if (c < 0) safeStore.progressLog().waiting(HasStableDeps, safeStore, safeCommand, participants.route(), participants.owns());
-                else if (c > 0 && status.compareTo(executeOn().min) >= 0 && status.compareTo(SaveStatus.PreApplied) < 0) safeStore.progressLog().waiting(CanApply, safeStore, safeCommand, null, readScope);
-                return status.compareTo(SaveStatus.Stable) >= 0 ? null : Insufficient;
-
-            case OBSOLETE:
-                state = State.OBSOLETE;
-                return Redundant;
-
-            case EXECUTE:
-                registrations.put(storeId, safeStore.register(txnId, this));
-                waitingOn.set(storeId);
-                ++waitingOnCount;
-                reading.set(storeId);
-                read(safeStore, safeCommand.current());
+            if (state != State.PENDING)
                 return null;
+
+            Command command = safeCommand.current();
+            SaveStatus status = command.saveStatus();
+            int storeId = safeStore.commandStore().id();
+
+            logger.trace("{}: setting up read with status {} on {}", txnId, status, safeStore);
+            switch (actionForStatus(status))
+            {
+                default: throw new AssertionError();
+                case WAIT:
+                    registrations.put(storeId, safeStore.register(txnId, this));
+                    waitingOn.set(storeId);
+                    ++waitingOnCount;
+
+                    int c = status.compareTo(SaveStatus.Stable);
+                    if (c < 0) safeStore.progressLog().waiting(HasStableDeps, safeStore, safeCommand, participants.route(), participants.owns());
+                    else if (c > 0 && status.compareTo(executeOn().min) >= 0 && status.compareTo(SaveStatus.PreApplied) < 0) safeStore.progressLog().waiting(CanApply, safeStore, safeCommand, null, readScope);
+                    return status.compareTo(SaveStatus.Stable) >= 0 ? null : Insufficient;
+
+                case OBSOLETE:
+                    state = State.OBSOLETE;
+                    return Redundant;
+
+                case EXECUTE:
+                    registrations.put(storeId, safeStore.register(txnId, this));
+                    waitingOn.set(storeId);
+                    ++waitingOnCount;
+                    reading.set(storeId);
+            }
         }
+
+        read(safeStore, safeCommand.current());
+        return null;
     }
 
-    protected final Action actionForStatus(SaveStatus status)
+    protected final StoreAction actionForStatus(SaveStatus status)
     {
         ExecuteOn executeOn = executeOn();
-        if (status.compareTo(executeOn.min) < 0) return Action.WAIT;
-        if (status.compareTo(executeOn.max) > 0) return Action.OBSOLETE;
-        return Action.EXECUTE;
+        if (status.compareTo(executeOn.min) < 0) return StoreAction.WAIT;
+        if (status.compareTo(executeOn.max) > 0) return StoreAction.OBSOLETE;
+        return StoreAction.EXECUTE;
     }
 
     @Override
-    public synchronized boolean notify(SafeCommandStore safeStore, SafeCommand safeCommand)
+    public boolean notify(SafeCommandStore safeStore, SafeCommand safeCommand)
     {
         Command command = safeCommand.current();
         logger.trace("{}: updating as listener in response to change on {} with status {} ({})",
                      this, command.txnId(), command.status(), command);
 
-        int storeId = safeStore.commandStore().id();
-        if (state != State.PENDING)
-            return false;
-
-        switch (actionForStatus(command.saveStatus()))
+        boolean execute;
+        synchronized (this)
         {
-            default: throw new AssertionError("Unhandled Action: " + actionForStatus(command.saveStatus()));
-            case WAIT:
-                return true;
-
-            case OBSOLETE:
-                onFailure(Redundant, null);
+            int storeId = safeStore.commandStore().id();
+            if (state != State.PENDING)
                 return false;
 
-            case EXECUTE:
-                if (!reading.get(storeId))
-                {
+            switch (actionForStatus(command.saveStatus()))
+            {
+                default: throw new AssertionError("Unhandled Action: " + actionForStatus(command.saveStatus()));
+                case WAIT:
+                    return true;
+
+                case OBSOLETE:
+                    execute = false;
+                    break;
+
+                case EXECUTE:
+                    if (reading.get(storeId))
+                        return true;
+
                     if (!waitingOn.get(storeId))
                     {
                         waitingOn.set(storeId);
                         ++waitingOnCount;
                     }
                     reading.set(storeId);
-                    logger.trace("{}: executing read", command.txnId());
-                    read(safeStore, command);
-                }
-                return true;
+                    execute = true;
+            }
+        }
+
+        if (execute)
+        {
+            logger.trace("{}: executing read", command.txnId());
+            read(safeStore, command);
+            return true;
+        }
+        else
+        {
+            onFailure(Redundant, null);
+            return false;
         }
     }
 
     @Override
-    public synchronized void accept(CommitOrReadNack reply, Throwable failure)
+    public void accept(CommitOrReadNack reply, Throwable failure)
     {
         // Unless failed always ack to indicate setup has completed otherwise the counter never gets to -1
         if ((reply == null || !reply.isFinal()) && failure == null)
         {
-            onOneSuccess(-1, null);
-            if (state == State.PENDING)
-            {
-                // Time out reads to avoid doing extra work for requests that will have responses ignored
-                long replyTimeout = node.agent().replyTimeout(replyContext, MILLISECONDS);
-                timeout = node.requestTimeouts().register(this, replyTimeout, MILLISECONDS);
-            }
+            onOneSuccess(-1, null, true);
             if (reply != null)
                 node.reply(replyTo, replyContext, reply, null);
         }
@@ -307,21 +319,33 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
         });
     }
 
-    protected synchronized void readComplete(CommandStore commandStore, @Nullable Data result, @Nullable Ranges unavailable)
+    protected void readComplete(CommandStore commandStore, @Nullable Data result, @Nullable Ranges unavailable)
     {
-        if (state == State.OBSOLETE)
-            return;
+        LocalListeners.Registered cancel;
+        Runnable clear;
+        synchronized(this)
+        {
+            if (state == State.OBSOLETE)
+                return;
 
-        logger.trace("{}: read completed on {}", txnId, commandStore);
-        if (result != null)
-            data = data == null ? result : data.merge(result);
+            logger.trace("{}: read completed on {}", txnId, commandStore);
+            if (result != null)
+                data = data == null ? result : data.merge(result);
 
-        int storeId = commandStore.id();
-        registrations.remove(storeId).cancel();
-        onOneSuccess(storeId, unavailable);
+            int storeId = commandStore.id();
+            cancel = registrations.remove(storeId);
+            clear = onOneSuccessInternal(storeId, unavailable, false);
+        }
+        cancel.cancel();
+        cleanup(clear);
     }
 
-    protected void onOneSuccess(int storeId, @Nullable Ranges newUnavailable)
+    protected void onOneSuccess(int storeId, @Nullable Ranges newUnavailable, boolean registration)
+    {
+        cleanup(onOneSuccessInternal(storeId, newUnavailable, registration));
+    }
+
+    protected synchronized Runnable onOneSuccessInternal(int storeId, @Nullable Ranges newUnavailable, boolean registration)
     {
         if (storeId >= 0)
         {
@@ -339,56 +363,93 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
         // wait for -1 to ensure the setup phase has also completed. Setup calls ack in its callback
         // and prevents races where we respond before dispatching all the required reads (if the reads are
         // completing faster than the reads can be setup on all required shards)
-        if (-1 == --waitingOnCount)
-            onAllSuccess(this.unavailable, data, null);
-    }
+        if (--waitingOnCount >= 0)
+        {
+            if (registration)
+            {
+                // Time out reads to avoid doing extra work for requests that will have responses ignored
+                long replyTimeout = node.agent().replyTimeout(replyContext, MILLISECONDS);
+                timeout = node.requestTimeouts().register(this, replyTimeout, MILLISECONDS);
+            }
+            return null;
+        }
 
-    protected void onAllSuccess(@Nullable Ranges unavailable, @Nullable Data data, @Nullable Throwable fail)
-    {
         switch (state)
         {
+            default:
+                throw new AssertionError("Unknown state: " + state);
+
             case RETURNED:
                 throw illegalState("ReadOk was sent, yet ack called again");
 
             case OBSOLETE:
-                logger.debug("After the read completed for txn {}, the result was marked obsolete", txnId);
-                if (fail != null)
-                    node.agent().onUncaughtException(fail);
-                break;
+                logger.debug("Before the read completed successfully for txn {}, the result was marked obsolete", txnId);
+                return null;
 
             case PENDING:
                 state = State.RETURNED;
-                node.reply(replyTo, replyContext, fail == null ? constructReadOk(unavailable, data) : null, fail);
-                clear();
-                break;
-
-            default:
-                throw new AssertionError("Unknown state: " + state);
+                node.reply(replyTo, replyContext, constructReadOk(unavailable, data), null);
+                return clearUnsafe();
         }
     }
 
-    void cancel()
+    boolean cancel()
     {
-        state = State.OBSOLETE;
-        clear();
+        Runnable clear;
+        synchronized (this)
+        {
+            if (state != State.PENDING)
+                return false;
+
+            clear = clearUnsafe();
+            state = State.OBSOLETE;
+        }
+        cleanup(clear);
+        return true;
     }
 
-    void clear()
+    void cleanup()
     {
-        if (timeout != null)
-            timeout.cancel();
-        registrations.forEach((i, r) -> r.cancel());
+        Runnable clear;
+        synchronized (this)
+        {
+            clear = clearUnsafe();
+        }
+        cleanup(clear);
+    }
+
+    private static void cleanup(@Nullable Runnable clear)
+    {
+        if (clear != null)
+            clear.run();
+    }
+
+    @Nullable Runnable clearUnsafe()
+    {
+        RegisteredTimeout cancelTimeout = timeout;
+        Int2ObjectHashMap<LocalListeners.Registered> cancelRegistrations = registrations;
+        timeout = null;
+        registrations = null;
         waitingOn.clear();
         reading.clear();
         data = null;
         unavailable = null;
-        timeout = null;
+
+        if (cancelRegistrations == null && cancelTimeout == null)
+            return null;
+
+        return () -> {
+            if (cancelTimeout != null)
+                cancelTimeout.cancel();
+            if (cancelRegistrations != null)
+                cancelRegistrations.forEach((i, r) -> r.cancel());
+        };
     }
 
-    synchronized public void timeout()
+    public void timeout()
     {
         timeout = null;
-        cancel();
+        cleanup();
     }
 
     public int stripe()
@@ -396,9 +457,11 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
         return txnId.hashCode();
     }
 
-    synchronized void onFailure(CommitOrReadNack failReply, Throwable throwable)
+    void onFailure(CommitOrReadNack failReply, Throwable throwable)
     {
-        cancel();
+        if (!cancel())
+            return;
+
         if (throwable != null)
         {
             node.reply(replyTo, replyContext, null, throwable);

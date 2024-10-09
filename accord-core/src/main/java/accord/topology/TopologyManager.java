@@ -872,6 +872,11 @@ public class TopologyManager
         return epochs.get(epoch) != null;
     }
 
+    public boolean hasAtLeastEpoch(long epoch)
+    {
+        return epochs.currentEpoch >= epoch;
+    }
+
     public Topology localForEpoch(long epoch)
     {
         EpochState epochState = epochs.get(epoch);

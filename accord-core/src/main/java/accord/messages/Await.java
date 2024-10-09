@@ -30,6 +30,7 @@ import accord.api.LocalListeners;
 import accord.api.ProgressLog.BlockedUntil;
 import accord.api.RemoteListeners;
 import accord.api.RequestTimeouts;
+import accord.api.RequestTimeouts.RegisteredTimeout;
 import accord.local.Command;
 import accord.local.Commands;
 import accord.local.Node;
@@ -86,7 +87,7 @@ public class Await implements Request, MapReduceConsume<SafeCommandStore, Void>,
 
     private transient volatile Collection<LocalListeners.Registered> syncRegistrations;
     private static final AtomicReferenceFieldUpdater<Await, Collection<LocalListeners.Registered>> syncRegistrationsUpdater = AtomicReferenceFieldUpdater.newUpdater(Await.class, (Class)Collection.class, "syncRegistrations");
-    private transient RequestTimeouts.RegisteredTimeout timeout;
+    private transient RegisteredTimeout timeout;
 
     // we use exactly -1 to make serialization easy (can increment by 1 and store a non-negative integer)
     private static final int SYNCHRONOUS_CALLBACKID = -1;
@@ -184,22 +185,28 @@ public class Await implements Request, MapReduceConsume<SafeCommandStore, Void>,
         }
         else if (callbackId >= 0)
         {
+            RemoteListeners.Registration asyncRegistration = this.asyncRegistration;
             AwaitOk reply = asyncRegistration == null || 0 == asyncRegistration.done() ? AwaitOk.Ready : AwaitOk.NotReady;
             node.reply(replyTo, replyContext, reply, null);
         }
         else
         {
-            if (synchronouslyWaitingOn > 0)
+            int waitingOn = synchronouslyWaitingOnUpdater.decrementAndGet(this);
+            if (waitingOn >= 0)
             {
                 long replyTimeout = node.agent().replyTimeout(replyContext, MILLISECONDS);
                 timeout = node.requestTimeouts().register(this, replyTimeout, MILLISECONDS);
+                if (-1 == synchronouslyWaitingOn)
+                    timeout.cancel(); // we could leave a dangling timeout in this rare race condition
             }
-            if (-1 == synchronouslyWaitingOnUpdater.decrementAndGet(this))
+            else
+            {
                 node.reply(replyTo, replyContext, AwaitOk.Ready, null);
+            }
         }
     }
 
-    synchronized public void timeout()
+    public void timeout()
     {
         timeout = null;
         cancel();
@@ -210,20 +217,17 @@ public class Await implements Request, MapReduceConsume<SafeCommandStore, Void>,
         return txnId.hashCode();
     }
 
-    synchronized void cancel()
+    void cancel()
     {
-        if (timeout != null)
-        {
-            timeout.cancel();
-            timeout = null;
-        }
-        if (syncRegistrations != null)
-        {
-            syncRegistrations.forEach(LocalListeners.Registered::cancel);
-            syncRegistrations = null;
-        }
-        if (asyncRegistration != null)
-            asyncRegistration = null;
+        RegisteredTimeout cancelTimeout = timeout;
+        Collection<LocalListeners.Registered> cancelRegistrations = syncRegistrations;
+        if (cancelTimeout != null)
+            cancelTimeout.cancel();
+        if (cancelRegistrations != null)
+            cancelRegistrations.forEach(LocalListeners.Registered::cancel);
+        timeout = null;
+        syncRegistrations = null;
+        asyncRegistration = null;
     }
 
     @Override
@@ -247,6 +251,30 @@ public class Await implements Request, MapReduceConsume<SafeCommandStore, Void>,
         {
             return MessageType.AWAIT_RSP;
         }
+    }
+
+    @Override
+    public long waitForEpoch()
+    {
+        return txnId.epoch();
+    }
+
+    @Override
+    public boolean notify(SafeCommandStore safeStore, SafeCommand safeCommand)
+    {
+        Command command = safeCommand.current();
+        if (command.saveStatus().compareTo(blockedUntil.minSaveStatus) >= 0)
+            return true;
+
+        if (-1 == synchronouslyWaitingOnUpdater.decrementAndGet(this))
+        {
+            node.reply(replyTo, replyContext, AwaitOk.Ready, null);
+            if (timeout != null)
+                timeout.cancel();
+            syncRegistrations = null;
+        }
+
+        return false;
     }
 
     public static class AsyncAwaitComplete implements Request, PreLoadContext, Consumer<SafeCommandStore>
@@ -292,32 +320,8 @@ public class Await implements Request, MapReduceConsume<SafeCommandStore, Void>,
             if (safeCommand == null || safeCommand.current().saveStatus() == SaveStatus.Uninitialised)
                 return;
 
-            Command command = Commands.updateRoute(safeStore, safeCommand, route);
+            Commands.updateRoute(safeStore, safeCommand, route);
             safeStore.progressLog().remoteCallback(safeStore, safeCommand, newStatus, callbackId, from);
         }
-    }
-
-    @Override
-    public long waitForEpoch()
-    {
-        return txnId.epoch();
-    }
-
-    @Override
-    public boolean notify(SafeCommandStore safeStore, SafeCommand safeCommand)
-    {
-        Command command = safeCommand.current();
-        if (command.saveStatus().compareTo(blockedUntil.minSaveStatus) >= 0)
-            return true;
-
-        if (-1 == synchronouslyWaitingOnUpdater.decrementAndGet(this))
-        {
-            node.reply(replyTo, replyContext, AwaitOk.Ready, null);
-            if (timeout != null)
-                timeout.cancel();
-            syncRegistrations = null;
-        }
-
-        return false;
     }
 }

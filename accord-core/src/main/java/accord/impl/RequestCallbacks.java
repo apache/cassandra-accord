@@ -21,6 +21,9 @@ package accord.impl;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import accord.local.AgentExecutor;
 import accord.local.Node;
 import accord.local.TimeService;
@@ -32,6 +35,8 @@ import static java.util.concurrent.TimeUnit.MICROSECONDS;
 
 public class RequestCallbacks extends AbstractRequestTimeouts<RequestCallbacks.CallbackStripe>
 {
+    private static final Logger logger = LoggerFactory.getLogger(RequestCallbacks.class);
+
     public interface CallbackEntry
     {
         long registeredAt(TimeUnit units);
@@ -73,26 +78,26 @@ public class RequestCallbacks extends AbstractRequestTimeouts<RequestCallbacks.C
             }
 
             @Override
-            public Expiring prepareToExpire(Stripe stripe, long now)
+            public Expiring prepareToExpire()
             {
-                Invariants.checkState(((CallbackStripe)stripe).callbacks.containsKey(callbackId));
-                if (now >= reportFailAt)
+                if (deadline() == reportFailAt)
                 {
-                    ((CallbackStripe)stripe).callbacks.remove(callbackId);
+                    callbacks.remove(callbackId);
                     return this;
                 }
 
-                stripe.register(this, reportFailAt);
+                Invariants.checkState(callbacks.containsKey(callbackId));
+                timeouts.add(reportFailAt, this);
                 return new Expiring()
                 {
                     @Override
-                    public Expiring prepareToExpire(Stripe stripe, long now)
+                    public Expiring prepareToExpire()
                     {
                         return this;
                     }
 
                     @Override
-                    public void onExpire(long now)
+                    public void onExpire()
                     {
                         safeInvoke(RegisteredCallback::unsafeOnSlow, null);
                     }
@@ -100,7 +105,7 @@ public class RequestCallbacks extends AbstractRequestTimeouts<RequestCallbacks.C
             }
 
             @Override
-            public void onExpire(long now)
+            public void onExpire()
             {
                 safeInvoke(RegisteredCallback::unsafeOnFailure, new accord.coordinate.Timeout(null, null));
             }
@@ -122,6 +127,8 @@ public class RequestCallbacks extends AbstractRequestTimeouts<RequestCallbacks.C
 
             <P> void safeInvoke(BiConsumer<RegisteredCallback<T>, P> invoker, P param)
             {
+                // TODO (expected): have executor provide inStore() function so can invoke immediately
+                //   BUT need to be careful no callers fail if we invok to refactor a little as we cannot safely invoke callbacks before we have marked them in-flight
                 executor.execute(() -> {
                     try
                     {
@@ -162,8 +169,8 @@ public class RequestCallbacks extends AbstractRequestTimeouts<RequestCallbacks.C
             {
                 RegisteredCallback<T> registered = new RegisteredCallback<>(executor, callbackId, callback, to, now, reportSlowAt, reportFailAt);
                 Object existing = callbacks.putIfAbsent(callbackId, registered);
-                timeouts.add(Math.min(reportSlowAt, reportFailAt), registered);
                 Invariants.checkState(existing == null);
+                timeouts.add(Math.min(reportSlowAt, reportFailAt), registered);
                 return registered;
             }
             finally
@@ -184,6 +191,7 @@ public class RequestCallbacks extends AbstractRequestTimeouts<RequestCallbacks.C
 
         private <T, P> RegisteredCallback<T> safeInvoke(long callbackId, Node.Id from, P param, BiConsumer<RegisteredCallback<T>, P> invoker, boolean remove)
         {
+            long now = time.elapsed(MICROSECONDS);
             lock();
             try
             {
@@ -198,7 +206,7 @@ public class RequestCallbacks extends AbstractRequestTimeouts<RequestCallbacks.C
             }
             finally
             {
-                unlock();
+                unlock(now);
             }
         }
     }
@@ -213,14 +221,12 @@ public class RequestCallbacks extends AbstractRequestTimeouts<RequestCallbacks.C
         super(time, stripeCount, CallbackStripe[]::new, CallbackStripe::new);
     }
 
-    public <T> void register(long callbackId, AgentExecutor executor, Callback<T> callback, Node.Id to, long failDelay, TimeUnit units)
+    public <T> void registerWithDelay(long callbackId, AgentExecutor executor, Callback<T> callback, Node.Id to, long failDelay, TimeUnit units)
     {
-        long now = time.elapsed(MICROSECONDS);
-        long failDeadline = now + units.toMicros(failDelay);
-        stripes[(int)callbackId & (stripes.length - 1)].register(callbackId, executor, callback, to, now, failDeadline);
+        registerWithDelay(callbackId, executor, callback, to, Long.MAX_VALUE, failDelay, units);
     }
 
-    public <T> void register(long callbackId, AgentExecutor executor, Callback<T> callback, Node.Id to, long slowDelay, long failDelay, TimeUnit units)
+    public <T> void registerWithDelay(long callbackId, AgentExecutor executor, Callback<T> callback, Node.Id to, long slowDelay, long failDelay, TimeUnit units)
     {
         long now = time.elapsed(MICROSECONDS);
         long reportFailAt = now + units.toMicros(failDelay);
@@ -228,7 +234,12 @@ public class RequestCallbacks extends AbstractRequestTimeouts<RequestCallbacks.C
         stripes[(int)callbackId & (stripes.length - 1)].register(callbackId, executor, callback, to, now, reportSlowAt, reportFailAt);
     }
 
-    public <T> void register(long callbackId, AgentExecutor executor, Callback<T> callback, Node.Id to, long now, long reportSlowAt, long reportFailAt, TimeUnit units)
+    public <T> void registerAt(long callbackId, AgentExecutor executor, Callback<T> callback, Node.Id to, long now, long reportFailAt, TimeUnit units)
+    {
+        registerAt(callbackId, executor, callback, to, now, Long.MAX_VALUE, reportFailAt, units);
+    }
+
+    public <T> void registerAt(long callbackId, AgentExecutor executor, Callback<T> callback, Node.Id to, long now, long reportSlowAt, long reportFailAt, TimeUnit units)
     {
         if (units != MICROSECONDS)
         {

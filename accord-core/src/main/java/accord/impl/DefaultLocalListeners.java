@@ -39,7 +39,7 @@ import accord.utils.Invariants;
 import accord.utils.btree.BTree;
 import accord.utils.btree.BTreeRemoval;
 
-// TODO (required): evict to disk
+// TODO (expected): evict to disk
 public class DefaultLocalListeners implements LocalListeners
 {
     public static class Factory implements LocalListeners.Factory
@@ -462,6 +462,7 @@ public class DefaultLocalListeners implements LocalListeners
 
     private void notifyComplexListeners(SafeCommandStore safeStore, SafeCommand safeCommand)
     {
+        // TODO (expected): potential for lock inversion on notify calls; consider buffering notifies as we do elsewhere
         complexListeners.compute(safeCommand.txnId(), (id, cur) -> {
             if (cur == null)
                 return null;

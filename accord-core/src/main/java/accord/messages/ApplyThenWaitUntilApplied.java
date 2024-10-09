@@ -18,12 +18,9 @@
 
 package accord.messages;
 
-import javax.annotation.Nullable;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import accord.api.Data;
 import accord.api.Result;
 import accord.local.Node;
 import accord.local.SafeCommandStore;
@@ -34,7 +31,6 @@ import accord.primitives.FullRoute;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Participants;
-import accord.primitives.Ranges;
 import accord.primitives.Route;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
@@ -120,12 +116,6 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
                 break;
         }
         return super.apply(safeStore);
-    }
-
-    @Override
-    protected void onAllSuccess(@Nullable Ranges unavailable, @Nullable Data data, @Nullable Throwable fail)
-    {
-        super.onAllSuccess(unavailable, data, fail);
     }
 
     @Override

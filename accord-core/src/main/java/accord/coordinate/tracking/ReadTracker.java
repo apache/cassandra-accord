@@ -150,6 +150,12 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker>
             return ensureProgressOrFail();
         }
 
+        public ShardOutcomes prerecordReadFailure(Object ignore)
+        {
+            ++contacted;
+            return ensureProgressOrFail();
+        }
+
         private ShardOutcomes ensureProgressOrFail()
         {
             if (!shouldRead())
@@ -236,7 +242,7 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker>
 
     private boolean receiveResponseIsSlow(Id node)
     {
-        if (!inflight.remove(node.id))
+        if (!inflight.isEmpty() && !inflight.remove(node.id))
             throw illegalState("Nothing in flight for " + node);
 
         return slow != null && slow.remove(node.id);
@@ -290,6 +296,11 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker>
     public RequestStatus recordFailure(Id from)
     {
         return recordResponse(from, ReadShardTracker::recordReadFailure);
+    }
+
+    public RequestStatus prerecordFailure(Id from)
+    {
+        return recordResponse(this, from, ReadShardTracker::prerecordReadFailure, null);
     }
 
     protected RequestStatus recordResponse(Id from, BiFunction<? super ReadShardTracker, Boolean, ? extends ShardOutcome<? super ReadTracker>> function)
