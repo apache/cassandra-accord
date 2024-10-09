@@ -56,6 +56,11 @@ public class CoordinateShardDurable extends ExecuteExclusiveSyncPoint implements
     protected void start()
     {
         SortedArrayList<Node.Id> contact = tracker.filterAndRecordFaulty();
+        if (contact == null)
+        {
+            tryFailure(new Exhausted(syncPoint.syncId, syncPoint.route.homeKey(), null));
+            return;
+        }
         SortedArrayList<Node.Id> allStaleNodes = tracker.topologies().staleNodes();
         SortedArrayList<Node.Id> allCurrentNodes = tracker.topologies().current().nodes();
         SortedArrayList<Node.Id> staleNodes = contact.without(id -> !allStaleNodes.contains(id))

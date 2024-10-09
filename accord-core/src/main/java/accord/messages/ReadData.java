@@ -325,7 +325,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
         Runnable clear;
         synchronized(this)
         {
-            if (state == State.OBSOLETE)
+            if (state != State.PENDING)
                 return;
 
             logger.trace("{}: read completed on {}", txnId, commandStore);
@@ -401,8 +401,8 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
             if (state != State.PENDING)
                 return false;
 
-            clear = clearUnsafe();
             state = State.OBSOLETE;
+            clear = clearUnsafe();
         }
         cleanup(clear);
         return true;
@@ -426,6 +426,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
 
     @Nullable Runnable clearUnsafe()
     {
+        Invariants.checkState(state != State.PENDING);
         RegisteredTimeout cancelTimeout = timeout;
         Int2ObjectHashMap<LocalListeners.Registered> cancelRegistrations = registrations;
         timeout = null;
@@ -449,7 +450,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
     public void timeout()
     {
         timeout = null;
-        cleanup();
+        cancel();
     }
 
     public int stripe()

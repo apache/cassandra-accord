@@ -53,6 +53,7 @@ public class RequestCallbacks extends AbstractRequestTimeouts<RequestCallbacks.C
             final long registeredAt;
             final long reportSlowAt;
             final long reportFailAt;
+            boolean cancelInFlight;
 
             public RegisteredCallback(AgentExecutor executor, long callbackId, Callback<T> callback, Node.Id to, long registeredAt, long reportSlowAt, long reportFailAt)
             {
@@ -75,6 +76,7 @@ public class RequestCallbacks extends AbstractRequestTimeouts<RequestCallbacks.C
             {
                 if (isInHeap())
                     timeouts.remove(this);
+                cancelInFlight = true;
             }
 
             @Override
@@ -122,7 +124,8 @@ public class RequestCallbacks extends AbstractRequestTimeouts<RequestCallbacks.C
 
             private void unsafeOnSlow(Object ignore)
             {
-                callback.onSlowResponse(to);
+                if (!cancelInFlight)
+                    callback.onSlowResponse(to);
             }
 
             <P> void safeInvoke(BiConsumer<RegisteredCallback<T>, P> invoker, P param)
