@@ -538,10 +538,18 @@ public abstract class CommandStore implements AgentExecutor
     public void markShardDurable(SafeCommandStore safeStore, TxnId globalSyncId, Ranges durableRanges)
     {
         final Ranges slicedRanges = durableRanges.slice(safeStore.ranges().allUntil(globalSyncId.epoch()), Minimal);
+        TxnId locallyRedundantBefore = safeStore.redundantBefore().minLocallyAppliedOrInvalidatedBefore(slicedRanges);
         RedundantBefore addShardRedundant = RedundantBefore.create(slicedRanges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, globalSyncId, TxnId.NONE, TxnId.NONE);
         safeStore.upsertRedundantBefore(addShardRedundant);
         updatedRedundantBefore(safeStore, globalSyncId, slicedRanges);
         safeStore = safeStore; // make unusable in lambda
+
+        if (locallyRedundantBefore.compareTo(globalSyncId) < 0)
+        {
+            logger.warn("Trying to markShardDurable we have not yet caught-up to locally. Local: {}, Global: {}, Ranges: {}", locallyRedundantBefore, globalSyncId, slicedRanges);
+            return;
+        }
+
         safeStore.dataStore().snapshot(slicedRanges, globalSyncId).begin((success, fail) -> {
             if (fail != null)
             {
@@ -550,9 +558,9 @@ public abstract class CommandStore implements AgentExecutor
             }
 
             execute(PreLoadContext.empty(), safeStore0 -> {
-                RedundantBefore addGc = RedundantBefore.create(slicedRanges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, globalSyncId, TxnId.NONE);
+                RedundantBefore addGc = RedundantBefore.create(slicedRanges, Long.MIN_VALUE, Long.MAX_VALUE, globalSyncId, globalSyncId, globalSyncId, TxnId.NONE);
                 safeStore0.upsertRedundantBefore(addGc);
-            });
+            }).begin(agent());
         });
     }
 

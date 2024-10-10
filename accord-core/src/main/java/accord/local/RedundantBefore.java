@@ -178,9 +178,9 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
             int cb = cur.bootstrappedAt.compareTo(add.bootstrappedAt);
             int csu = compareStaleUntilAtLeast(cur.staleUntilAtLeast, add.staleUntilAtLeast);
 
-            if (range.equals(cur.range) && startEpoch == cur.startOwnershipEpoch && endEpoch == cur.endOwnershipEpoch && cl >= 0 && cb >= 0 && cs >= 0 && csu >= 0)
+            if (range.equals(cur.range) && startEpoch == cur.startOwnershipEpoch && endEpoch == cur.endOwnershipEpoch && cl >= 0 && cd >= 0 && cs >= 0 && cg >= 0 && cb >= 0 && csu >= 0)
                 return cur;
-            if (range.equals(add.range) && startEpoch == add.startOwnershipEpoch && endEpoch == add.endOwnershipEpoch && cl <= 0 && cb <= 0 && cs <= 0 && csu <= 0)
+            if (range.equals(add.range) && startEpoch == add.startOwnershipEpoch && endEpoch == add.endOwnershipEpoch && cl <= 0 && cd >= 0 && cs <= 0 && cg <= 0 && cb <= 0 && csu <= 0)
                 return add;
 
             TxnId locallyAppliedOrInvalidatedBefore = cl >= 0 ? cur.locallyAppliedOrInvalidatedBefore : add.locallyAppliedOrInvalidatedBefore;
@@ -308,6 +308,17 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
                 return entry.gcBefore;
 
             return TxnId.min(minGcBefore, entry.gcBefore);
+        }
+
+        static TxnId minLocallyAppliedOrInvalidatedBefore(Entry entry, @Nullable TxnId minLocallyAppliedOrInvalidatedBefore)
+        {
+            if (entry == null)
+                return minLocallyAppliedOrInvalidatedBefore;
+
+            if (minLocallyAppliedOrInvalidatedBefore == null)
+                return entry.locallyAppliedOrInvalidatedBefore;
+
+            return TxnId.min(minLocallyAppliedOrInvalidatedBefore, entry.locallyAppliedOrInvalidatedBefore);
         }
 
         static Ranges expectToExecute(Entry entry, @Nonnull Ranges executeRanges, TxnId txnId, @Nullable Timestamp executeAt)
@@ -505,9 +516,9 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
         return create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, locallyAppliedOrInvalidatedBefore, shardAppliedOrInvalidatedBefore, gcBefore, bootstrappedAt, staleUntilAtLeast);
     }
 
-    public static RedundantBefore create(AbstractRanges ranges, long startEpoch, long endEpoch, @Nonnull TxnId locallyAppliedOrInvalidatedBefore, @Nonnull TxnId shardAppliedOrInvalidatedBefore, @Nonnull TxnId gcBefore, @Nonnull TxnId bootstrappedAt)
+    public static RedundantBefore create(AbstractRanges ranges, long startEpoch, long endEpoch, @Nonnull TxnId locallyAppliedOrInvalidatedBefore, @Nonnull TxnId shardOnlyAppliedOrInvalidatedBefore, @Nonnull TxnId gcBefore, @Nonnull TxnId bootstrappedAt)
     {
-        return create(ranges, startEpoch, endEpoch, locallyAppliedOrInvalidatedBefore, shardAppliedOrInvalidatedBefore, gcBefore, bootstrappedAt, null);
+        return create(ranges, startEpoch, endEpoch, locallyAppliedOrInvalidatedBefore, shardOnlyAppliedOrInvalidatedBefore, gcBefore, bootstrappedAt, null);
     }
 
     public static RedundantBefore create(AbstractRanges ranges, long startEpoch, long endEpoch, @Nonnull TxnId locallyAppliedOrInvalidatedBefore, @Nonnull TxnId shardOnlyAppliedOrInvalidatedBefore, @Nonnull TxnId gcBefore, @Nonnull TxnId bootstrappedAt, @Nullable Timestamp staleUntilAtLeast)
@@ -588,6 +599,11 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
     public TxnId minGcBefore(Routables<?> participants)
     {
         return TxnId.nonNullOrMax(TxnId.NONE, foldl(participants, Entry::minGcBefore, null, ignore -> false));
+    }
+
+    public TxnId minLocallyAppliedOrInvalidatedBefore(Routables<?> participants)
+    {
+        return TxnId.nonNullOrMax(TxnId.NONE, foldl(participants, Entry::minLocallyAppliedOrInvalidatedBefore, null, ignore -> false));
     }
 
     /**
