@@ -118,6 +118,7 @@ public class PersistentField<Input, Saved>
                     upd = true;
                 }
                 if (upd) set.accept(latest);
+                result.setSuccess(null);
             }
         });
 
