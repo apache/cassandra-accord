@@ -57,6 +57,7 @@ import accord.utils.SimpleBitSet;
 import javax.annotation.Nonnull;
 
 import static accord.local.Command.AbstractCommand.validate;
+import static accord.primitives.Routable.Domain.Key;
 import static accord.primitives.SaveStatus.AcceptedInvalidate;
 import static accord.primitives.SaveStatus.ErasedOrVestigial;
 import static accord.primitives.SaveStatus.Uninitialised;
@@ -1353,7 +1354,7 @@ public abstract class Command implements CommonAttributes
                 this.directRangeDeps = directRangeDeps;
                 this.directKeyDeps = directKeyDeps;
                 this.waitingOn = new SimpleBitSet(txnIdCount() + keys.size(), false);
-                this.appliedOrInvalidated = CommandsForKey.managesExecution(txnId) ? null : new SimpleBitSet(txnIdCount(), false);
+                this.appliedOrInvalidated = txnId.is(Key) ? null : new SimpleBitSet(txnIdCount(), false);
             }
 
             public static Update initialise(SafeCommandStore safeStore, TxnId txnId, Timestamp executeAt, StoreParticipants participants, Deps deps)
