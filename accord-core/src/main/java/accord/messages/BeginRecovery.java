@@ -47,9 +47,9 @@ import static accord.local.SafeCommandStore.TestStatus.IS_STABLE;
 import static accord.local.SafeCommandStore.TestStatus.IS_PROPOSED;
 import static accord.local.SafeCommandStore.TestStartedAt.STARTED_AFTER;
 import static accord.local.SafeCommandStore.TestStartedAt.STARTED_BEFORE;
+import static accord.primitives.Status.Accepted;
 import static accord.primitives.Status.Phase;
 import static accord.primitives.Status.PreAccepted;
-import static accord.primitives.Status.PreCommitted;
 import static accord.messages.PreAccept.calculateDeps;
 import static accord.primitives.EpochSupplier.constant;
 import static accord.utils.Invariants.illegalState;
@@ -130,7 +130,7 @@ public class BeginRecovery extends TxnRequest.WithUnsynced<BeginRecovery.Recover
         boolean rejectsFastPath;
         Deps earlierCommittedWitness, earlierAcceptedNoWitness;
 
-        if (command.hasBeen(PreCommitted))
+        if (command.hasBeen(Accepted))
         {
             rejectsFastPath = false;
             earlierCommittedWitness = earlierAcceptedNoWitness = Deps.NONE;

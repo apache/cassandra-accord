@@ -43,6 +43,7 @@ import java.util.NavigableMap;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -476,6 +477,7 @@ public abstract class CommandStore implements AgentExecutor
         };
     }
 
+    // TODO (required): replace with a simple wait on suitable exclusive sync point(s)
     private void fetchMajorityDeps(AsyncResults.SettableResult<Void> coordination, Node node, long epoch, Ranges ranges)
     {
         TxnId id = TxnId.fromValues(epoch - 1, 0, node.id());
@@ -485,7 +487,8 @@ public abstract class CommandStore implements AgentExecutor
         CollectCalculatedDeps.withCalculatedDeps(node, id, route, route, before, (deps, fail) -> {
             if (fail != null)
             {
-                fetchMajorityDeps(coordination, node, epoch, ranges);
+                node.agent().onUncaughtException(fail);
+                node.scheduler().once(() -> fetchMajorityDeps(coordination, node, epoch, ranges), 1L, TimeUnit.MINUTES);
             }
             else
             {
