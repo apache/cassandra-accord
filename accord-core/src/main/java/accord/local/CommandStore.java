@@ -487,7 +487,7 @@ public abstract class CommandStore implements AgentExecutor
         CollectCalculatedDeps.withCalculatedDeps(node, id, route, route, before, (deps, fail) -> {
             if (fail != null)
             {
-                node.scheduler().once(() -> fetchMajorityDeps(coordination, node, epoch, ranges), 10L, TimeUnit.SECONDS);
+                node.scheduler().once(() -> fetchMajorityDeps(coordination, node, epoch, ranges), 1L, TimeUnit.MINUTES);
                 node.agent().onUncaughtException(fail);
             }
             else
@@ -497,8 +497,15 @@ public abstract class CommandStore implements AgentExecutor
                 execute(contextFor(null, deps.txnIds(), deps.keyDeps.keys(), COMMANDS), safeStore -> {
                     safeStore.registerHistoricalTransactions(deps);
                 }).begin((success, fail2) -> {
-                    if (fail2 != null) fetchMajorityDeps(coordination, node, epoch, ranges);
-                    else coordination.setSuccess(null);
+                    if (fail2 != null)
+                    {
+                        node.agent().onUncaughtException(fail2);
+                        node.scheduler().once(() -> fetchMajorityDeps(coordination, node, epoch, ranges), 1L, TimeUnit.MINUTES);
+                    }
+                    else
+                    {
+                        coordination.setSuccess(null);
+                    }
                 });
             }
         });

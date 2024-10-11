@@ -24,6 +24,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.primitives.Ints;
 import org.slf4j.Logger;
@@ -36,6 +37,7 @@ import accord.coordinate.CoordinationFailed;
 import accord.coordinate.ExecuteSyncPoint.SyncPointErased;
 import accord.local.Node;
 import accord.local.ShardDistributor;
+import accord.primitives.FullRoute;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.Routable.Domain;
@@ -82,6 +84,7 @@ public class CoordinateDurabilityScheduling
 
     private final Node node;
     private Scheduler.Scheduled scheduled;
+    private final AtomicReference<Ranges> active = new AtomicReference<>(Ranges.EMPTY);
 
     /*
      * In each round at each node wait this amount of time between initiating new CoordinateShardDurable
@@ -206,7 +209,20 @@ public class CoordinateDurabilityScheduling
 
         logger.trace("Scheduling CoordinateShardDurable for {} at {}", coordinate, nowMicros);
         for (Ranges ranges : coordinate)
-            startShardSync(ranges);
+        {
+            if (ranges.isEmpty())
+                continue;
+
+            Ranges inactiveRanges = ranges.without(active.get());
+            if (!inactiveRanges.equals(ranges))
+            {
+                logger.info("Not initiating new durability scheduling for {} as previous attempt still in progress", ranges.without(inactiveRanges));
+                if (inactiveRanges.isEmpty())
+                    continue;
+            }
+            active.accumulateAndGet(inactiveRanges, Ranges::with);
+            startShardSync(inactiveRanges);
+        }
     }
 
     /**
@@ -217,6 +233,7 @@ public class CoordinateDurabilityScheduling
     {
         TxnId at = node.nextTxnId(ExclusiveSyncPoint, Domain.Range);
         node.scheduler().once(() -> node.withEpoch(at.epoch(), (ignored, withEpochFailure) -> {
+                           FullRoute<Range> route = (FullRoute<Range>) node.computeRoute(at, ranges);
                            if (withEpochFailure != null)
                            {
                                Throwable wrapped = CoordinationFailed.wrap(withEpochFailure);
@@ -224,11 +241,12 @@ public class CoordinateDurabilityScheduling
                                node.agent().onUncaughtException(wrapped);
                                return;
                            }
-                           exclusiveSyncPoint(node, at, ranges)
+                           exclusiveSyncPoint(node, at, route)
                            .addCallback((success, fail) -> {
                                if (fail != null)
                                {
                                    logger.trace("{}: Exception coordinating ExclusiveSyncPoint for local shard durability of {}", at, ranges, fail);
+                                   active.accumulateAndGet(route.toRanges(), Ranges::without);
                                }
                                else
                                {
@@ -249,6 +267,10 @@ public class CoordinateDurabilityScheduling
                                           {
                                               logger.trace("Exception coordinating local shard durability, will retry immediately", fail);
                                               coordinateShardDurableAfterExclusiveSyncPoint(node, exclusiveSyncPoint);
+                                          }
+                                          else
+                                          {
+                                              active.accumulateAndGet(exclusiveSyncPoint.route.toRanges(), Ranges::without);
                                           }
                                       });
             });

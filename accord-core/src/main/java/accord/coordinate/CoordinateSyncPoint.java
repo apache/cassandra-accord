@@ -78,6 +78,11 @@ public class CoordinateSyncPoint<U extends Unseekable> extends CoordinatePreAcce
         return coordinate(node, txnId, keysOrRanges, Adapters.exclusiveSyncPoint());
     }
 
+    public static <U extends Unseekable> AsyncResult<SyncPoint<U>> exclusiveSyncPoint(Node node, TxnId txnId, FullRoute<U> route)
+    {
+        return coordinate(node, txnId, route, Adapters.exclusiveSyncPoint());
+    }
+
     public static <U extends Unseekable> AsyncResult<SyncPoint<U>> inclusive(Node node, Unseekables<U> keysOrRanges)
     {
         return coordinate(node, Kind.SyncPoint, keysOrRanges, Adapters.inclusiveSyncPoint());
