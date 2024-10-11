@@ -85,6 +85,7 @@ public class RequestCallbacks extends AbstractRequestTimeouts<RequestCallbacks.C
                 if (deadline() == reportFailAt)
                 {
                     callbacks.remove(callbackId);
+                    cancelInFlight = true;
                     return this;
                 }
 
@@ -194,23 +195,38 @@ public class RequestCallbacks extends AbstractRequestTimeouts<RequestCallbacks.C
 
         private <T, P> RegisteredCallback<T> safeInvoke(long callbackId, Node.Id from, P param, BiConsumer<RegisteredCallback<T>, P> invoker, boolean remove)
         {
+            RegisteredCallback<T> registered = null;
             long now = time.elapsed(MICROSECONDS);
             lock();
             try
             {
-                RegisteredCallback<T> registered = remove ? callbacks.remove(callbackId) : callbacks.get(callbackId);
-                if (registered == null)
-                    return null;
+                try
+                {
+                    registered = remove ? callbacks.remove(callbackId) : callbacks.get(callbackId);
+                    if (registered == null)
+                        return null;
 
-                if (remove) registered.cancelUnsafe();
-                Invariants.checkState(registered.to.equals(from));
-                registered.safeInvoke(invoker, param);
-                return registered;
+                    if (remove)
+                        registered.cancelUnsafe();
+                    Invariants.checkState(registered.to.equals(from));
+                }
+                finally
+                {
+                    unlock(now);
+                }
             }
-            finally
+            catch (Throwable t)
             {
-                unlock(now);
+                // we don't want to hold the lock when we invoke the callback,
+                // but we also want to make sure we invoke the callback even
+                // if some other callback throws an exception
+                try { if (registered != null) registered.safeInvoke(invoker, param); }
+                catch (Throwable t2) { t.addSuppressed(t2); }
+                throw t;
             }
+
+            registered.safeInvoke(invoker, param);
+            return registered;
         }
     }
 

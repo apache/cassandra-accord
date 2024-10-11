@@ -487,8 +487,8 @@ public abstract class CommandStore implements AgentExecutor
         CollectCalculatedDeps.withCalculatedDeps(node, id, route, route, before, (deps, fail) -> {
             if (fail != null)
             {
+                node.scheduler().once(() -> fetchMajorityDeps(coordination, node, epoch, ranges), 10L, TimeUnit.SECONDS);
                 node.agent().onUncaughtException(fail);
-                node.scheduler().once(() -> fetchMajorityDeps(coordination, node, epoch, ranges), 1L, TimeUnit.MINUTES);
             }
             else
             {

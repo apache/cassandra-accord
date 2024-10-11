@@ -345,46 +345,44 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
                 head.heapify();
 
             Timer next = head.peekNode();
-            if (next == null)
+            if (next != null)
             {
-                if (head.end() >= curEpoch)
+                wakeAt = next.deadline;
+            }
+            else if (head.end() >= curEpoch)
+            {
+                wakeAt = head.end();
+            }
+            else
+            {
+                while (true)
                 {
-                    wakeAt = head.end();
-                }
-                else
-                {
-                    while (true)
+                    buckets[bucketsStart++] = null;
+                    if (head == addFinger) addFinger = null;
+                    if (bucketsStart == bucketsEnd)
                     {
-                        buckets[bucketsStart++] = null;
-                        if (head == addFinger) addFinger = null;
-                        if (bucketsStart == bucketsEnd)
-                        {
-                            wakeAt = Long.MAX_VALUE;
-                            return;
-                        }
-                        head = buckets[bucketsStart];
-                        if (head.end() >= curEpoch)
-                        {
-                            if (head.epoch >= curEpoch)
-                            {
-                                wakeAt = head.epoch;
-                                return;
-                            }
-                            else
-                            {
-                                head.heapify();
-                                if (!head.isEmpty())
-                                {
-                                    wakeAt = head.peekNode().deadline();
-                                    return;
-                                }
-                            }
-                        }
-                        Invariants.checkState(head.isEmpty());
+                        wakeAt = Long.MAX_VALUE;
+                        return;
+                    }
+                    head = buckets[bucketsStart];
+                    if (head.epoch >= curEpoch)
+                    {
+                        wakeAt = head.epoch;
+                        return;
+                    }
+                    head.heapify();
+                    if (!head.isEmpty())
+                    {
+                        wakeAt = head.peekNode().deadline();
+                        return;
+                    }
+                    else if (head.end() < curEpoch)
+                    {
+                        wakeAt = head.end();
+                        return;
                     }
                 }
             }
-            else wakeAt = next.deadline;
         }
     }
 
