@@ -23,8 +23,11 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import com.google.common.primitives.Ints;
 import org.slf4j.Logger;
@@ -85,6 +88,7 @@ public class CoordinateDurabilityScheduling
     private final Node node;
     private Scheduler.Scheduled scheduled;
     private final AtomicReference<Ranges> active = new AtomicReference<>(Ranges.EMPTY);
+    private final ConcurrentHashMap<TxnId, Ranges> coordinating = new ConcurrentHashMap<>();
 
     /*
      * In each round at each node wait this amount of time between initiating new CoordinateShardDurable
@@ -216,7 +220,8 @@ public class CoordinateDurabilityScheduling
             Ranges inactiveRanges = ranges.without(active.get());
             if (!inactiveRanges.equals(ranges))
             {
-                logger.info("Not initiating new durability scheduling for {} as previous attempt still in progress", ranges.without(inactiveRanges));
+                String waitingOn = coordinating.entrySet().stream().filter(e -> e.getValue().intersects(ranges)).map(Objects::toString).collect(Collectors.joining(", ", "[", "]"));
+                logger.info("Not initiating new durability scheduling for {} as previous attempt(s) {} still in progress (scheduling {})", ranges.without(inactiveRanges), waitingOn, inactiveRanges);
                 if (inactiveRanges.isEmpty())
                     continue;
             }
@@ -232,6 +237,7 @@ public class CoordinateDurabilityScheduling
     private void startShardSync(Ranges ranges)
     {
         TxnId at = node.nextTxnId(ExclusiveSyncPoint, Domain.Range);
+        coordinating.put(at, ranges);
         node.scheduler().once(() -> node.withEpoch(at.epoch(), (ignored, withEpochFailure) -> {
                            FullRoute<Range> route = (FullRoute<Range>) node.computeRoute(at, ranges);
                            if (withEpochFailure != null)
@@ -246,6 +252,7 @@ public class CoordinateDurabilityScheduling
                                if (fail != null)
                                {
                                    logger.trace("{}: Exception coordinating ExclusiveSyncPoint for local shard durability of {}", at, ranges, fail);
+                                   coordinating.remove(at);
                                    active.accumulateAndGet(route.toRanges(), Ranges::without);
                                }
                                else
@@ -270,6 +277,7 @@ public class CoordinateDurabilityScheduling
                                           }
                                           else
                                           {
+                                              coordinating.remove(exclusiveSyncPoint.syncId);
                                               active.accumulateAndGet(exclusiveSyncPoint.route.toRanges(), Ranges::without);
                                           }
                                       });

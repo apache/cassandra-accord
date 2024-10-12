@@ -487,6 +487,7 @@ public abstract class CommandStore implements AgentExecutor
         CollectCalculatedDeps.withCalculatedDeps(node, id, route, route, before, (deps, fail) -> {
             if (fail != null)
             {
+                logger.warn("Failed to fetch deps for syncing epoch {} for ranges {}", epoch, ranges, fail);
                 node.scheduler().once(() -> fetchMajorityDeps(coordination, node, epoch, ranges), 1L, TimeUnit.MINUTES);
                 node.agent().onUncaughtException(fail);
             }
@@ -499,8 +500,9 @@ public abstract class CommandStore implements AgentExecutor
                 }).begin((success, fail2) -> {
                     if (fail2 != null)
                     {
-                        node.agent().onUncaughtException(fail2);
+                        logger.warn("Failed to apply deps for syncing epoch {} for ranges {}", epoch, ranges, fail2);
                         node.scheduler().once(() -> fetchMajorityDeps(coordination, node, epoch, ranges), 1L, TimeUnit.MINUTES);
+                        node.agent().onUncaughtException(fail2);
                     }
                     else
                     {
