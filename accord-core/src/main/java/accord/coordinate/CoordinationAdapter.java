@@ -229,7 +229,7 @@ public interface CoordinationAdapter<R>
                 Topologies all = forExecution(node, route, txnId, executeAt, deps);
 
                 invokeSuccess(node, route, txnId, txn, deps, callback);
-                new PersistExclusiveSyncPoint(node, all, txnId, route, txn, executeAt, deps, writes, result)
+                new PersistSyncPoint(node, all, txnId, route, txn, executeAt, deps, writes, result)
                     .start(Apply.FACTORY, Maximal, any, writes, result);
             }
         }

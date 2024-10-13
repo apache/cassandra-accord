@@ -193,8 +193,9 @@ public class AsyncChainsTest
     {
         AsyncChain<String> chain = new AsyncChains.Head<String>() {
             @Override
-            protected void start(BiConsumer<? super String, Throwable> callback) {
+            protected Cancellable start(BiConsumer<? super String, Throwable> callback) {
                 callback.accept("success", null);
+                return null;
             }
         };
 
@@ -207,8 +208,9 @@ public class AsyncChainsTest
     {
         AsyncChain<String> chain = new AsyncChains.Head<String>() {
             @Override
-            protected void start(BiConsumer<? super String, Throwable> callback) {
+            protected Cancellable start(BiConsumer<? super String, Throwable> callback) {
                 callback.accept("success", null);
+                return null;
             }
         };
         chain = chain.map(s -> s + " is true");
@@ -254,8 +256,9 @@ public class AsyncChainsTest
     void simpleHeadChain() throws ExecutionException, InterruptedException {
         AsyncChain<Integer> chain = new AsyncChains.Head<Integer>() {
             @Override
-            protected void start(BiConsumer<? super Integer, Throwable> callback) {
+            protected Cancellable start(BiConsumer<? super Integer, Throwable> callback) {
                 callback.accept(0, null);
+                return null;
             }
         };
         chain = chain.map(i -> i + 1)
@@ -319,9 +322,10 @@ public class AsyncChainsTest
         topLevel.add(() -> new AsyncChains.Head<Integer>()
         {
             @Override
-            protected void start(BiConsumer<? super Integer, Throwable> callback)
+            protected Cancellable start(BiConsumer<? super Integer, Throwable> callback)
             {
                 callback.accept(42, null);
+                return null;
             }
         });
         topLevel.add(() -> {

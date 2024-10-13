@@ -27,6 +27,7 @@ import javax.annotation.Nullable;
 import accord.api.Agent;
 
 import accord.local.CommandStores.RangesForEpoch;
+import accord.primitives.Range;
 import accord.primitives.Routables;
 import accord.primitives.Unseekables;
 import accord.utils.async.AsyncChain;
@@ -44,6 +45,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -477,19 +479,38 @@ public abstract class CommandStore implements AgentExecutor
         };
     }
 
-    // TODO (required): replace with a simple wait on suitable exclusive sync point(s)
+    // TODO (required, correctness): replace with a simple wait on suitable exclusive sync point(s)
     private void fetchMajorityDeps(AsyncResults.SettableResult<Void> coordination, Node node, long epoch, Ranges ranges)
+    {
+        AtomicInteger index = new AtomicInteger();
+        fetchMajorityDeps(coordination, node, epoch, ranges, index);
+    }
+
+    // this is temporary until we rely on RX
+    static final int FETCH_SLICES = Invariants.debug() ? 1 : 64;
+    private void fetchMajorityDeps(AsyncResults.SettableResult<Void> coordination, Node node, long epoch, Ranges ranges, AtomicInteger index)
     {
         TxnId id = TxnId.fromValues(epoch - 1, 0, node.id());
         Timestamp before = Timestamp.minForEpoch(epoch);
-        FullRoute<?> route = node.computeRoute(id, ranges);
-        // TODO (required): we need to ensure anyone we receive a reply from proposes newer timestamps for anything we don't see
+        int rangeIndex = index.get() / FETCH_SLICES;
+        int subRangeIndex = index.get() % FETCH_SLICES;
+        int nextIndex;
+        Range nextRange;
+        {
+            int nextSubRangeIndex = subRangeIndex;
+            Range selectRange = null;
+            while (selectRange == null)
+                selectRange = node.commandStores().shardDistributor().splitRange(ranges.get(rangeIndex), subRangeIndex, ++nextSubRangeIndex, FETCH_SLICES);
+            nextRange = selectRange;
+            nextIndex = rangeIndex + nextSubRangeIndex;
+        }
+        FullRoute<?> route = node.computeRoute(id, Ranges.of(nextRange));
+        logger.debug("Fetching deps to sync epoch {} for range {}", epoch, nextRange);
         CollectCalculatedDeps.withCalculatedDeps(node, id, route, route, before, (deps, fail) -> {
             if (fail != null)
             {
-                logger.warn("Failed to fetch deps for syncing epoch {} for ranges {}", epoch, ranges, fail);
-                node.scheduler().once(() -> fetchMajorityDeps(coordination, node, epoch, ranges), 1L, TimeUnit.MINUTES);
-                node.agent().onUncaughtException(fail);
+                logger.warn("Failed to fetch deps for syncing epoch {} for range {}", epoch, nextRange, fail);
+                node.scheduler().once(() -> fetchMajorityDeps(coordination, node, epoch, ranges, index), 1L, TimeUnit.MINUTES);
             }
             else
             {
@@ -500,13 +521,16 @@ public abstract class CommandStore implements AgentExecutor
                 }).begin((success, fail2) -> {
                     if (fail2 != null)
                     {
-                        logger.warn("Failed to apply deps for syncing epoch {} for ranges {}", epoch, ranges, fail2);
-                        node.scheduler().once(() -> fetchMajorityDeps(coordination, node, epoch, ranges), 1L, TimeUnit.MINUTES);
+                        logger.warn("Failed to apply deps for syncing epoch {} for range {}", epoch, nextRange, fail2);
+                        node.scheduler().once(() -> fetchMajorityDeps(coordination, node, epoch, ranges, index), 1L, TimeUnit.MINUTES);
                         node.agent().onUncaughtException(fail2);
                     }
                     else
                     {
-                        coordination.setSuccess(null);
+                        int prev = index.getAndSet(nextIndex);
+                        Invariants.checkState(rangeIndex * FETCH_SLICES + subRangeIndex == prev);
+                        if (nextIndex >= ranges.size() * FETCH_SLICES) coordination.setSuccess(null);
+                        else fetchMajorityDeps(coordination, node, epoch, ranges, index);
                     }
                 });
             }

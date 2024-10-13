@@ -90,6 +90,7 @@ import accord.primitives.Unseekables;
 import accord.utils.Invariants;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
+import accord.utils.async.Cancellable;
 
 import static accord.local.KeyHistory.COMMANDS;
 import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
@@ -1060,12 +1061,13 @@ public abstract class InMemoryCommandStore extends CommandStore
             }
         }
 
-        private void enqueueAndRun(Runnable runnable)
+        private Cancellable enqueueAndRun(Runnable runnable)
         {
             boolean result = queue.add(runnable);
             if (!result)
                 throw illegalState("could not add item to queue");
             maybeRun();
+            return () -> queue.remove(runnable);
         }
 
         @Override
@@ -1086,9 +1088,9 @@ public abstract class InMemoryCommandStore extends CommandStore
             return new AsyncChains.Head<T>()
             {
                 @Override
-                protected void start(BiConsumer<? super T, Throwable> callback)
+                protected Cancellable start(BiConsumer<? super T, Throwable> callback)
                 {
-                    enqueueAndRun(() -> executeInContext(InMemoryCommandStore.Synchronized.this, context, function, callback));
+                    return enqueueAndRun(() -> executeInContext(InMemoryCommandStore.Synchronized.this, context, function, callback));
                 }
             };
         }
@@ -1099,9 +1101,9 @@ public abstract class InMemoryCommandStore extends CommandStore
             return new AsyncChains.Head<T>()
             {
                 @Override
-                protected void start(BiConsumer<? super T, Throwable> callback)
+                protected Cancellable start(BiConsumer<? super T, Throwable> callback)
                 {
-                    enqueueAndRun(() -> {
+                    return enqueueAndRun(() -> {
                         try
                         {
                             callback.accept(task.call(), null);

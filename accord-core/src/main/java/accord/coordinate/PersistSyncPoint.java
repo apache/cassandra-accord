@@ -30,9 +30,9 @@ import accord.primitives.Writes;
 import accord.topology.Topologies;
 import accord.utils.SortedArrays;
 
-public class PersistExclusiveSyncPoint extends Persist
+public class PersistSyncPoint extends Persist
 {
-    public PersistExclusiveSyncPoint(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    public PersistSyncPoint(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
         super(node, topologies, txnId, route, txn, executeAt, deps, writes, result);
     }

@@ -121,7 +121,6 @@ public class BeginRecovery extends TxnRequest.WithUnsynced<BeginRecovery.Recover
         Deps localDeps = null;
         if (!command.known().deps.hasCommittedOrDecidedDeps())
         {
-            // TODO (required): consider whether we are safe ignoring the concept of minUnsyncedEpoch here
             localDeps = calculateDeps(safeStore, txnId, participants, constant(minEpoch), txnId);
         }
 

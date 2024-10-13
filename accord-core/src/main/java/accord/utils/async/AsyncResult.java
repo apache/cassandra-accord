@@ -20,6 +20,8 @@ package accord.utils.async;
 
 import java.util.function.BiConsumer;
 
+import javax.annotation.Nullable;
+
 import static accord.utils.Invariants.illegalState;
 
 /**
@@ -41,10 +43,11 @@ public interface AsyncResult<V> extends AsyncChain<V>
     boolean isSuccess();
 
     @Override
-    default void begin(BiConsumer<? super V, Throwable> callback)
+    default @Nullable Cancellable begin(BiConsumer<? super V, Throwable> callback)
     {
         //TODO chain shouldn't allow double calling, but should result allow?
         addCallback(callback);
+        return null;
     }
 
     @Override

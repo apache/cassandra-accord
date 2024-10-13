@@ -75,7 +75,7 @@ public class AsyncChainCombiner<I> extends AsyncChains.Head<I[]>
     }
 
     @Override
-    protected void start(BiConsumer<? super I[], Throwable> callback)
+    protected Cancellable start(BiConsumer<? super I[], Throwable> callback)
     {
         List<? extends AsyncChain<? extends I>> chains = inputs();
         state = new Object[chains.size()];
@@ -83,7 +83,17 @@ public class AsyncChainCombiner<I> extends AsyncChains.Head<I[]>
         int size = chains.size();
         this.callback = callback;
         this.remaining = size;
+        Cancellable cancellable = null;
         for (int i=0; i<size; i++)
-            chains.get(i).begin(callbackFor(i));
+        {
+            Cancellable next = chains.get(i).begin(callbackFor(i));
+            if (next != null)
+            {
+                Cancellable prev = cancellable;
+                if (prev == null) cancellable = next;
+                else cancellable = () -> { prev.cancel(); next.cancel(); };
+            }
+        }
+        return cancellable;
     }
 }

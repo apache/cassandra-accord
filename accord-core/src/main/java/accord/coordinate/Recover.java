@@ -101,7 +101,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
     private final BiConsumer<Outcome, Throwable> callback;
     private boolean isDone;
 
-    private final SortedListMap<Id, RecoverOk> recoverOks;
+    private SortedListMap<Id, RecoverOk> recoverOks;
     private final RecoveryTracker tracker;
     private boolean isBallotPromised;
 
@@ -199,6 +199,8 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         Invariants.checkState(!isBallotPromised);
         isBallotPromised = true;
 
+        SortedListMap<Id, RecoverOk> recoverOks = this.recoverOks;
+        if (!Invariants.debug()) this.recoverOks = null;
         List<RecoverOk> recoverOkList = recoverOks.valuesAsNullableList();
         RecoverOk acceptOrCommit = maxAccepted(recoverOkList);
         RecoverOk acceptOrCommitNotTruncated = acceptOrCommit == null || acceptOrCommit.status != Status.Truncated
@@ -213,14 +215,14 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 case Truncated: throw illegalState("Truncate should be filtered");
                 case Invalidated:
                 {
-                    commitInvalidate();
+                    commitInvalidate(invalidateUntil(recoverOks));
                     return;
                 }
 
                 case Applied:
                 case PreApplied:
                 {
-                    withCommittedDeps(executeAt, (stableDeps, withEpochFailure) -> {
+                    withCommittedDeps(recoverOkList, executeAt, (stableDeps, withEpochFailure) -> {
                         if (withEpochFailure != null)
                         {
                             node.agent().onUncaughtException(CoordinationFailed.wrap(withEpochFailure));
@@ -242,7 +244,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 {
                     // TODO (required): if we have to calculate deps for any shard, should we first ensure they are stable?
                     //   it should only be possible for a fast path decision, but we might have Stable in only one shard.
-                    withCommittedDeps(executeAt, (stableDeps, withEpochFailure) -> {
+                    withCommittedDeps(recoverOkList, executeAt, (stableDeps, withEpochFailure) -> {
                         if (withEpochFailure != null)
                         {
                             node.agent().onUncaughtException(CoordinationFailed.wrap(withEpochFailure));
@@ -257,7 +259,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 case Committed:
                 {
                     // TODO (expected): should we only ask for txns with t0 < t0' < t?
-                    withCommittedDeps(executeAt, (committedDeps, withEpochFailure) -> {
+                    withCommittedDeps(recoverOkList, executeAt, (committedDeps, withEpochFailure) -> {
                         if (withEpochFailure != null)
                         {
                             node.agent().onUncaughtException(CoordinationFailed.wrap(withEpochFailure));
@@ -280,7 +282,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
                 case AcceptedInvalidate:
                 {
-                    invalidate();
+                    invalidate(recoverOks);
                     return;
                 }
 
@@ -321,7 +323,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
         if (tracker.rejectsFastPath() || recoverOks.valuesAsNullableStream().anyMatch(ok -> ok != null && ok.rejectsFastPath))
         {
-            invalidate();
+            invalidate(recoverOks);
             return;
         }
 
@@ -348,9 +350,9 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         propose(txnId, proposeDeps);
     }
 
-    private void withCommittedDeps(Timestamp executeAt, BiConsumer<Deps, Throwable> withDeps)
+    private void withCommittedDeps(List<RecoverOk> nullableRecoverOkList, Timestamp executeAt, BiConsumer<Deps, Throwable> withDeps)
     {
-        LatestDeps.MergedCommitResult merged = LatestDeps.mergeCommit(txnId, executeAt, recoverOks.valuesAsNullableList(), ok -> ok == null ? null : ok.deps);
+        LatestDeps.MergedCommitResult merged = LatestDeps.mergeCommit(txnId, executeAt, nullableRecoverOkList, ok -> ok == null ? null : ok.deps);
         node.withEpoch(executeAt.epoch(), (ignored, withEpochFailure) -> {
             if (withEpochFailure != null)
             {
@@ -379,22 +381,26 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         });
     }
 
-    private void invalidate()
+    private void invalidate(SortedListMap<Id, RecoverOk> recoverOks)
     {
+        Timestamp invalidateUntil = invalidateUntil(recoverOks);
         proposeInvalidate(node, ballot, txnId, route.homeKey(), (success, fail) -> {
             if (fail != null) accept(null, fail);
-            else commitInvalidate();
+            else commitInvalidate(invalidateUntil);
         });
     }
 
-    private void commitInvalidate()
+    private Timestamp invalidateUntil(SortedListMap<Id, RecoverOk> recoverOks)
     {
         // If not accepted then the executeAt is not consistent cross the peers and likely different on every node.  There is also an edge case
         // when ranges are removed from the topology, during this case the executeAt won't know the ranges and the invalidate commit will fail.
-        Timestamp invalidateUntil = recoverOks.valuesAsNullableStream()
-                                              .map(ok -> ok == null ? null : ok.status.hasBeen(Status.Accepted) ? ok.executeAt : ok.txnId)
-                                              .reduce(txnId, Timestamp::nonNullOrMax);
+        return recoverOks.valuesAsNullableStream()
+                         .map(ok -> ok == null ? null : ok.status.hasBeen(Status.Accepted) ? ok.executeAt : ok.txnId)
+                         .reduce(txnId, Timestamp::nonNullOrMax);
+    }
 
+    private void commitInvalidate(Timestamp invalidateUntil)
+    {
         node.withEpoch(invalidateUntil.epoch(), (ignored, withEpochFailure) -> {
             if (withEpochFailure != null)
             {

@@ -68,6 +68,7 @@ import accord.utils.ReflectionUtils;
 import accord.utils.ReflectionUtils.Difference;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
+import accord.utils.async.Cancellable;
 
 import static accord.utils.Invariants.Paranoia.LINEAR;
 import static accord.utils.Invariants.ParanoiaCostFactor.HIGH;
@@ -244,13 +245,14 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
                 return new AsyncChains.Head<T>()
                 {
                     @Override
-                    protected void start(BiConsumer<? super T, Throwable> callback)
+                    protected Cancellable start(BiConsumer<? super T, Throwable> callback)
                     {
                         boolean wasEmpty = pending.isEmpty();
                         pending.add(task);
                         if (wasEmpty)
                             runNextTask();
                         task.begin(callback);
+                        return () -> pending.remove(task);
                     }
                 };
             }

@@ -707,12 +707,12 @@ public abstract class CommandStores
 
     public CommandStore select(Route<?> route)
     {
-        return  select(ranges -> ranges.intersects(route));
+        return select(ranges -> ranges.intersects(route));
     }
 
     public CommandStore select(Participants<?> participants)
     {
-        return  select(ranges -> ranges.intersects(participants));
+        return select(ranges -> ranges.intersects(participants));
     }
 
     private CommandStore select(Predicate<Ranges> fn)

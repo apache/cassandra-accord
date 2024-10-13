@@ -106,7 +106,10 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
 
         static LatestEntry reduce(LatestEntry a, LatestEntry b)
         {
-            return reduce(a, b, (v1, v2) -> new LatestEntry(v1.known, v1.ballot, v1.coordinatedDeps, v1.localDeps.with(v2.localDeps)));
+            return reduce(a, b, (v1, v2) -> new LatestEntry(v1.known, v1.ballot, v1.coordinatedDeps,
+                                                            v1.localDeps == null ? v2.localDeps
+                                                                                 : v2.localDeps == null ? v1.localDeps
+                                                                                                        : v1.localDeps.with(v2.localDeps)));
         }
 
         static LatestEntry slice(RoutingKey start, RoutingKey end, LatestEntry v)

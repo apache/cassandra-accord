@@ -25,6 +25,8 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
+import javax.annotation.Nullable;
+
 import com.google.common.util.concurrent.ListenableFuture;
 
 public interface AsyncChain<V>
@@ -126,7 +128,7 @@ public interface AsyncChain<V>
      * Causes the chain to begin, starting all work required.  This method must be called exactly once, not calling will
      * not cause any work to start, and calling multiple times will be rejected.
      */
-    void begin(BiConsumer<? super V, Throwable> callback);
+    @Nullable Cancellable begin(BiConsumer<? super V, Throwable> callback);
 
     default AsyncResult<V> beginAsResult()
     {

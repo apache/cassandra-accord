@@ -25,6 +25,8 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -33,6 +35,8 @@ import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
+
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
@@ -135,9 +139,10 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         }
 
         @Override
-        public void begin(BiConsumer<? super V, Throwable> callback)
+        public Cancellable begin(BiConsumer<? super V, Throwable> callback)
         {
             addCallback(callback);
+            return null;
         }
     }
 
@@ -149,22 +154,22 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
             next = this;
         }
 
-        protected abstract void start(BiConsumer<? super V, Throwable> callback);
+        protected abstract @Nullable Cancellable start(BiConsumer<? super V, Throwable> callback);
 
         @Override
-        public final void begin(BiConsumer<? super V, Throwable> callback)
+        public final @Nullable Cancellable begin(BiConsumer<? super V, Throwable> callback)
         {
             Invariants.checkArgument(next != null);
             next = null;
-            start(callback);
+            return start(callback);
         }
 
-        void begin()
+        Cancellable begin()
         {
             Invariants.checkArgument(next != null);
             BiConsumer<? super V, Throwable> next = this.next;
             this.next = null;
-            start(next);
+            return start(next);
         }
 
         @Override
@@ -183,13 +188,13 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         }
 
         @Override
-        public void begin(BiConsumer<? super O, Throwable> callback)
+        public Cancellable begin(BiConsumer<? super O, Throwable> callback)
         {
             Invariants.checkArgument(!(callback instanceof AsyncChains.Head));
             checkNextIsHead();
             Head<?> head = (Head<?>) next;
             next = callback;
-            head.begin();
+            return head.begin();
         }
     }
 
@@ -369,11 +374,12 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         }
 
         @Override
-        protected void start(BiConsumer<? super Void, Throwable> callback)
+        protected Cancellable start(BiConsumer<? super Void, Throwable> callback)
         {
             called.set(true);
             onCall.run();
             callback.accept(null, null);
+            return null;
         }
 
         @Override
@@ -416,9 +422,9 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         }
 
         @Override
-        protected void start(BiConsumer<? super V, Throwable> callback)
+        protected Cancellable start(BiConsumer<? super V, Throwable> callback)
         {
-            chain.map(r -> reduceArray(r, reducer)).begin(callback);
+            return chain.map(r -> reduceArray(r, reducer)).begin(callback);
         }
     }
 
@@ -531,29 +537,21 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         return chain.flatMap(v -> new Head<T>()
         {
             @Override
-            protected void start(BiConsumer<? super T, Throwable> callback)
+            protected Cancellable start(BiConsumer<? super T, Throwable> callback)
             {
-                try
-                {
-                    executor.execute(() -> {
-                        T value;
-                        try
-                        {
-                            value = mapper.apply(v);
-                        }
-                        catch (Throwable t)
-                        {
-                            callback.accept(null, t);
-                            return;
-                        }
-                        callback.accept(value, null);
-                    });
-                }
-                catch (Throwable t)
-                {
-                    // TODO (low priority, correctness): If the executor is shutdown then the callback may run in an unexpected thread, which may not be thread safe
-                    callback.accept(null, t);
-                }
+                return AsyncChains.submit(executor, callback, () -> {
+                    T value;
+                    try
+                    {
+                        value = mapper.apply(v);
+                    }
+                    catch (Throwable t)
+                    {
+                        callback.accept(null, t);
+                        return;
+                    }
+                    callback.accept(value, null);
+                });
             }
         });
     }
@@ -563,28 +561,43 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         return chain.flatMap(v -> new Head<T>()
         {
             @Override
-            protected void start(BiConsumer<? super T, Throwable> callback)
+            protected Cancellable start(BiConsumer<? super T, Throwable> callback)
             {
-                try
-                {
-                    executor.execute(() -> {
-                        try
-                        {
-                            mapper.apply(v).begin(callback);
-                        }
-                        catch (Throwable t)
-                        {
-                            callback.accept(null, t);
-                        }
-                    });
-                }
-                catch (Throwable t)
-                {
-                    // TODO (low priority, correctness): If the executor is shutdown then the callback may run in an unexpected thread, which may not be thread safe
-                    callback.accept(null, t);
-                }
+                return AsyncChains.submit(executor, callback, () -> {
+                    try
+                    {
+                        mapper.apply(v).begin(callback);
+                    }
+                    catch (Throwable t)
+                    {
+                        callback.accept(null, t);
+                    }
+                });
             }
         });
+    }
+
+    private static Cancellable submit(Executor executor, BiConsumer<?, Throwable> callback, Runnable run)
+    {
+        try
+        {
+            if (executor instanceof ExecutorService)
+            {
+                Future<?> future = ((ExecutorService) executor).submit(run);
+                return () -> future.cancel(true);
+            }
+            else
+            {
+                executor.execute(run);
+                return null;
+            }
+        }
+        catch (Throwable t)
+        {
+            // TODO (low priority, correctness): If the executor is shutdown then the callback may run in an unexpected thread, which may not be thread safe
+            callback.accept(null, t);
+            return null;
+        }
     }
 
     public static <V> AsyncChain<V> ofCallable(Executor executor, Callable<V> callable)
@@ -599,16 +612,9 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         return new Head<>()
         {
             @Override
-            protected void start(BiConsumer<? super V, Throwable> callback)
+            protected Cancellable start(BiConsumer<? super V, Throwable> callback)
             {
-                try
-                {
-                    executor.execute(encapsulator.apply(callable, callback));
-                }
-                catch (Throwable t)
-                {
-                    callback.accept(null, t);
-                }
+                return AsyncChains.submit(executor, callback, encapsulator.apply(callable, callback));
             }
         };
     }
@@ -618,16 +624,9 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         return new Head<Void>()
         {
             @Override
-            protected void start(BiConsumer<? super Void, Throwable> callback)
+            protected Cancellable start(BiConsumer<? super Void, Throwable> callback)
             {
-                try
-                {
-                    executor.execute(encapsulate(runnable, callback));
-                }
-                catch (Throwable t)
-                {
-                    callback.accept(null, t);
-                }
+                return AsyncChains.submit(executor, callback, encapsulate(runnable, callback));
             }
         };
     }

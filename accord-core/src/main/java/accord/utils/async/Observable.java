@@ -150,9 +150,10 @@ public interface Observable<T>
         return new AsyncChains.Head<Result>()
         {
             @Override
-            protected void start(BiConsumer<? super Result, Throwable> callback)
+            protected Cancellable start(BiConsumer<? super Result, Throwable> callback)
             {
                 work.accept(forCallback(callback, collector).map(mapper));
+                return null;
             }
         };
     }

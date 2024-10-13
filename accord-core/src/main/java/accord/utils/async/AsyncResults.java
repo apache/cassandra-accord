@@ -132,14 +132,15 @@ public class AsyncResults
             return trySetResult(null, throwable);
         }
 
-        private  AsyncChain<V> newChain()
+        private AsyncChain<V> newChain()
         {
             return new AsyncChains.Head<V>()
             {
                 @Override
-                protected void start(BiConsumer<? super V, Throwable> callback)
+                protected Cancellable start(BiConsumer<? super V, Throwable> callback)
                 {
                     AbstractResult.this.addCallback(callback);
+                    return null;
                 }
             };
         }
@@ -283,9 +284,10 @@ public class AsyncResults
             return new AsyncChains.Head<V>()
             {
                 @Override
-                protected void start(BiConsumer<? super V, Throwable> callback)
+                protected Cancellable start(BiConsumer<? super V, Throwable> callback)
                 {
                     AsyncResults.Immediate.this.addCallback(callback);
+                    return null;
                 }
             };
         }
