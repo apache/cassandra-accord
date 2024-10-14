@@ -31,7 +31,6 @@ import org.slf4j.LoggerFactory;
 
 import accord.api.Scheduler;
 import accord.coordinate.CoordinateGloballyDurable;
-import accord.coordinate.CoordinateShardDurable;
 import accord.coordinate.CoordinationFailed;
 import accord.coordinate.ExecuteSyncPoint.SyncPointErased;
 import accord.local.Node;
@@ -48,9 +47,11 @@ import accord.utils.Invariants;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncResult;
 
+import static accord.coordinate.CoordinateShardDurable.coordinate;
 import static accord.coordinate.CoordinateSyncPoint.exclusiveSyncPoint;
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
+import static java.util.concurrent.TimeUnit.MINUTES;
 
 /**
  * Helper methods and classes to invoke coordination to propagate information about durability.
@@ -85,15 +86,15 @@ public class CoordinateDurabilityScheduling
     private Scheduler.Scheduled scheduled;
 
     /*
-     * In each round at each node wait this amount of time between initiating new CoordinateShardDurable
+     * In each cycle, attempt to split the range into this many pieces; if we fail, we increase the number of pieces
      */
-    private long frequencyMicros = TimeUnit.MILLISECONDS.toMicros(500L);
+    private int targetShardSplits = 64;
 
     /*
      * In each round at each node wait this amount of time between allocating a CoordinateShardDurable txnId
      * and coordinating the shard durability
      */
-    private long txnIdLagMicros = TimeUnit.SECONDS.toMicros(1L);
+    private long txnIdLagMicros = TimeUnit.SECONDS.toMicros(5L);
 
     /*
      * In each round at each node wait this amount of time between allocating a CoordinateShardDurable txnId
@@ -120,6 +121,10 @@ public class CoordinateDurabilityScheduling
      */
     private long globalCycleTimeMicros = TimeUnit.SECONDS.toMicros(30);
 
+    private long defaultRetryDelayMicros = TimeUnit.SECONDS.toMicros(1);
+    private long maxRetryDelayMicros = TimeUnit.MINUTES.toMicros(1);
+    private int maxNumberOfSplits = 1 << 10;
+
     private Topology currentGlobalTopology;
     private final Map<Range, ShardScheduler> shardSchedulers = new HashMap<>();
     private int globalIndex;
@@ -131,16 +136,15 @@ public class CoordinateDurabilityScheduling
     {
         Shard shard;
 
-        // based on ideal number of splits
+        // time to start a new cycle
         int nodeOffset;
 
         int index;
-        int numberOfSplits, desiredNumberOfSplits;
-        boolean defunct;
-        long shardCycleTimeMicros;
+        int numberOfSplits;
         Scheduler.Scheduled scheduled;
-        long rangeStartedAtMicros;
-        long cycleStartedAtMicros = -1;
+        long rangeStartedAtMicros, cycleStartedAtMicros;
+        long retryDelayMicros = defaultRetryDelayMicros;
+        boolean defunct;
 
         private ShardScheduler()
         {
@@ -150,18 +154,41 @@ public class CoordinateDurabilityScheduling
         {
             this.shard = shard;
             this.nodeOffset = offset;
-            this.shardCycleTimeMicros = Math.max(CoordinateDurabilityScheduling.this.shardCycleTimeMicros, shard.rf() * 3L * frequencyMicros);
-            this.desiredNumberOfSplits = (int) ((shardCycleTimeMicros + frequencyMicros - 1) / frequencyMicros);
-            if (numberOfSplits == 0 || numberOfSplits < desiredNumberOfSplits)
-            {
-                index = offset;
-                numberOfSplits = desiredNumberOfSplits;
-            }
+            if (numberOfSplits == 0 || numberOfSplits < targetShardSplits)
+                numberOfSplits = targetShardSplits;
         }
 
         synchronized void markDefunct()
         {
             defunct = true;
+            logger.info("Discarding defunct shard durability scheduler for {}", shard);
+        }
+
+        synchronized void retryCoordinateDurability(Node node, SyncPoint<Range> exclusiveSyncPoint, int nextIndex)
+        {
+            if (defunct)
+                return;
+
+            // TODO (expected): back-off
+            coordinateShardDurableAfterExclusiveSyncPoint(node, exclusiveSyncPoint, nextIndex);
+        }
+
+        synchronized void restart()
+        {
+            if (defunct)
+                return;
+
+            long nowMicros = node.elapsed(MICROSECONDS);
+            long microsOffset = (nodeOffset * shardCycleTimeMicros) / shard.rf();
+            long scheduleAt = nowMicros - (nowMicros % shardCycleTimeMicros) + microsOffset;
+            if (nowMicros > scheduleAt + (shardCycleTimeMicros / numberOfSplits))
+                scheduleAt += shardCycleTimeMicros;
+
+            if (numberOfSplits < targetShardSplits)
+                numberOfSplits = targetShardSplits;
+
+            cycleStartedAtMicros = scheduleAt;
+            scheduleAt(nowMicros, scheduleAt);
         }
 
         synchronized void schedule()
@@ -170,12 +197,37 @@ public class CoordinateDurabilityScheduling
                 return;
 
             long nowMicros = node.elapsed(MICROSECONDS);
-            int cyclePosition = (nodeOffset + (((index * shard.rf()) + numberOfSplits - 1) / numberOfSplits)) % shard.rf();
-            long microsOffset = (cyclePosition * shardCycleTimeMicros) / shard.rf();
-            long scheduleAt = nowMicros - (nowMicros % shardCycleTimeMicros) + microsOffset;
-            if (nowMicros > scheduleAt)
-                scheduleAt += shardCycleTimeMicros;
+            long microsOffset = (index * shardCycleTimeMicros) / numberOfSplits;
+            long scheduleAt = cycleStartedAtMicros + microsOffset;
+            if (retryDelayMicros > defaultRetryDelayMicros)
+            {
+                retryDelayMicros = Math.max(defaultRetryDelayMicros, (long)(0.9 * retryDelayMicros));
+            }
+            if (numberOfSplits > targetShardSplits && index % 4 == 0)
+            {
+                index /= 4;
+                numberOfSplits /=4;
+            }
+            scheduleAt(nowMicros, scheduleAt);
+        }
 
+        synchronized void retry()
+        {
+            if (defunct)
+                return;
+
+            long nowMicros = node.elapsed(MICROSECONDS);
+            long scheduleAt = nowMicros + retryDelayMicros;
+            retryDelayMicros += retryDelayMicros / 2;
+            if (retryDelayMicros > maxRetryDelayMicros)
+            {
+                retryDelayMicros = maxRetryDelayMicros;
+            }
+            scheduleAt(nowMicros, scheduleAt);
+        }
+
+        synchronized void scheduleAt(long nowMicros, long scheduleAt)
+        {
             ShardDistributor distributor = node.commandStores().shardDistributor();
             Range range;
             int nextIndex;
@@ -188,11 +240,13 @@ public class CoordinateDurabilityScheduling
                 nextIndex = i;
             }
 
-            scheduled = node.scheduler().once(() -> {
+            Runnable schedule = () -> {
                 // TODO (required): allocate stale HLC from a reservation of HLCs for this purpose
                 TxnId syncId = node.nextTxnId(ExclusiveSyncPoint, Domain.Range);
                 startShardSync(syncId, Ranges.of(range), nextIndex);
-            }, scheduleAt - nowMicros, MICROSECONDS);
+            };
+            if (scheduleAt <= nowMicros) schedule.run();
+            else scheduled = node.scheduler().once(schedule, scheduleAt - nowMicros, MICROSECONDS);
         }
 
         /**
@@ -204,6 +258,7 @@ public class CoordinateDurabilityScheduling
             scheduled = node.scheduler().once(() -> node.withEpoch(syncId.epoch(), (ignored, withEpochFailure) -> {
                 if (withEpochFailure != null)
                 {
+                    // don't wait on epoch failure - we aren't the cause of any problems
                     startShardSync(syncId, ranges, nextIndex);
                     Throwable wrapped = CoordinationFailed.wrap(withEpochFailure);
                     logger.trace("Exception waiting for epoch before coordinating exclusive sync point for local shard durability, epoch " + syncId.epoch(), wrapped);
@@ -219,10 +274,13 @@ public class CoordinateDurabilityScheduling
                     {
                         synchronized (ShardScheduler.this)
                         {
-                            index *= 2;
-                            numberOfSplits *= 2;
                             // TODO (required): try to recover or invalidate prior sync point
-                            schedule();
+                            retry();
+                            if (numberOfSplits * 2 <= maxNumberOfSplits)
+                            {
+                                index *= 2;
+                                numberOfSplits *= 2;
+                            }
                             logger.warn("{}: Exception coordinating ExclusiveSyncPoint for {} durability. Increased numberOfSplits to " + numberOfSplits, syncId, ranges, fail);
                         }
                     }
@@ -240,68 +298,92 @@ public class CoordinateDurabilityScheduling
             scheduled = node.scheduler().once(() -> {
                 scheduled = null;
                 node.commandStores().any().execute(() -> {
-                    CoordinateShardDurable.coordinate(node, exclusiveSyncPoint)
-                                          .addCallback((success, fail) -> {
-                                              if (fail != null && fail.getClass() != SyncPointErased.class)
-                                              {
-                                                  logger.trace("Exception coordinating local shard durability, will retry immediately", fail);
-                                                  coordinateShardDurableAfterExclusiveSyncPoint(node, exclusiveSyncPoint, nextIndex);
-                                              }
-                                              else
-                                              {
-                                                  synchronized (ShardScheduler.this)
-                                                  {
-                                                      index = nextIndex;
-                                                      if (index >= numberOfSplits)
-                                                      {
-                                                          index = 0;
-                                                          long nowMicros = node.elapsed(MICROSECONDS);
-                                                          String reportTime = "";
-                                                          if (cycleStartedAtMicros > 0)
-                                                              reportTime = "in " + MICROSECONDS.toSeconds(nowMicros - cycleStartedAtMicros) + 's';
-                                                          logger.info("Successfully completed one cycle of durability scheduling for shard {}{}", shard.range, reportTime);
-                                                          if (numberOfSplits > desiredNumberOfSplits)
-                                                            numberOfSplits = Math.max(desiredNumberOfSplits, (int)(numberOfSplits * 0.9));
-                                                          cycleStartedAtMicros = nowMicros;
-                                                      }
-                                                      else
-                                                      {
-                                                          long nowMicros = node.elapsed(MICROSECONDS);
-                                                          logger.debug("Successfully coordinated shard durability for range {} in {}s", shard.range, MICROSECONDS.toSeconds(nowMicros - rangeStartedAtMicros));
-                                                      }
-
-                                                      schedule();
-                                                  }
-                                              }
-                                          });
+                    coordinate(node, exclusiveSyncPoint)
+                    .addCallback((success, fail) -> {
+                        if (fail != null && fail.getClass() != SyncPointErased.class)
+                        {
+                            logger.debug("Exception coordinating shard durability for {}, will retry", exclusiveSyncPoint.route.toRanges(), fail);
+                            retryCoordinateDurability(node, exclusiveSyncPoint, nextIndex);
+                        }
+                        else
+                        {
+                            try
+                            {
+                                synchronized (ShardScheduler.this)
+                                {
+                                    int prevIndex = index;
+                                    index = nextIndex;
+                                    if (index >= numberOfSplits)
+                                    {
+                                        index = 0;
+                                        long nowMicros = node.elapsed(MICROSECONDS);
+                                        long timeTakenSeconds = MICROSECONDS.toSeconds(nowMicros - cycleStartedAtMicros);
+                                        long targetTimeSeconds = MICROSECONDS.toSeconds(shardCycleTimeMicros);
+                                        logger.info("Successfully completed one cycle of durability scheduling for shard {} in {}s (vs {}s target)", shard.range, timeTakenSeconds, targetTimeSeconds);
+                                        restart();
+                                    }
+                                    else
+                                    {
+                                        long nowMicros = node.elapsed(MICROSECONDS);
+                                        int prevRfCycle = (prevIndex * shard.rf()) / numberOfSplits;
+                                        int curRfCycle = (index * shard.rf()) / numberOfSplits;
+                                        if (prevRfCycle != curRfCycle)
+                                        {
+                                            long targetTimeSeconds = MICROSECONDS.toSeconds((index * shardCycleTimeMicros) / numberOfSplits);
+                                            long timeTakenSeconds = MICROSECONDS.toSeconds(nowMicros - cycleStartedAtMicros);
+                                            logger.info("Successfully completed {}/{} cycle of durability scheduling covering range {}. Completed in {}s (vs {}s target).", curRfCycle, shard.rf(), exclusiveSyncPoint.route.toRanges(), timeTakenSeconds, targetTimeSeconds);
+                                        }
+                                        else if (logger.isTraceEnabled())
+                                        {
+                                            logger.trace("Successfully coordinated shard durability for range {} in {}s", shard.range, MICROSECONDS.toSeconds(nowMicros - rangeStartedAtMicros));
+                                        }
+                                        schedule();
+                                    }
+                                }
+                            }
+                            catch (Throwable t)
+                            {
+                                retry();
+                                logger.error("Unexpected exception handling durability scheduling callback; starting from scratch", t);
+                            }
+                        }
+                    });
                 });
             }, durabilityLagMicros, MICROSECONDS);
         }
-
     }
-
 
     public CoordinateDurabilityScheduling(Node node)
     {
         this.node = node;
     }
 
-    public void setFrequency(int frequency, TimeUnit units)
+    public void setTargetShardSplits(int targetShardSplits)
     {
-        this.frequencyMicros = Ints.saturatedCast(units.toMicros(frequency));
+        this.targetShardSplits = targetShardSplits;
     }
 
-    public void setTxnIdLag(int txnIdLag, TimeUnit units)
+    public void setDefaultRetryDelay(long retryDelay, TimeUnit units)
+    {
+        this.defaultRetryDelayMicros = units.toMicros(retryDelay);
+    }
+
+    public void setMaxRetryDelay(long retryDelay, TimeUnit units)
+    {
+        this.maxRetryDelayMicros = units.toMicros(retryDelay);
+    }
+
+    public void setTxnIdLag(long txnIdLag, TimeUnit units)
     {
         this.txnIdLagMicros = Ints.saturatedCast(units.toMicros(txnIdLag));
     }
 
-    public void setDurabilityLag(int durabilityLag, TimeUnit units)
+    public void setDurabilityLag(long durabilityLag, TimeUnit units)
     {
         this.durabilityLagMicros = Ints.saturatedCast(units.toMicros(durabilityLag));
     }
 
-    public void setShardCycleTime(int shardCycleTime, TimeUnit units)
+    public void setShardCycleTime(long shardCycleTime, TimeUnit units)
     {
         this.shardCycleTimeMicros = Ints.saturatedCast(units.toMicros(shardCycleTime));
     }
@@ -319,7 +401,7 @@ public class CoordinateDurabilityScheduling
         Invariants.checkState(!stop); // cannot currently restart safely
         long nowMicros = node.elapsed(MICROSECONDS);
         setNextGlobalSyncTime(nowMicros);
-        scheduled = node.scheduler().recurring(this::run, frequencyMicros, MICROSECONDS);
+        scheduled = node.scheduler().recurring(this::run, 1L, MINUTES);
     }
 
     public void stop()
@@ -351,7 +433,6 @@ public class CoordinateDurabilityScheduling
         }
     }
 
-
     private void startGlobalSync()
     {
         try
@@ -369,7 +450,7 @@ public class CoordinateDurabilityScheduling
         }
     }
 
-    private void updateTopology()
+    public synchronized void updateTopology()
     {
         Topology latestGlobal = node.topology().current();
         if (latestGlobal == currentGlobalTopology)
@@ -395,7 +476,10 @@ public class CoordinateDurabilityScheduling
             shardSchedulers.put(shard.range, scheduler);
             scheduler.update(shard, shard.nodes.find(node.id()));
             if (prevScheduler == null)
-                scheduler.schedule();
+            {
+                logger.info("Starting shard durability scheduler for {}", shard);
+                scheduler.restart();
+            }
         }
         prev.forEach((r, s) -> s.markDefunct());
     }
@@ -432,6 +516,6 @@ public class CoordinateDurabilityScheduling
         if (targetTimeInCurrentRound < nowMicros)
             targetTime += totalRoundDuration;
 
-        nextGlobalSyncTimeMicros = targetTime - nowMicros;
+        nextGlobalSyncTimeMicros = targetTime;
     }
 }

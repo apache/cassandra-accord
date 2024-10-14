@@ -264,7 +264,7 @@ public abstract class SafeCommandStore
         commandStore().unsafeSetRangesForEpoch(rangesForEpoch);
     }
 
-    protected void registerHistoricalTransactions(Deps deps)
+    public void registerHistoricalTransactions(Deps deps)
     {
         commandStore().registerHistoricalTransactions(deps, this);
     }

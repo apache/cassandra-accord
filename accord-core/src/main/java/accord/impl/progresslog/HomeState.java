@@ -114,7 +114,6 @@ abstract class HomeState extends WaitingState
         encodedState &= ~shiftedMask;
     }
 
-
     void atLeast(SafeCommandStore safeStore, DefaultProgressLog instance, CoordinatePhase newPhase, Progress newProgress)
     {
         if (phase() == Done)

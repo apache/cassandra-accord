@@ -21,11 +21,11 @@ package accord.local;
 import accord.api.LocalListeners;
 import accord.api.ProgressLog;
 import accord.api.DataStore;
-import accord.coordinate.CollectCalculatedDeps;
 
 import javax.annotation.Nullable;
 import accord.api.Agent;
 
+import accord.impl.MajorityDepsFetcher;
 import accord.local.CommandStores.RangesForEpoch;
 import accord.primitives.Range;
 import accord.primitives.Routables;
@@ -44,8 +44,6 @@ import java.util.NavigableMap;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.Callable;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -57,15 +55,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.primitives.Deps;
-import accord.primitives.FullRoute;
 import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.utils.async.AsyncResults;
 
 import static accord.api.ConfigurationService.EpochReady.DONE;
-import static accord.local.KeyHistory.COMMANDS;
-import static accord.local.PreLoadContext.contextFor;
 import static accord.local.PreLoadContext.empty;
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_ADJACENT;
 import static accord.primitives.Routables.Slice.Minimal;
@@ -479,62 +474,13 @@ public abstract class CommandStore implements AgentExecutor
         };
     }
 
+    private MajorityDepsFetcher fetcher;
     // TODO (required, correctness): replace with a simple wait on suitable exclusive sync point(s)
     private void fetchMajorityDeps(AsyncResults.SettableResult<Void> coordination, Node node, long epoch, Ranges ranges)
     {
-        AtomicInteger index = new AtomicInteger();
-        fetchMajorityDeps(coordination, node, epoch, ranges, index);
-    }
-
-    // this is temporary until we rely on RX
-    static final int FETCH_SLICES = Invariants.debug() ? 1 : 64;
-    private void fetchMajorityDeps(AsyncResults.SettableResult<Void> coordination, Node node, long epoch, Ranges ranges, AtomicInteger index)
-    {
-        TxnId id = TxnId.fromValues(epoch - 1, 0, node.id());
-        Timestamp before = Timestamp.minForEpoch(epoch);
-        int rangeIndex = index.get() / FETCH_SLICES;
-        int subRangeIndex = index.get() % FETCH_SLICES;
-        int nextIndex;
-        Range nextRange;
-        {
-            int nextSubRangeIndex = subRangeIndex;
-            Range selectRange = null;
-            while (selectRange == null)
-                selectRange = node.commandStores().shardDistributor().splitRange(ranges.get(rangeIndex), subRangeIndex, ++nextSubRangeIndex, FETCH_SLICES);
-            nextRange = selectRange;
-            nextIndex = rangeIndex + nextSubRangeIndex;
-        }
-        FullRoute<?> route = node.computeRoute(id, Ranges.of(nextRange));
-        logger.debug("Fetching deps to sync epoch {} for range {}", epoch, nextRange);
-        CollectCalculatedDeps.withCalculatedDeps(node, id, route, route, before, (deps, fail) -> {
-            if (fail != null)
-            {
-                logger.warn("Failed to fetch deps for syncing epoch {} for range {}", epoch, nextRange, fail);
-                node.scheduler().once(() -> fetchMajorityDeps(coordination, node, epoch, ranges, index), 1L, TimeUnit.MINUTES);
-            }
-            else
-            {
-                // TODO (correctness) : PreLoadContext only works with Seekables, which doesn't allow mixing Keys and Ranges... But Deps has both Keys AND Ranges!
-                // ATM all known implementations store ranges in-memory, but this will not be true soon, so this will need to be addressed
-                execute(contextFor(null, deps.txnIds(), deps.keyDeps.keys(), COMMANDS), safeStore -> {
-                    safeStore.registerHistoricalTransactions(deps);
-                }).begin((success, fail2) -> {
-                    if (fail2 != null)
-                    {
-                        logger.warn("Failed to apply deps for syncing epoch {} for range {}", epoch, nextRange, fail2);
-                        node.scheduler().once(() -> fetchMajorityDeps(coordination, node, epoch, ranges, index), 1L, TimeUnit.MINUTES);
-                        node.agent().onUncaughtException(fail2);
-                    }
-                    else
-                    {
-                        int prev = index.getAndSet(nextIndex);
-                        Invariants.checkState(rangeIndex * FETCH_SLICES + subRangeIndex == prev);
-                        if (nextIndex >= ranges.size() * FETCH_SLICES) coordination.setSuccess(null);
-                        else fetchMajorityDeps(coordination, node, epoch, ranges, index);
-                    }
-                });
-            }
-        });
+        if (fetcher == null) fetcher = new MajorityDepsFetcher(node);
+        for (Range range : ranges)
+            fetcher.fetchMajorityDeps(this, range, epoch);
     }
 
     Supplier<EpochReady> unbootstrap(long epoch, Ranges removedRanges)

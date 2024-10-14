@@ -477,7 +477,7 @@ public class Cluster implements Scheduler
                                      DurableBefore.NOOP_PERSISTER, localConfig);
                 CoordinateDurabilityScheduling durability = new CoordinateDurabilityScheduling(node);
                 // TODO (desired): randomise
-                durability.setFrequency(60, SECONDS);
+                durability.setShardCycleTime(30, SECONDS);
                 durability.setGlobalCycleTime(180, SECONDS);
                 durabilityScheduling.add(durability);
                 nodeMap.put(id, node);
@@ -487,15 +487,15 @@ public class Cluster implements Scheduler
 
             Runnable updateDurabilityRate;
             {
-                IntSupplier frequencySeconds       = random.biasedUniformIntsSupplier( 1, 120, 10,  30, 10,  60).get();
+                IntSupplier targetSplits           = random.biasedUniformIntsSupplier(1, 16,  2,  4, 4, 16).get();
                 IntSupplier shardCycleTimeSeconds  = random.biasedUniformIntsSupplier(5, 60, 10, 30, 1, 30).get();
-                IntSupplier globalCycleTimeSeconds = random.biasedUniformIntsSupplier( 1,  90, 10,  30, 10,  60).get();
+                IntSupplier globalCycleTimeSeconds = random.biasedUniformIntsSupplier(1, 90, 10, 30,10, 60).get();
                 updateDurabilityRate = () -> {
-                    int f = frequencySeconds.getAsInt();
+                    int c = targetSplits.getAsInt();
                     int s = shardCycleTimeSeconds.getAsInt();
                     int g = globalCycleTimeSeconds.getAsInt();
                     durabilityScheduling.forEach(d -> {
-                        d.setFrequency(f, SECONDS);
+                        d.setTargetShardSplits(c);
                         d.setShardCycleTime(s, SECONDS);
                         d.setGlobalCycleTime(g, SECONDS);
                     });
