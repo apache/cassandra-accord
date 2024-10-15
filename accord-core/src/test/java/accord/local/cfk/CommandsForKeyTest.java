@@ -961,7 +961,7 @@ public class CommandsForKeyTest
         }
 
         @Override
-        protected void registerHistoricalTransactions(Deps deps, SafeCommandStore safeStore)
+        protected void registerHistoricalTransactions(Range range, Deps deps, SafeCommandStore safeStore)
         {
             throw new UnsupportedOperationException();
         }

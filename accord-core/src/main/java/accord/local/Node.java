@@ -231,7 +231,7 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
     @VisibleForTesting
     public AsyncResult<Void> unsafeStart()
     {
-        EpochReady ready = onTopologyUpdateInternal(configService.currentTopology(), false);
+        EpochReady ready = onTopologyUpdateInternal(configService.currentTopology(), false, false);
         ready.coordination.addCallback(() -> this.topology.onEpochSyncComplete(id, topology.epoch()));
         configService.acknowledgeEpoch(ready, false);
         return ready.metadata;
@@ -302,9 +302,9 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
         return topology().epoch();
     }
 
-    private synchronized EpochReady onTopologyUpdateInternal(Topology topology, boolean startSync)
+    private synchronized EpochReady onTopologyUpdateInternal(Topology topology, boolean isLoad, boolean startSync)
     {
-        Supplier<EpochReady> bootstrap = commandStores.updateTopology(this, topology, startSync);
+        Supplier<EpochReady> bootstrap = commandStores.updateTopology(this, topology, isLoad, startSync);
         Supplier<EpochReady> ordering = () -> {
             if (this.topology.isEmpty()) return bootstrap.get();
             return order(this.topology.epochReady(topology.epoch() - 1), bootstrap.get());
@@ -325,11 +325,11 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
     }
 
     @Override
-    public synchronized AsyncResult<Void> onTopologyUpdate(Topology topology, boolean startSync)
+    public synchronized AsyncResult<Void> onTopologyUpdate(Topology topology, boolean isLoad, boolean startSync)
     {
         if (topology.epoch() <= this.topology.epoch())
             return AsyncResults.success(null);
-        EpochReady ready = onTopologyUpdateInternal(topology, startSync);
+        EpochReady ready = onTopologyUpdateInternal(topology, isLoad, startSync);
         ready.coordination.addCallback(() -> this.topology.onEpochSyncComplete(id, topology.epoch()));
         configService.acknowledgeEpoch(ready, startSync);
         return ready.coordination;

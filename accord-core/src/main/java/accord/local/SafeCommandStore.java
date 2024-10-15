@@ -32,6 +32,7 @@ import accord.local.cfk.SafeCommandsForKey;
 import accord.primitives.AbstractUnseekableKeys;
 import accord.primitives.Deps;
 import accord.primitives.Participants;
+import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.Routable.Domain;
 import accord.primitives.RoutingKeys;
@@ -264,9 +265,9 @@ public abstract class SafeCommandStore
         commandStore().unsafeSetRangesForEpoch(rangesForEpoch);
     }
 
-    public void registerHistoricalTransactions(Deps deps)
+    public void registerHistoricalTransactions(long epoch, Range range, Deps deps)
     {
-        commandStore().registerHistoricalTransactions(deps, this);
+        commandStore().registerHistoricalTransactions(range, deps, this);
     }
 
     public void updateCommandsForKey(Command prev, Command next)

@@ -110,7 +110,7 @@ public class ImmutableCommandTest
                              DurableBefore.NOOP_PERSISTER,
                              localConfig);
         awaitUninterruptibly(node.unsafeStart());
-        node.onTopologyUpdate(storeSupport.local.get(), true);
+        node.onTopologyUpdate(storeSupport.local.get(), false, true);
         return node;
     }
 

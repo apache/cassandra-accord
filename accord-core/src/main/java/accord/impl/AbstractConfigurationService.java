@@ -267,7 +267,7 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
     protected void topologyUpdatePreListenerNotify(Topology topology) {}
     protected void topologyUpdatePostListenerNotify(Topology topology) {}
 
-    public synchronized void reportTopology(Topology topology, boolean startSync)
+    public synchronized void reportTopology(Topology topology, boolean isLoad, boolean startSync)
     {
         long lastReceived = epochs.lastReceived;
         if (topology.epoch() <= lastReceived)
@@ -276,19 +276,19 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
         if (lastReceived > 0 && topology.epoch() > lastReceived + 1)
         {
             fetchTopologyForEpoch(lastReceived + 1);
-            epochs.receiveFuture(lastReceived + 1).addCallback(() -> reportTopology(topology, startSync));
+            epochs.receiveFuture(lastReceived + 1).addCallback(() -> reportTopology(topology, startSync, isLoad));
             return;
         }
 
         long lastAcked = epochs.lastAcknowledged;
         if (lastAcked == 0 && lastReceived > 0)
         {
-            epochs.acknowledgeFuture(epochs.minEpoch()).addCallback(() -> reportTopology(topology, startSync));
+            epochs.acknowledgeFuture(epochs.minEpoch()).addCallback(() -> reportTopology(topology, startSync, isLoad));
             return;
         }
         if (lastAcked > 0 && topology.epoch() > lastAcked + 1)
         {
-            epochs.acknowledgeFuture(lastAcked + 1).addCallback(() -> reportTopology(topology, startSync));
+            epochs.acknowledgeFuture(lastAcked + 1).addCallback(() -> reportTopology(topology, startSync, isLoad));
             return;
         }
         logger.trace("Epoch {} received by {}", topology.epoch(), localId);
@@ -296,13 +296,13 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
         epochs.receive(topology);
         topologyUpdatePreListenerNotify(topology);
         for (Listener listener : listeners)
-            listener.onTopologyUpdate(topology, startSync);
+            listener.onTopologyUpdate(topology, isLoad, startSync);
         topologyUpdatePostListenerNotify(topology);
     }
 
     public synchronized void reportTopology(Topology topology)
     {
-        reportTopology(topology, true);
+        reportTopology(topology, false, true);
     }
 
     protected void receiveRemoteSyncCompletePreListenerNotify(Node.Id node, long epoch) {}

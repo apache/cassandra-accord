@@ -61,7 +61,7 @@ public class AbstractConfigurationServiceTest
         }
 
         @Override
-        public AsyncResult<Void> onTopologyUpdate(Topology topology, boolean startSync)
+        public AsyncResult<Void> onTopologyUpdate(Topology topology, boolean isLoad, boolean startSync)
         {
             if (topologies.put(topology.epoch(), topology) != null)
                 Assertions.fail("Received topology twice for epoch " + topology.epoch());

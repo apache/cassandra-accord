@@ -115,7 +115,7 @@ public class MockConfigurationService implements TestableConfigurationService
 
         List<AsyncResult<Void>> futures = new ArrayList<>();
         for (Listener listener : listeners)
-            futures.add(listener.onTopologyUpdate(topology, true));
+            futures.add(listener.onTopologyUpdate(topology, false, true));
 
         AsyncResult<Void> result = futures.isEmpty()
            ? AsyncResults.success(null)

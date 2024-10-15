@@ -145,7 +145,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
                              DurableBefore.NOOP_PERSISTER,
                              localConfig);
         awaitUninterruptibly(node.unsafeStart());
-        node.onTopologyUpdate(topology, true);
+        node.onTopologyUpdate(topology, false, true);
         return node;
     }
 

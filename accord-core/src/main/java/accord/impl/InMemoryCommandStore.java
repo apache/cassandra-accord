@@ -1450,7 +1450,7 @@ public abstract class InMemoryCommandStore extends CommandStore
     }
 
     @Override
-    protected void registerHistoricalTransactions(Deps deps, SafeCommandStore safeStore)
+    protected void registerHistoricalTransactions(Range range, Deps deps, SafeCommandStore safeStore)
     {
         registerHistoricalTransactions(deps, (key, txnId) -> safeStore.get(key).registerHistorical(safeStore, txnId));
     }

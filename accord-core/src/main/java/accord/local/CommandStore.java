@@ -35,10 +35,13 @@ import accord.utils.async.AsyncChain;
 import accord.api.ConfigurationService.EpochReady;
 import accord.utils.DeterministicIdentitySet;
 import accord.utils.Invariants;
+import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResult;
 
 import java.util.AbstractMap.SimpleImmutableEntry;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Set;
@@ -235,7 +238,7 @@ public abstract class CommandStore implements AgentExecutor
     public abstract <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> apply);
     public abstract void shutdown();
 
-    protected abstract void registerHistoricalTransactions(Deps deps, SafeCommandStore safeStore);
+    protected abstract void registerHistoricalTransactions(Range range, Deps deps, SafeCommandStore safeStore);
 
     protected void unsafeSetRejectBefore(RejectBefore newRejectBefore)
     {
@@ -465,22 +468,36 @@ public abstract class CommandStore implements AgentExecutor
      * So, the outer future's success is sufficient for the topology to be acknowledged, and the inner future for the
      * bootstrap to be complete.
      */
-    protected Supplier<EpochReady> sync(Node node, Ranges ranges, long epoch)
+    protected Supplier<EpochReady> sync(Node node, Ranges ranges, long epoch, boolean isLoad)
     {
-        return () -> {
-            AsyncResults.SettableResult<Void> whenDone = new AsyncResults.SettableResult<>();
-            fetchMajorityDeps(whenDone, node, epoch, ranges);
-            return new EpochReady(epoch, DONE, whenDone, whenDone, whenDone);
-        };
+        return () -> syncInternal(node, ranges, epoch, isLoad);
+    }
+
+    protected EpochReady syncInternal(Node node, Ranges ranges, long epoch, boolean isLoad)
+    {
+        AsyncResults.SettableResult<Void> whenDone = new AsyncResults.SettableResult<>();
+        fetchMajorityDeps(whenDone, node, epoch, ranges);
+        return new EpochReady(epoch, DONE, whenDone, whenDone, whenDone);
     }
 
     private MajorityDepsFetcher fetcher;
+    protected void cancelFetch(Range range, long epoch)
+    {
+        if (fetcher != null)
+            fetcher.cancel(range, epoch);
+    }
     // TODO (required, correctness): replace with a simple wait on suitable exclusive sync point(s)
-    private void fetchMajorityDeps(AsyncResults.SettableResult<Void> coordination, Node node, long epoch, Ranges ranges)
+    private void fetchMajorityDeps(AsyncResult.Settable<Void> coordination, Node node, long epoch, Ranges ranges)
     {
         if (fetcher == null) fetcher = new MajorityDepsFetcher(node);
+        List<AsyncResult.Settable<Void>> waiting = new ArrayList<>();
         for (Range range : ranges)
-            fetcher.fetchMajorityDeps(this, range, epoch);
+        {
+            AsyncResult.Settable<Void> rangeComplete = AsyncResults.settable();
+            fetcher.fetchMajorityDeps(this, range, epoch, rangeComplete);
+            waiting.add(rangeComplete);
+        }
+        AsyncChains.reduce(waiting, (a, b) -> null).begin(coordination.settingCallback());
     }
 
     Supplier<EpochReady> unbootstrap(long epoch, Ranges removedRanges)

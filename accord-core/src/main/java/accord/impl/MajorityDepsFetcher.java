@@ -18,7 +18,10 @@
 
 package accord.impl;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -36,6 +39,7 @@ import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.utils.async.AsyncResult;
 
 import static accord.local.KeyHistory.COMMANDS;
 import static accord.local.PreLoadContext.contextFor;
@@ -62,6 +66,7 @@ public class MajorityDepsFetcher
     {
         final CommandStore commandStore;
         final Range range;
+        final List<AsyncResult.Settable<Void>> waiting;
 
         long epoch;
         boolean defunct;
@@ -71,10 +76,11 @@ public class MajorityDepsFetcher
         Scheduler.Scheduled scheduled;
         long retryDelayMicros = defaultRetryDelayMicros;
 
-        private ShardScheduler(CommandStore commandStore, Range range, long epoch)
+        private ShardScheduler(CommandStore commandStore, Range range, List<AsyncResult.Settable<Void>> waiting, long epoch)
         {
             this.commandStore = commandStore;
             this.range = range;
+            this.waiting = waiting;
             this.numberOfSplits = targetShardSplits;
             this.epoch = epoch;
         }
@@ -137,7 +143,7 @@ public class MajorityDepsFetcher
                     nextIndex = i;
                 }
 
-                Runnable schedule = () -> start(Ranges.of(range), nextIndex);
+                Runnable schedule = () -> start(range, nextIndex);
                 if (scheduleAt <= nowMicros) schedule.run();
                 else scheduled = node.scheduler().once(schedule, scheduleAt - nowMicros, MICROSECONDS);
             }
@@ -147,7 +153,7 @@ public class MajorityDepsFetcher
          * The first step for coordinating shard durable is to run an exclusive sync point
          * the result of which can then be used to run
          */
-        private void start(Ranges ranges, int nextIndex)
+        private void start(Range slice, int nextIndex)
         {
             TxnId id = TxnId.fromValues(epoch - 1, 0, node.id());
             Timestamp before = Timestamp.minForEpoch(epoch);
@@ -156,19 +162,19 @@ public class MajorityDepsFetcher
                 if (withEpochFailure != null)
                 {
                     // don't wait on epoch failure - we aren't the cause of any problems
-                    start(ranges, nextIndex);
+                    start(slice, nextIndex);
                     Throwable wrapped = CoordinationFailed.wrap(withEpochFailure);
                     logger.trace("Exception waiting for epoch before coordinating exclusive sync point for local shard durability, epoch " + id.epoch(), wrapped);
                     node.agent().onUncaughtException(wrapped);
                     return;
                 }
                 scheduled = null;
-                FullRoute<Range> route = (FullRoute<Range>) node.computeRoute(id, ranges);
-                logger.debug("Fetching deps to sync epoch {} for range {}", epoch, ranges);
+                FullRoute<Range> route = (FullRoute<Range>) node.computeRoute(id, Ranges.of(slice));
+                logger.debug("Fetching deps to sync epoch {} for range {}", epoch, slice);
                 CollectCalculatedDeps.withCalculatedDeps(node, id, route, route, before, (deps, fail) -> {
                     if (fail != null)
                     {
-                        logger.warn("Failed to fetch deps for syncing epoch {} for {}", epoch, ranges, fail);
+                        logger.warn("Failed to fetch deps for syncing epoch {} for {}", epoch, slice, fail);
                         retry();
                     }
                     else
@@ -176,12 +182,12 @@ public class MajorityDepsFetcher
                         // TODO (correctness) : PreLoadContext only works with Seekables, which doesn't allow mixing Keys and Ranges... But Deps has both Keys AND Ranges!
                         // ATM all known implementations store ranges in-memory, but this will not be true soon, so this will need to be addressed
                         commandStore.execute(contextFor(null, deps.keyDeps.keys(), COMMANDS), safeStore -> {
-                            safeStore.registerHistoricalTransactions(deps);
+                            safeStore.registerHistoricalTransactions(epoch, slice, deps);
                         }).begin((success, fail2) -> {
                             if (fail2 != null)
                             {
                                 retry();
-                                logger.warn("Failed to apply deps for syncing epoch {} for range {}", epoch, ranges, fail2);
+                                logger.warn("Failed to apply deps for syncing epoch {} for range {}", epoch, slice, fail2);
                             }
                             else
                             {
@@ -192,9 +198,10 @@ public class MajorityDepsFetcher
                                         index = nextIndex;
                                         if (index >= numberOfSplits)
                                         {
-                                            logger.info("Successfully fetched majority deps for {} at epoch {}", range, epoch);
+                                            waiting.forEach(w -> w.trySuccess(null));
+                                            logger.info("Successfully fetched majority deps for {} at epoch {}", this.range, epoch);
                                             defunct = true;
-                                            shardSchedulers.remove(range, ShardScheduler.this);
+                                            shardSchedulers.remove(this.range, ShardScheduler.this);
                                         }
                                         else
                                         {
@@ -220,6 +227,16 @@ public class MajorityDepsFetcher
         this.node = node;
     }
 
+    public synchronized void cancel(Range range, long epoch)
+    {
+        ShardScheduler scheduler = shardSchedulers.get(range);
+        if (scheduler == null || scheduler.epoch > epoch)
+            return;
+
+        scheduler.markDefunct();
+        shardSchedulers.remove(range);
+    }
+
     public void setTargetShardSplits(int targetShardSplits)
     {
         this.targetShardSplits = targetShardSplits;
@@ -235,16 +252,19 @@ public class MajorityDepsFetcher
         this.maxRetryDelayMicros = units.toMicros(retryDelay);
     }
 
-    public synchronized void fetchMajorityDeps(CommandStore commandStore, Range range, long epoch)
+    public synchronized void fetchMajorityDeps(CommandStore commandStore, Range range, long epoch, AsyncResult.Settable<Void> waiting)
     {
         ShardScheduler scheduler = shardSchedulers.get(range);
+        List<AsyncResult.Settable<Void>> waitingList = Collections.singletonList(waiting);
         if (scheduler != null)
         {
             if (scheduler.epoch >= epoch)
                 return;
             scheduler.markDefunct();
+            waitingList = new ArrayList<>(waitingList);
+            waitingList.addAll(scheduler.waiting);
         }
-        scheduler = new ShardScheduler(commandStore, range, epoch);
+        scheduler = new ShardScheduler(commandStore, range, waitingList, epoch);
         scheduler.schedule();
     }
 

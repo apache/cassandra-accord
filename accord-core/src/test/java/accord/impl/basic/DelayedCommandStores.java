@@ -288,10 +288,10 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         }
 
         @Override
-        protected void registerHistoricalTransactions(Deps deps, SafeCommandStore safeStore)
+        protected void registerHistoricalTransactions(Range range, Deps deps, SafeCommandStore safeStore)
         {
             journal.registerHistoricalTransactions(id(), deps);
-            super.registerHistoricalTransactions(deps, safeStore);
+            super.registerHistoricalTransactions(range, deps, safeStore);
         }
 
         @Override

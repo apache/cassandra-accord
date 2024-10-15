@@ -115,7 +115,7 @@ public interface ConfigurationService
          *
          * TODO (desired): document what this Future represents, or maybe refactor it away - only used for testing
          */
-        AsyncResult<Void> onTopologyUpdate(Topology topology, boolean startSync);
+        AsyncResult<Void> onTopologyUpdate(Topology topology, boolean isLoad, boolean startSync);
 
         /**
          * Called when accord data associated with a superseded epoch has been sync'd from previous replicas.
