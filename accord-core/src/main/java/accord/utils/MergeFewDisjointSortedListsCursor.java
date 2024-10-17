@@ -17,7 +17,6 @@
  */
 package accord.utils;
 
-import java.util.Arrays;
 import javax.annotation.Nonnull;
 
 public class MergeFewDisjointSortedListsCursor<T extends Comparable<? super T>> implements SortedCursor<T>
@@ -46,17 +45,30 @@ public class MergeFewDisjointSortedListsCursor<T extends Comparable<? super T>> 
             return this;
         }
 
-        private boolean find(Comparable<? super T> find)
+        private static final int FOUND = 1;
+        private static final int ADVANCED = 2;
+
+        private int find(Comparable<? super T> find)
         {
-            boolean found;
+            int result = 0;
             int i = list.findNext(itemIdx, find);
-            found = i >= 0;
+            if (i >= 0) result = FOUND;
             if (i < 0) i = -1 - i;
-            if ((itemIdx = i) < list.size())
-                item = list.get(itemIdx = i);
-            else
-                item = null;
-            return found;
+            if (i > itemIdx)
+            {
+                result |= ADVANCED;
+                if ((itemIdx = i) < list.size())
+                    item = list.get(itemIdx = i);
+                else
+                    item = null;
+            }
+            return result;
+        }
+
+        @Override
+        public String toString()
+        {
+            return list.toString();
         }
 
         public int compareTo(Candidate<T> that)
@@ -65,25 +77,16 @@ public class MergeFewDisjointSortedListsCursor<T extends Comparable<? super T>> 
         }
     }
 
-    protected final Candidate<T>[] heap;
-
-    /** Number of non-exhausted iterators. */
-    int size;
-
+    Candidate<T>[] heap;
+    int size = 0;
     public MergeFewDisjointSortedListsCursor(int capacity)
     {
-        this.heap = (Candidate<T>[]) new Candidate[capacity];
+        heap = new Candidate[capacity];
     }
 
     public void add(SortedList<? extends T> list)
     {
-        Candidate<T> candidate = new Candidate<>(list);
-        heap[size++] = candidate;
-    }
-
-    public void init()
-    {
-        Arrays.sort(heap, 0, size);
+        heap[size++] = new Candidate<>(list);
     }
 
     @Override
@@ -101,56 +104,74 @@ public class MergeFewDisjointSortedListsCursor<T extends Comparable<? super T>> 
     public void advance()
     {
         Candidate<T> sink = heap[0].advance();
-        if (sink == null)
-        {
-            heap[0] = null;
-            if (--size > 0)
-                System.arraycopy(heap, 1, heap, 0, size);
-        }
-        else
-        {
-            int i = 1;
-            for (; i < size && sink.compareTo(heap[i]) > 0; ++i)
-                heap[i - 1] = heap[i];
-            heap[i - 1] = sink;
-        }
+        if (sink == null) replaceHead();
+        else siftDown(heap[0], 0);
+    }
+
+    public void init()
+    {
+        for (int i = size - 2 ; i >= 0 ; --i)
+            siftDown(heap[i], i);
     }
 
     @Override
     public boolean find(Comparable<? super T> find)
     {
-        int i = 0;
-        int removedCount = 0;
-        boolean found = false;
-        while (i < size)
+        if (size == 0)
+            return false;
+
+        Candidate<T> found = null;
+        while (true)
         {
-            int c = find.compareTo(heap[i].item);
-            if (c <= 0)
+            Candidate<T> head = heap[0];
+            if (head == found)
+                return true;
+
+            int result = head.find(find);
+            if (0 != (result & Candidate.FOUND))
             {
-                found |= c == 0;
-                if (removedCount > 0)
-                    System.arraycopy(heap, removedCount, heap, 0, size - removedCount);
-                break;
+                Invariants.checkState(found == null, "%s and %s both contained %s", head, found, find);
+                found = head;
             }
 
-            Candidate<T> candidate = heap[i];
-            found |= candidate.find(find);
-            if (candidate.item == null)
+            if (0 == (result & Candidate.ADVANCED))
+                return found != null;
+
+            if (head.item == null)
             {
-                Invariants.checkState(candidate.itemIdx == candidate.list.size());
-                ++removedCount;
+                Invariants.checkState(head != found);
+                replaceHead();
+                if (size == 0)
+                    return false;
             }
-            else if (removedCount > 0)
+            else
             {
-                heap[i - removedCount] = candidate;
+                siftDown(head, 0);
             }
-            i++;
+        }
+    }
+
+    void replaceHead()
+    {
+        for (int i = 1 ; i < size ; ++i)
+            heap[i - 1] = heap[i];
+        heap[--size] = null;
+    }
+
+    private void siftDown(Candidate<T> node, int i)
+    {
+        int j = i;
+        while (++j < size)
+        {
+            if (node.compareTo(heap[j]) < 0)
+                break;
         }
 
-        while (removedCount-- > 0)
-            heap[--size] = null;
+        if (--j == i)
+            return;
 
-        Arrays.sort(heap, 0, size);
-        return found;
+        for (; i < j ; ++i)
+            heap[i] = heap[i + 1];
+        heap[i] = node;
     }
 }

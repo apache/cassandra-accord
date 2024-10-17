@@ -21,6 +21,7 @@ package accord.local;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import accord.api.Agent;
 import accord.api.VisibleForImplementation;
 import accord.primitives.FullRoute;
 import accord.primitives.Route;
@@ -85,29 +86,29 @@ public enum Cleanup
 
     public static Cleanup shouldCleanup(SafeCommandStore safeStore, Command command, @Nonnull StoreParticipants participants)
     {
-        return shouldCleanup(command.txnId(), command.saveStatus(), command.durability(), participants,
+        return shouldCleanup(safeStore.agent(), command.txnId(), command.saveStatus(), command.durability(), participants,
                              safeStore.redundantBefore(), safeStore.durableBefore());
     }
 
-    public static Cleanup shouldCleanup(Command command, RedundantBefore redundantBefore, DurableBefore durableBefore)
+    public static Cleanup shouldCleanup(Agent agent, Command command, RedundantBefore redundantBefore, DurableBefore durableBefore)
     {
-        return shouldCleanup(command.txnId(), command.saveStatus(), command.durability(), command.participants(),
+        return shouldCleanup(agent, command.txnId(), command.saveStatus(), command.durability(), command.participants(),
                              redundantBefore, durableBefore);
     }
 
-    public static Cleanup shouldCleanup(TxnId txnId, SaveStatus status, Durability durability, StoreParticipants participants, RedundantBefore redundantBefore, DurableBefore durableBefore)
+    public static Cleanup shouldCleanup(Agent agent, TxnId txnId, SaveStatus status, Durability durability, StoreParticipants participants, RedundantBefore redundantBefore, DurableBefore durableBefore)
     {
-        return shouldCleanupInternal(txnId, status, durability, participants, redundantBefore, durableBefore).filter(status);
+        return shouldCleanupInternal(agent, txnId, status, durability, participants, redundantBefore, durableBefore).filter(status);
     }
 
     // TODO (required): simulate compaction of log records in burn test
     @VisibleForImplementation
-    public static Cleanup shouldCleanupPartial(TxnId txnId, SaveStatus status, Durability durability, StoreParticipants participants, RedundantBefore redundantBefore, DurableBefore durableBefore)
+    public static Cleanup shouldCleanupPartial(Agent agent, TxnId txnId, SaveStatus status, Durability durability, StoreParticipants participants, RedundantBefore redundantBefore, DurableBefore durableBefore)
     {
-        return shouldCleanupPartialInternal(txnId, status, durability, participants, redundantBefore, durableBefore).filter(status);
+        return shouldCleanupPartialInternal(agent, txnId, status, durability, participants, redundantBefore, durableBefore).filter(status);
     }
 
-    private static Cleanup shouldCleanupInternal(TxnId txnId, SaveStatus saveStatus, Durability durability, StoreParticipants participants, RedundantBefore redundantBefore, DurableBefore durableBefore)
+    private static Cleanup shouldCleanupInternal(Agent agent, TxnId txnId, SaveStatus saveStatus, Durability durability, StoreParticipants participants, RedundantBefore redundantBefore, DurableBefore durableBefore)
     {
         if (txnId.kind() == EphemeralRead)
             return NO; // TODO (required): clean-up based on timeout
@@ -142,10 +143,10 @@ public enum Cleanup
             return Cleanup.NO;
         }
 
-        return cleanupWithFullRoute(false, participants, txnId, saveStatus, durability, redundantBefore, durableBefore);
+        return cleanupWithFullRoute(agent, false, participants, txnId, saveStatus, durability, redundantBefore, durableBefore);
     }
 
-    private static Cleanup shouldCleanupPartialInternal(TxnId txnId, SaveStatus status, @Nullable Durability durability, @Nullable StoreParticipants participants, RedundantBefore redundantBefore, DurableBefore durableBefore)
+    private static Cleanup shouldCleanupPartialInternal(Agent agent, TxnId txnId, SaveStatus status, @Nullable Durability durability, @Nullable StoreParticipants participants, RedundantBefore redundantBefore, DurableBefore durableBefore)
     {
         if (txnId.kind() == EphemeralRead)
             return NO; // TODO (required): clean-up based on timeout
@@ -177,10 +178,10 @@ public enum Cleanup
             }
         }
 
-        return cleanupWithFullRoute(true, participants, txnId, status, durability, redundantBefore, durableBefore);
+        return cleanupWithFullRoute(agent, true, participants, txnId, status, durability, redundantBefore, durableBefore);
     }
 
-    private static Cleanup cleanupWithFullRoute(boolean isPartial, StoreParticipants participants, TxnId txnId, SaveStatus saveStatus, Durability durability, RedundantBefore redundantBefore, DurableBefore durableBefore)
+    private static Cleanup cleanupWithFullRoute(Agent agent, boolean isPartial, StoreParticipants participants, TxnId txnId, SaveStatus saveStatus, Durability durability, RedundantBefore redundantBefore, DurableBefore durableBefore)
     {
         // We first check if the command is redundant locally, i.e. whether it has been applied to all non-faulty replicas of the local shard
         // If not, we don't want to truncate its state else we may make catching up for these other replicas much harder
@@ -200,7 +201,10 @@ public enum Cleanup
                 return Cleanup.NO;
             case SHARD_REDUNDANT:
                 if (!isPartial && saveStatus.hasBeen(PreCommitted) && !saveStatus.hasBeen(Applied) && redundantBefore.preBootstrapOrStale(txnId, participants.owns) != FULLY)
-                    illegalState("Loading redundant command that has been PreCommitted but not Applied.");
+                {
+                    agent.onViolation(String.format("Loading SHARD_REDUNDANT command %s with status %s (that should have been Applied). Expected to be witnessed and executed by %s.", txnId, saveStatus, redundantBefore.max(participants.route, e -> e.shardAppliedOrInvalidatedBefore)));
+                    return TRUNCATE;
+                }
             case WAS_OWNED:
         }
 

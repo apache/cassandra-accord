@@ -25,6 +25,7 @@ import accord.primitives.*;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.utils.SortedList;
+import accord.utils.async.Cancellable;
 
 import javax.annotation.Nullable;
 import java.util.Arrays;
@@ -34,7 +35,7 @@ import static accord.primitives.Route.castToFullRoute;
 import static accord.primitives.Route.isFullRoute;
 import static accord.utils.Functions.mapReduceNonNull;
 
-public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.InvalidateReply> implements Request, PreLoadContext
+public class BeginInvalidation extends AbstractRequest<BeginInvalidation.InvalidateReply> implements Request, PreLoadContext
 {
     public final Ballot ballot;
     public final Participants<?> participants;
@@ -54,9 +55,9 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
     }
 
     @Override
-    public void process()
+    public Cancellable submit()
     {
-        node.mapReduceConsumeLocal(this, participants, txnId.epoch(), txnId.epoch(), this);
+        return node.mapReduceConsumeLocal(this, participants, txnId.epoch(), txnId.epoch(), this);
     }
 
     @Override

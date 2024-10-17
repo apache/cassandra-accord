@@ -62,6 +62,8 @@ import static accord.primitives.Status.Durability.ShardUniversal;
 import static accord.primitives.Status.Durability.Universal;
 
 import accord.primitives.Known;
+import accord.utils.async.Cancellable;
+
 import static accord.primitives.Status.NotDefined;
 import static accord.primitives.Status.Stable;
 import static accord.primitives.Status.Truncated;
@@ -70,7 +72,7 @@ import static accord.primitives.WithQuorum.HasQuorum;
 import static accord.primitives.Route.castToRoute;
 import static accord.primitives.Route.isRoute;
 
-public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusReply>
+public class CheckStatus extends AbstractRequest<CheckStatus.CheckStatusReply>
         implements Request, PreLoadContext, MapReduceConsume<SafeCommandStore, CheckStatus.CheckStatusReply>
 {
     public static class SerializationSupport
@@ -130,10 +132,10 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
     }
 
     @Override
-    public void process()
+    public Cancellable submit()
     {
         // TODO (expected): only contact sourceEpoch
-        node.mapReduceConsumeLocal(this, query, txnId.epoch(), sourceEpoch, this);
+        return node.mapReduceConsumeLocal(this, query, txnId.epoch(), sourceEpoch, this);
     }
 
     @Override
@@ -199,7 +201,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
     }
 
     @Override
-    public void accept(CheckStatusReply ok, Throwable failure)
+    protected void acceptInternal(CheckStatusReply ok, Throwable failure)
     {
         if (failure != null) node.reply(replyTo, replyContext, ok, failure);
         else if (ok == null) node.reply(replyTo, replyContext, CheckStatusNack.NotOwned, null);

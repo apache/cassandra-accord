@@ -47,10 +47,11 @@ public class MaybeRecover extends CheckShards<Route<?>>
         this.callback = callback;
     }
 
-    public static void maybeRecover(Node node, TxnId txnId, Route<?> someRoute, ProgressToken prevProgress, BiConsumer<Outcome, Throwable> callback)
+    public static Object maybeRecover(Node node, TxnId txnId, Route<?> someRoute, ProgressToken prevProgress, BiConsumer<Outcome, Throwable> callback)
     {
         MaybeRecover maybeRecover = new MaybeRecover(node, txnId, someRoute, prevProgress, callback);
         maybeRecover.start();
+        return maybeRecover;
     }
 
     @Override

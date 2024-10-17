@@ -1260,6 +1260,21 @@ public abstract class Command implements CommonAttributes
             return waitingOn.get(txnIdCount() + keyIndex);
         }
 
+        public RoutingKeys waitingOnKeys()
+        {
+            int offset = txnIdCount();
+            int count = waitingOn.getSetBitCount(offset, waitingOn.size());
+            if (count == 0)
+                return RoutingKeys.EMPTY;
+            if (count == keys.size())
+                return keys;
+            RoutingKey[] selected = new RoutingKey[count];
+            int c = 0;
+            for (int i = waitingOn.nextSetBit(offset, -1) ; i >= 0 ; i = waitingOn.nextSetBit(i + 1, -1))
+                selected[c++] = keys.get(i - offset);
+            return RoutingKeys.ofSortedUnique(selected);
+        }
+
         public boolean isWaitingOnCommand()
         {
             return waitingOn.firstSetBit() < txnIdCount();

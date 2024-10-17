@@ -32,11 +32,12 @@ import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
+import accord.utils.async.Cancellable;
 
 import static accord.messages.PreAccept.calculateDeps;
 import static accord.primitives.EpochSupplier.constant;
 
-public class CalculateDeps extends TxnRequest.WithUnsynced<Deps>
+public class CalculateDeps extends TxnRequest.WithUnsynced<CalculateDeps.CalculateDepsOk>
 {
     public static final class SerializationSupport
     {
@@ -61,28 +62,22 @@ public class CalculateDeps extends TxnRequest.WithUnsynced<Deps>
     }
 
     @Override
-    public void process()
+    public Cancellable submit()
     {
-        node.mapReduceConsumeLocal(this, minEpoch, executeAt.epoch(), this);
+        return node.mapReduceConsumeLocal(this, minEpoch, executeAt.epoch(), this);
     }
 
     @Override
-    public Deps apply(SafeCommandStore safeStore)
+    public CalculateDepsOk apply(SafeCommandStore safeStore)
     {
         StoreParticipants participants = StoreParticipants.read(safeStore, scope, txnId, minEpoch, executeAt.epoch());
-        return calculateDeps(safeStore, txnId, participants, constant(minEpoch), executeAt);
+        return new CalculateDepsOk(calculateDeps(safeStore, txnId, participants, constant(minEpoch), executeAt));
     }
 
     @Override
-    public Deps reduce(Deps deps1, Deps deps2)
+    public CalculateDepsOk reduce(CalculateDepsOk ok1, CalculateDepsOk ok2)
     {
-        return deps1.with(deps2);
-    }
-
-    @Override
-    public void accept(Deps result, Throwable failure)
-    {
-        node.reply(replyTo, replyContext, result != null ? new CalculateDepsOk(result) : null, failure);
+        return new CalculateDepsOk(ok1.deps.with(ok2.deps));
     }
 
     @Override
@@ -116,7 +111,7 @@ public class CalculateDeps extends TxnRequest.WithUnsynced<Deps>
     @Override
     public KeyHistory keyHistory()
     {
-        return KeyHistory.COMMANDS;
+        return KeyHistory.SYNC;
     }
 
     public static class CalculateDepsOk implements Reply

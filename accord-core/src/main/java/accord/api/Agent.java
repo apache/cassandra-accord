@@ -32,6 +32,8 @@ import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 
+import static accord.utils.Invariants.illegalState;
+
 /**
  * Facility for augmenting node behaviour at specific points
  *
@@ -122,8 +124,6 @@ public interface Agent extends UncaughtExceptionListener
      */
     default Topologies selectPreferred(Node.Id from, Topologies to) { return to; }
 
-    long replyTimeout(ReplyContext replyContext, TimeUnit units);
-
     /**
      *  This method permits implementations to configure the time at which a local home shard will attempt
      *  to coordinate a transaction to completion.
@@ -148,4 +148,8 @@ public interface Agent extends UncaughtExceptionListener
      * and re-query the local state.
      */
     long retryAwaitTimeout(Node node, SafeCommandStore safeStore, TxnId txnId, int retryCount, BlockedUntil retrying, TimeUnit units);
+
+    long expiresAt(ReplyContext replyContext, TimeUnit unit);
+
+    default void onViolation(String message) { throw illegalState(message); }
 }

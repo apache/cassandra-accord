@@ -98,7 +98,7 @@ public class ExecuteEphemeralRead extends ReadCoordinator<ReadReply>
             if (ok.futureEpoch > allTopologies.currentEpoch())
             {
                 // TODO (expected): only submit new requests for the keys that execute in a later epoch
-                new ExecuteEphemeralRead(node, node.topology().preciseEpochs(route, ok.futureEpoch, ok.futureEpoch), route, txnId, txn, ok.futureEpoch, deps, callback).start();
+                new ExecuteEphemeralRead(node, node.topology().preciseEpochs(route, ok.futureEpoch, ok.futureEpoch), route, txnId.withEpoch(ok.futureEpoch), txn, ok.futureEpoch, deps, callback).start();
                 return Aborted;
             }
 

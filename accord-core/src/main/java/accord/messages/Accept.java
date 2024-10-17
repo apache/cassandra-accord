@@ -42,6 +42,7 @@ import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
+import accord.utils.async.Cancellable;
 
 import static accord.local.Commands.AcceptOutcome.Redundant;
 import static accord.local.Commands.AcceptOutcome.RejectedBallot;
@@ -121,15 +122,9 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     }
 
     @Override
-    public void accept(AcceptReply reply, Throwable failure)
+    public Cancellable submit()
     {
-        node.reply(replyTo, replyContext, reply, failure);
-    }
-
-    @Override
-    public void process()
-    {
-        node.mapReduceConsumeLocal(this, minEpoch, executeAt.epoch(), this);
+        return node.mapReduceConsumeLocal(this, minEpoch, executeAt.epoch(), this);
     }
 
     @Override
@@ -147,7 +142,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     @Override
     public KeyHistory keyHistory()
     {
-        return KeyHistory.COMMANDS;
+        return KeyHistory.SYNC;
     }
 
     @Override
@@ -248,7 +243,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
         }
     }
 
-    public static class Invalidate extends AbstractEpochRequest<AcceptReply>
+    public static class Invalidate extends AbstractRequest<AcceptReply>
     {
         public final Ballot ballot;
         // should not be a non-participating home key
@@ -262,9 +257,9 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
         }
 
         @Override
-        public void process()
+        public Cancellable submit()
         {
-            node.mapReduceConsumeLocal(this, someKey, txnId.epoch(), this);
+            return node.mapReduceConsumeLocal(this, someKey, txnId.epoch(), this);
         }
 
         @Override

@@ -82,7 +82,7 @@ public class TopologyChangeTest
                 try
                 {
                     config.fetchTopologyForEpoch(2);
-                    getUninterruptibly(config.ackFor(topology2.epoch()).coordination);
+                    getUninterruptibly(config.ackFor(topology2.epoch()).fastPath);
                 }
                 catch (ExecutionException e)
                 {
@@ -183,13 +183,13 @@ public class TopologyChangeTest
             cluster.configServices(1, 2, 3, 4, 5).forEach(configService -> configService.reportTopology(topology2));
             cluster.nodes(4).forEach(node -> {
                 MockConfigurationService configService = (MockConfigurationService) node.configService();
-                getUncheckedTimeout(configService.ackFor(2).coordination, 5, TimeUnit.SECONDS);
+                getUncheckedTimeout(configService.ackFor(2).fastPath, 5, TimeUnit.SECONDS);
                 assertEpochRejection(node, keys, 1, false);  // shouldn't have received the sync point preaccept
             });
 
             cluster.nodes(2, 3).forEach(node -> {
                 MockConfigurationService configService = (MockConfigurationService) node.configService();
-                getUncheckedTimeout(configService.ackFor(2).coordination, 5, TimeUnit.SECONDS);
+                getUncheckedTimeout(configService.ackFor(2).fastPath, 5, TimeUnit.SECONDS);
                 assertEpochRejection(node, keys, 1, true);
             });
 
@@ -200,14 +200,14 @@ public class TopologyChangeTest
             cluster.configServices(1, 2, 3, 4, 5).forEach(configService -> configService.reportTopology(topology3));
             cluster.nodes(2, 3).forEach(node -> {
                 MockConfigurationService configService = (MockConfigurationService) node.configService();
-                getUncheckedTimeout(configService.ackFor(3).coordination, 5, TimeUnit.SECONDS);
+                getUncheckedTimeout(configService.ackFor(3).fastPath, 5, TimeUnit.SECONDS);
                 assertEpochRejection(node, keys, 2, true);
             });
 
             // node 4 shouldn't have up to date rejectBefore data
             cluster.nodes(4).forEach(node -> {
                 MockConfigurationService configService = (MockConfigurationService) node.configService();
-                getUncheckedTimeout(configService.ackFor(3).coordination, 5, TimeUnit.SECONDS);
+                getUncheckedTimeout(configService.ackFor(3).fastPath, 5, TimeUnit.SECONDS);
                 assertEpochRejection(node, keys, 1, false);  // shouldn't have received the sync point preaccept
                 assertEpochRejection(node, keys, 2, false);  // shouldn't have received the sync point preaccept
             });
@@ -251,7 +251,7 @@ public class TopologyChangeTest
                 MockConfigurationService configService = (MockConfigurationService) node.configService();
                 try
                 {
-                    AsyncChains.getUninterruptibly(configService.ackFor(2).coordination, 5, TimeUnit.SECONDS);
+                    AsyncChains.getUninterruptibly(configService.ackFor(2).fastPath, 5, TimeUnit.SECONDS);
                     Assertions.fail("Expected to timeout on node " + node.id());
                 }
                 catch (ExecutionException e)

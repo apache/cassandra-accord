@@ -43,6 +43,8 @@ public interface ShardDistributor
      */
     @Nullable Range splitRange(Range range, int from, int to, int totalSplits);
 
+    int numberOfSplitsPossible(Range range);
+
     class EvenSplit<T> implements ShardDistributor
     {
         public interface Splitter<T>
@@ -69,6 +71,13 @@ public interface ShardDistributor
         {
             this.numberOfShards = numberOfShards;
             this.splitter = splitter;
+        }
+
+        @Override
+        public int numberOfSplitsPossible(Range range)
+        {
+            Splitter<T> splitter = this.splitter.apply(Ranges.of(range));
+            return splitter.min(splitter.sizeOf(range), Integer.MAX_VALUE);
         }
 
         @Override

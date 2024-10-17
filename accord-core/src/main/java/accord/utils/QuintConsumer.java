@@ -15,24 +15,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package accord.utils;
 
-package accord.api;
-
-import java.util.concurrent.TimeUnit;
-
-public interface RequestTimeouts
+public interface QuintConsumer<P1, P2, P3, P4, P5>
 {
-    interface RegisteredTimeout
-    {
-        void cancel();
-    }
-
-    interface Timeout
-    {
-        void timeout();
-        int stripe();
-    }
-
-    RegisteredTimeout register(Timeout timeout, long delay, TimeUnit units);
-    void maybeNotify();
+    void accept(P1 p1, P2 p2, P3 p3, P4 p4, P5 p5);
 }

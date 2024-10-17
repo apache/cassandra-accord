@@ -60,6 +60,7 @@ import accord.utils.MapReduceConsume;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
+import accord.utils.async.Cancellable;
 import org.agrona.collections.Hashing;
 import org.agrona.collections.Int2ObjectHashMap;
 
@@ -402,7 +403,7 @@ public abstract class CommandStores
         return newLocalTopology.epoch() != 1;
     }
 
-    private synchronized TopologyUpdate updateTopology(Node node, Snapshot prev, Topology newTopology, boolean isLoad, boolean startSync)
+    private synchronized TopologyUpdate updateTopology(Node node, Snapshot prev, Topology newTopology, boolean startSync)
     {
         checkArgument(!newTopology.isSubset(), "Use full topology for CommandStores.updateTopology");
 
@@ -451,14 +452,13 @@ public abstract class CommandStores
             // ranges can be empty when ranges are lost or consolidated across epochs.
             if (epoch > 1 && startSync && requiresSync(ranges, prev.global, newTopology))
             {
-                bootstrapUpdates.add(shard.store.sync(node, ranges, epoch, isLoad));
+                bootstrapUpdates.add(shard.store.sync(node, ranges, epoch));
             }
             result.add(shard);
         }
 
         if (!added.isEmpty())
         {
-            // TODO (required): shards must rebalance
             for (Ranges addRanges : shardDistributor.split(added))
             {
                 EpochUpdateHolder updateHolder = new EpochUpdateHolder();
@@ -480,7 +480,7 @@ public abstract class CommandStores
             List<EpochReady> list = bootstrapUpdates.stream().map(Supplier::get).collect(toList());
             return new EpochReady(epoch,
                 AsyncChains.reduce(list.stream().map(b -> b.metadata).collect(toList()), (a, b) -> null).beginAsResult(),
-                AsyncChains.reduce(list.stream().map(b -> b.coordination).collect(toList()), (a, b) -> null).beginAsResult(),
+                AsyncChains.reduce(list.stream().map(b -> b.fastPath).collect(toList()), (a, b) -> null).beginAsResult(),
                 AsyncChains.reduce(list.stream().map(b -> b.data).collect(toList()), (a, b) -> null).beginAsResult(),
                 AsyncChains.reduce(list.stream().map(b -> b.reads).collect(toList()), (a, b) -> null).beginAsResult()
             );
@@ -591,9 +591,9 @@ public abstract class CommandStores
     /**
      * See {@link #mapReduceConsume(PreLoadContext, Routables, long, long, MapReduceConsume)}
      */
-    public <O> void mapReduceConsume(PreLoadContext context, RoutingKey key, long minEpoch, long maxEpoch, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume)
+    public <O> Cancellable mapReduceConsume(PreLoadContext context, RoutingKey key, long minEpoch, long maxEpoch, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume)
     {
-        mapReduceConsume(context, RoutingKeys.of(key), minEpoch, maxEpoch, mapReduceConsume);
+        return mapReduceConsume(context, RoutingKeys.of(key), minEpoch, maxEpoch, mapReduceConsume);
     }
 
     /**
@@ -605,16 +605,16 @@ public abstract class CommandStores
      *
      * Implementations are expected to invoke {@link #mapReduceConsume(PreLoadContext, Routables, long, long, MapReduceConsume)}
      */
-    protected <O> void mapReduceConsume(PreLoadContext context, Routables<?> keys, long minEpoch, long maxEpoch, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume)
+    protected <O> Cancellable mapReduceConsume(PreLoadContext context, Routables<?> keys, long minEpoch, long maxEpoch, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume)
     {
         AsyncChain<O> reduced = mapReduce(context, keys, minEpoch, maxEpoch, mapReduceConsume);
-        reduced.begin(mapReduceConsume);
+        return reduced.begin(mapReduceConsume);
     }
 
-    public  <O> void mapReduceConsume(PreLoadContext context, IntStream commandStoreIds, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume)
+    public  <O> Cancellable mapReduceConsume(PreLoadContext context, IntStream commandStoreIds, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume)
     {
         AsyncChain<O> reduced = mapReduce(context, commandStoreIds, mapReduceConsume);
-        reduced.begin(mapReduceConsume);
+        return reduced.begin(mapReduceConsume);
     }
 
     public <O> AsyncChain<O> mapReduce(PreLoadContext context, Routables<?> keys, long minEpoch, long maxEpoch, MapReduce<? super SafeCommandStore, O> mapReduce)
@@ -667,10 +667,10 @@ public abstract class CommandStores
         return chain == null ? AsyncChains.success(null) : chain;
     }
 
-    public <O> void mapReduceConsume(PreLoadContext context, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume)
+    public <O> Cancellable mapReduceConsume(PreLoadContext context, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume)
     {
         AsyncChain<O> reduced = mapReduce(context, mapReduceConsume);
-        reduced.begin(mapReduceConsume);
+        return reduced.begin(mapReduceConsume);
     }
 
     protected <O> AsyncChain<O> mapReduce(PreLoadContext context, MapReduce<? super SafeCommandStore, O> mapReduce)
@@ -687,9 +687,9 @@ public abstract class CommandStores
         return chain == null ? AsyncChains.success(null) : chain;
     }
 
-    public synchronized Supplier<EpochReady> updateTopology(Node node, Topology newTopology, boolean isLoad, boolean startSync)
+    public synchronized Supplier<EpochReady> updateTopology(Node node, Topology newTopology, boolean startSync)
     {
-        TopologyUpdate update = updateTopology(node, current, newTopology, isLoad, startSync);
+        TopologyUpdate update = updateTopology(node, current, newTopology, startSync);
         current = update.snapshot;
         return update.bootstrap;
     }

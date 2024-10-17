@@ -145,7 +145,9 @@ abstract class HomeState extends WaitingState
         Invariants.checkState(!command.durability().isDurableOrInvalidated(), "Command is durable or invalidated, but we have not cleared the ProgressLog");
 
         ProgressToken maxProgressToken = instance.savedProgressToken(txnId).merge(command);
-        MaybeRecover.maybeRecover(instance.node(), txnId, command.route(), maxProgressToken, invokeHomeCallback(instance, txnId, maxProgressToken, HomeState::recoverCallback));
+
+        CallbackInvoker<ProgressToken, Outcome> invoker = invokeHomeCallback(instance, txnId, maxProgressToken, HomeState::recoverCallback);
+        instance.debugActive(MaybeRecover.maybeRecover(instance.node(), txnId, command.route(), maxProgressToken, invoker), invoker);
         set(safeStore, instance, ReadyToExecute, Querying);
     }
 
@@ -178,7 +180,7 @@ abstract class HomeState extends WaitingState
 
                 if (token.durability.isDurableOrInvalidated())
                 {
-                    state.setHomeDoneAnyMaybeRemove(instance);
+                    state.setHomeDoneAndMaybeRemove(instance);
                 }
                 else
                 {
@@ -197,7 +199,7 @@ abstract class HomeState extends WaitingState
         instance.clearActive(Home, txnId);
     }
 
-    void setHomeDoneAnyMaybeRemove(DefaultProgressLog instance)
+    void setHomeDoneAndMaybeRemove(DefaultProgressLog instance)
     {
         setHomeDone(instance);
         maybeRemove(instance);

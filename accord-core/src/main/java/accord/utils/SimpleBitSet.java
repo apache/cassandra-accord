@@ -66,7 +66,7 @@ public class SimpleBitSet
 
     public SimpleBitSet(SimpleBitSet copy, boolean share)
     {
-        bits = copy.bits.clone();
+        bits = share ? copy.bits : copy.bits.clone();
         count = copy.count;
     }
 
@@ -138,11 +138,9 @@ public class SimpleBitSet
         {
             int count = Long.bitCount(bits[fromIndex] & (-1L << (from & 63)));
             for (int i = fromIndex + 1; i < toIndex ; ++i)
-            {
-                count += 64 - Long.bitCount(bits[i]);
-                bits[i] = -1L;
-            }
-            count += Long.bitCount(bits[toIndex] & -1L >>> (64 - (to & 63)));
+                count += Long.bitCount(bits[i]);
+            if ((to & 63) != 0)
+                count += Long.bitCount(bits[toIndex] & -1L >>> (64 - (to & 63)));
             return count;
         }
     }
@@ -300,7 +298,7 @@ public class SimpleBitSet
 
     public final int nextSetBitBefore(int i, int exclBound, int ifNotFound)
     {
-        int result = nextSetBitInternal(i, upperLimitOf(exclBound), ifNotFound);
+        int result = nextSetBitInternal(i, upperIndexLimitOf(exclBound), ifNotFound);
         return result < exclBound ? result : ifNotFound;
     }
 
@@ -437,7 +435,7 @@ public class SimpleBitSet
         return i >>> 6;
     }
 
-    private int upperLimitOf(int i)
+    private int upperIndexLimitOf(int i)
     {
         int index = (i + 63) >>> 6;
         return Math.min(index, bits.length);

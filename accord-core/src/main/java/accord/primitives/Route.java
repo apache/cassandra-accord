@@ -169,6 +169,7 @@ public interface Route<K extends Unseekable> extends Participants<K>
 
     static <T extends Unseekable> Route<T> merge(@Nullable Route<T> prefer, @Nullable Route<T> defer)
     {
+        if (prefer == defer) return prefer;
         if (defer == null) return prefer;
         if (prefer == null) return defer;
         return prefer.with(defer);

@@ -35,7 +35,7 @@ import accord.api.Scheduler;
 import accord.api.LocalConfig;
 import accord.coordinate.CoordinationAdapter;
 import accord.coordinate.Timeout;
-import accord.impl.DefaultRequestTimeouts;
+import accord.impl.DefaultTimeouts;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.DefaultLocalListeners;
 import accord.impl.progresslog.DefaultProgressLogs;
@@ -183,7 +183,7 @@ public class Main
                           TimeService.ofNonMonotonic(System::currentTimeMillis, TimeUnit.MILLISECONDS),
                           MaelstromStore::new, new ShardDistributor.EvenSplit(8, ignore -> new MaelstromKey.Splitter()),
                           MaelstromAgent.INSTANCE, new DefaultRandom(), scheduler, SizeOfIntersectionSorter.SUPPLIER,
-                          DefaultRemoteListeners::new, DefaultRequestTimeouts::new, DefaultProgressLogs::new, DefaultLocalListeners.Factory::new,
+                          DefaultRemoteListeners::new, DefaultTimeouts::new, DefaultProgressLogs::new, DefaultLocalListeners.Factory::new,
                           InMemoryCommandStores.SingleThread::new, new CoordinationAdapter.DefaultFactory(),
                           DurableBefore.NOOP_PERSISTER, localConfig);
             awaitUninterruptibly(on.unsafeStart());

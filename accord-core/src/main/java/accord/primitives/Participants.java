@@ -45,6 +45,7 @@ public interface Participants<K extends Unseekable> extends Unseekables<K>
      */
     static <K extends Unseekable> Participants<K> merge(Participants<K> left, Participants<K> right)
     {
+        if (left == right) return left;
         if (left == null) return right;
         if (right == null) return left;
         return left.with(right);

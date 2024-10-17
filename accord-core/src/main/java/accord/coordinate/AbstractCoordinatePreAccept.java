@@ -208,7 +208,7 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
         {
             long latestEpoch = executeAtEpoch();
             if (latestEpoch > topologies.currentEpoch()) node.withEpoch(latestEpoch, node.agent(), () -> onPreAcceptedInNewEpoch(topologies, latestEpoch));
-            else onPreAcceptedInNewEpoch(topologies, latestEpoch);
+            else onPreAccepted(topologies);
             return;
         }
 

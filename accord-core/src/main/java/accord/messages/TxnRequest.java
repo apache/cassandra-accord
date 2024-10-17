@@ -20,6 +20,8 @@ package accord.messages;
 
 import java.util.function.BiFunction;
 
+import javax.annotation.Nullable;
+
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.PreLoadContext;
@@ -35,12 +37,13 @@ import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.utils.Invariants;
 import accord.utils.MapReduceConsume;
+import accord.utils.async.Cancellable;
 
 import static accord.utils.Invariants.illegalArgument;
 
-public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduceConsume<SafeCommandStore, R>
+public abstract class TxnRequest<R extends Reply> extends AbstractRequest<R> implements Request, PreLoadContext, MapReduceConsume<SafeCommandStore, R>
 {
-    public static abstract class WithUnsynced<R> extends TxnRequest<R>
+    public static abstract class WithUnsynced<R extends Reply> extends TxnRequest<R>
     {
         public final long minEpoch; // TODO (low priority, clarity): can this just always be TxnId.epoch?
 
@@ -67,13 +70,8 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
         }
     }
 
-    public final TxnId txnId;
     public final Route<?> scope;
     public final long waitForEpoch;
-    // set on receive only
-    protected transient Node node;
-    protected transient Id replyTo;
-    protected transient ReplyContext replyContext;
 
     public ReplyContext replyContext()
     {
@@ -92,8 +90,8 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
 
     public TxnRequest(TxnId txnId, Route<?> scope, long waitForEpoch)
     {
+        super(txnId);
         Invariants.checkState(!scope.isEmpty());
-        this.txnId = txnId;
         this.scope = scope;
         this.waitForEpoch = waitForEpoch;
     }
@@ -118,16 +116,7 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
         return waitForEpoch;
     }
 
-    @Override
-    public void process(Node on, Id replyTo, ReplyContext replyContext)
-    {
-        this.node = on;
-        this.replyTo = replyTo;
-        this.replyContext = replyContext;
-        process();
-    }
-
-    protected abstract void process();
+    protected abstract @Nullable Cancellable submit();
 
     // finds the first topology index that intersects with the node
     protected static int latestRelevantEpochIndex(Node.Id node, Topologies topologies, Routables<?> route)

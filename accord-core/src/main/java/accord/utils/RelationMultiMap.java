@@ -450,30 +450,35 @@ public class RelationMultiMap
             int idIdx = i + startIndex;
             int valueIdx = ids[idIdx];
             valueIdx = SortedArrays.exponentialSearch(values, valueIdx, values.length, find);
-            if (valueIdx < 0)
-                valueIdx = -1 -valueIdx;
-            return normalise(SortedArrays.exponentialSearch(ids, idIdx, endIndex, valueIdx));
+            boolean found = valueIdx >= 0;
+            if (!found) valueIdx = -1 -valueIdx;
+            return normalise(found, SortedArrays.exponentialSearch(ids, idIdx, endIndex, valueIdx));
         }
 
         public int findNext(int i, int valueIdx)
         {
             int idIdx = i + startIndex;
-            return normalise(SortedArrays.exponentialSearch(ids, idIdx, endIndex, valueIdx));
+            return normalise(true, SortedArrays.exponentialSearch(ids, idIdx, endIndex, valueIdx));
         }
 
         @Override
         public int find(Comparable<? super T> find)
         {
             int valueIdx = Arrays.binarySearch(values, 0, values.length, find);
-            if (valueIdx < 0)
-                valueIdx = -1 -valueIdx;
-            // TODO (desired): use interpolation search
-            return normalise(SortedArrays.exponentialSearch(ids, startIndex, endIndex, valueIdx));
+            boolean found = valueIdx >= 0;
+            if (!found) valueIdx = -1 -valueIdx;
+            // TODO (desired): use interpolation search (or binarySearch)
+            return normalise(found, Arrays.binarySearch(ids, startIndex, endIndex, valueIdx));
         }
 
-        private int normalise(int searchResult)
+        private int normalise(boolean foundValue, int searchResult)
         {
-            return searchResult >= 0 ? searchResult - startIndex : searchResult + startIndex;
+            if (searchResult < 0)
+                return searchResult + startIndex;
+
+            searchResult -= startIndex;
+            if (!foundValue) searchResult = -1 - searchResult;
+            return searchResult;
         }
     }
 

@@ -251,7 +251,10 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
                         if (wasEmpty)
                             runNextTask();
                         task.begin(callback);
-                        return () -> pending.remove(task);
+                        return () -> {
+                            if (pending.peek() != task)
+                                pending.remove(task);
+                        };
                     }
                 };
             }

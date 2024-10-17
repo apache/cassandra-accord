@@ -23,6 +23,7 @@ import java.util.AbstractList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.List;
 import java.util.function.IntBinaryOperator;
 import java.util.function.IntFunction;
 import java.util.function.Predicate;
@@ -107,6 +108,15 @@ public class SortedArrays
         public boolean containsAll(SortedArrayList<T> test)
         {
             return isSubset(Comparable::compareTo, test.array, 0, test.array.length, array, 0, array.length);
+        }
+
+        public List<T> reverse()
+        {
+            return new AbstractList<T>()
+            {
+                @Override public T get(int index) { return array[array.length - (1 + index)]; }
+                @Override public int size() { return array.length; }
+            };
         }
 
         public T[] backingArrayUnsafe()

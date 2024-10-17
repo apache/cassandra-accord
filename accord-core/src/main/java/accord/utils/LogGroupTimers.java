@@ -103,6 +103,7 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
             if (contains(deadline))
                 return false;
 
+            timer.heapIndex = -1;
             owner.addInternal(deadline, timer);
             return true;
         }

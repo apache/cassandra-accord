@@ -42,6 +42,7 @@ import accord.primitives.Unseekables;
 import accord.primitives.Writes;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
+import accord.utils.async.Cancellable;
 
 public class Apply extends TxnRequest<ApplyReply>
 {
@@ -144,9 +145,9 @@ public class Apply extends TxnRequest<ApplyReply>
     }
 
     @Override
-    public void process()
+    public Cancellable submit()
     {
-        node.mapReduceConsumeLocal(this, minEpoch(txnId), executeAt.epoch(), this);
+        return node.mapReduceConsumeLocal(this, minEpoch(txnId), executeAt.epoch(), this);
     }
 
     private long minEpoch(TxnId txnId)
@@ -196,12 +197,6 @@ public class Apply extends TxnRequest<ApplyReply>
     }
 
     @Override
-    public void accept(ApplyReply reply, Throwable failure)
-    {
-        node.reply(replyTo, replyContext, reply, failure);
-    }
-
-    @Override
     public TxnId primaryTxnId()
     {
         return txnId;
@@ -216,7 +211,7 @@ public class Apply extends TxnRequest<ApplyReply>
     @Override
     public KeyHistory keyHistory()
     {
-        return KeyHistory.COMMANDS;
+        return KeyHistory.ASYNC;
     }
 
     @Override

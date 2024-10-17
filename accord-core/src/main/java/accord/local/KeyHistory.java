@@ -24,13 +24,31 @@ package accord.local;
  */
 public enum KeyHistory
 {
+    // TODO (required): deprecate
     TIMESTAMPS,
-    COMMANDS,
-    RECOVERY,
-    NONE;
 
-    public boolean isNone()
-    {
-        return this == NONE;
-    }
+    /**
+     * This command will likely need to use the provided keys, but can be processed before they are loaded;
+     * any work touching keys not loaded will be submitted as a follow-up INCR or SYNC command.
+     */
+    ASYNC,
+
+    /**
+     * Load and process the requested keys incrementally; the operation will be invoked multiples times
+     * as keys are loaded, until all the keys have been processed. The keys to be processed must be loaded
+     * into memory
+     */
+    INCR,
+
+    /**
+     * Load all keys into memory before processing the command.
+     */
+    SYNC,
+
+    /**
+     * Load recovery information for all keys into memory before processing the command.
+     */
+    RECOVER,
+
+    NONE
 }

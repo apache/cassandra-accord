@@ -81,7 +81,7 @@ public class TimestampsForKeys
     }
 
     @VisibleForImplementation
-    public static <D> TimestampsForKey updateLastExecutionTimestamps(AbstractSafeCommandStore<?,?,?> safeStore, RoutingKey key, TxnId txnId, Timestamp executeAt, boolean isForWriteTxn)
+    public static <D> TimestampsForKey updateLastExecutionTimestamps(SafeCommandStore safeStore, RoutingKey key, TxnId txnId, Timestamp executeAt, boolean isForWriteTxn)
     {
         return updateLastExecutionTimestamps(safeStore, safeStore.timestampsForKey(key), txnId, executeAt, isForWriteTxn);
     }

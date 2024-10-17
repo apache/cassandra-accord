@@ -29,8 +29,8 @@ import javax.annotation.Nullable;
 import accord.api.LocalListeners;
 import accord.api.ProgressLog.BlockedUntil;
 import accord.api.RemoteListeners;
-import accord.api.RequestTimeouts;
-import accord.api.RequestTimeouts.RegisteredTimeout;
+import accord.api.Timeouts;
+import accord.api.Timeouts.RegisteredTimeout;
 import accord.local.Command;
 import accord.local.Commands;
 import accord.local.Node;
@@ -49,7 +49,7 @@ import accord.utils.Invariants;
 import accord.utils.MapReduceConsume;
 
 import static accord.messages.TxnRequest.computeScope;
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.MICROSECONDS;
 
 /**
  * Contact a replica to perform a synchronous or asynchronous wait on some condition for a transaction + some keys.
@@ -59,7 +59,7 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
  *
  * TODO (desired): return an OK message indicating we're waiting synchronously
  */
-public class Await implements Request, MapReduceConsume<SafeCommandStore, Void>, PreLoadContext, LocalListeners.ComplexListener, RequestTimeouts.Timeout
+public class Await implements Request, MapReduceConsume<SafeCommandStore, Void>, PreLoadContext, LocalListeners.ComplexListener, Timeouts.Timeout
 {
     public static class SerializerSupport
     {
@@ -194,10 +194,13 @@ public class Await implements Request, MapReduceConsume<SafeCommandStore, Void>,
             int waitingOn = synchronouslyWaitingOnUpdater.decrementAndGet(this);
             if (waitingOn >= 0)
             {
-                long replyTimeout = node.agent().replyTimeout(replyContext, MILLISECONDS);
-                timeout = node.requestTimeouts().register(this, replyTimeout, MILLISECONDS);
-                if (-1 == synchronouslyWaitingOn)
-                    timeout.cancel(); // we could leave a dangling timeout in this rare race condition
+                long expiresAtMicros = node.agent().expiresAt(replyContext, MICROSECONDS);
+                if (expiresAtMicros > 0)
+                {
+                    timeout = node.timeouts().registerAt(this, expiresAtMicros, MICROSECONDS);
+                    if (-1 == synchronouslyWaitingOn)
+                        timeout.cancel(); // we could leave a dangling timeout in this rare race condition
+                }
             }
             else
             {

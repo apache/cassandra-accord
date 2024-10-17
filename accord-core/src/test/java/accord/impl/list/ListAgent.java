@@ -150,12 +150,6 @@ public class ListAgent implements Agent
     }
 
     @Override
-    public long replyTimeout(ReplyContext replyContext, TimeUnit units)
-    {
-        return units.convert(timeoutDelays.getAsInt(), MILLISECONDS);
-    }
-
-    @Override
     public long attemptCoordinationDelay(Node node, SafeCommandStore safeStore, TxnId txnId, TimeUnit units, int retryCount)
     {
         // TODO (required): meta randomise
@@ -174,6 +168,14 @@ public class ListAgent implements Agent
         int retryDelay = Math.min(16, 1 << retryCount);
         return units.convert(retryDelay, SECONDS);
     }
+
+    @Override
+    public long expiresAt(ReplyContext replyContext, TimeUnit unit)
+    {
+        // TODO (required): implement this (add it to the replyContext)
+        return -1;
+    }
+
 
     public boolean collectMaxApplied()
     {

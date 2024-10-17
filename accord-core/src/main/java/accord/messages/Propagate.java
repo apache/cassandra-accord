@@ -22,7 +22,6 @@ import accord.api.RoutingKey;
 import accord.coordinate.FetchData.FetchResult;
 import accord.local.Command;
 import accord.local.Commands;
-import accord.local.KeyHistory;
 import accord.local.Node;
 import accord.local.PreLoadContext;
 import accord.local.RedundantStatus;
@@ -166,19 +165,6 @@ public class Propagate implements PreLoadContext, MapReduceConsume<SafeCommandSt
     public TxnId primaryTxnId()
     {
         return txnId;
-    }
-
-    @Override
-    public Unseekables<?> keys()
-    {
-        // TODO (required): confirm this includes Route
-        return propagateTo;
-    }
-
-    @Override
-    public KeyHistory keyHistory()
-    {
-        return KeyHistory.COMMANDS;
     }
 
     @Override

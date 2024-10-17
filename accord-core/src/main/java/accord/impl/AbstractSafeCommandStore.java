@@ -44,7 +44,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
         this.context = context;
     }
 
-    private static <K, V> V getIfLoaded(K key, Function<K, V> get, Consumer<V> add, Function<K, V> getIfLoaded)
+    private static <K, V> V getIfLoadedUnsafe(K key, Function<K, V> get, Consumer<V> add, Function<K, V> getIfLoaded)
     {
         V value = get.apply(key);
         if (value != null)
@@ -57,22 +57,22 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
         return value;
     }
 
-    protected abstract CommandType getCommandInternal(TxnId txnId);
-    protected abstract void addCommandInternal(CommandType command);
-    protected abstract CommandType getIfLoaded(TxnId txnId);
+    protected abstract CommandType getCommandUnsafe(TxnId txnId);
+    protected abstract void addCommandUnsafe(CommandType command);
+    protected abstract CommandType getIfLoadedUnsafe(TxnId txnId);
 
-    protected abstract TimestampsForKeyType getTimestampsForKeyInternal(RoutingKey key);
-    protected abstract void addTimestampsForKeyInternal(TimestampsForKeyType cfk);
-    protected abstract TimestampsForKeyType getTimestampsForKeyIfLoaded(RoutingKey key);
+    protected abstract TimestampsForKeyType getTimestampsForKeyUnsafe(RoutingKey key);
+    protected abstract void addTimestampsForKeyUnsafe(TimestampsForKeyType cfk);
+    protected abstract TimestampsForKeyType getTimestampsForKeyIfUnsafe(RoutingKey key);
 
-    protected abstract CommandsForKeyType getCommandsForKeyInternal(RoutingKey key);
-    protected abstract void addCommandsForKeyInternal(CommandsForKeyType cfk);
-    protected abstract CommandsForKeyType getCommandsForKeyIfLoaded(RoutingKey key);
+    protected abstract CommandsForKeyType getCommandsForKeyUnsafe(RoutingKey key);
+    protected abstract void addCommandsForKeyUnsafe(CommandsForKeyType cfk);
+    protected abstract CommandsForKeyType getCommandsForKeyIfUnsafe(RoutingKey key);
 
     @Override
-    protected CommandType getInternalIfLoadedAndInitialised(TxnId txnId)
+    protected CommandType ifLoadedAndInitialisedAndNotErasedInternal(TxnId txnId)
     {
-        CommandType command = getIfLoaded(txnId, this::getCommandInternal, this::addCommandInternal, this::getIfLoaded);
+        CommandType command = getIfLoadedUnsafe(txnId, this::getCommandUnsafe, this::addCommandUnsafe, this::getIfLoadedUnsafe);
         if (command == null || command.isUnset())
             return null;
         return command;
@@ -81,43 +81,29 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
     @Override
     public CommandType getInternal(TxnId txnId)
     {
-        CommandType command = getCommandInternal(txnId);
-        if (command == null)
-            throw illegalState(format("%s was not specified in PreLoadContext", txnId));
-        if (command.isUnset())
-            command.uninitialised();
-        return command;
+        return getCommandUnsafe(txnId);
     }
 
-    private CommandsForKeyType getCommandsIfLoaded(RoutingKey key)
+    private CommandsForKeyType getCommandsIfLoadedUnsafe(RoutingKey key)
     {
-        return getIfLoaded(key, this::getCommandsForKeyInternal, this::addCommandsForKeyInternal, this::getCommandsForKeyIfLoaded);
+        return getIfLoadedUnsafe(key, this::getCommandsForKeyUnsafe, this::addCommandsForKeyUnsafe, this::getCommandsForKeyIfUnsafe);
     }
 
-    protected CommandsForKeyType getInternalIfLoadedAndInitialised(RoutingKey key)
+    protected CommandsForKeyType ifLoadedInternal(RoutingKey key)
     {
-        CommandsForKeyType cfk = getCommandsIfLoaded(key);
-        if (cfk == null)
-            return null;
-        if (cfk.isUnset())
-            cfk.initialize();
-        return cfk;
+        return getCommandsIfLoadedUnsafe(key);
     }
 
     @VisibleForTesting
     protected CommandsForKeyType getInternal(RoutingKey key)
     {
-        CommandsForKeyType cfk = getCommandsIfLoaded(key);
-        Invariants.checkState(cfk != null, "%s was not specified in PreLoadContext", key);
-        if (cfk.isUnset())
-            cfk.initialize();
-        return cfk;
+        return getCommandsIfLoadedUnsafe(key);
     }
 
     @VisibleForImplementation
     public CommandsForKeyType maybeCommandsForKey(RoutingKey key)
     {
-        CommandsForKeyType cfk = getCommandsIfLoaded(key);
+        CommandsForKeyType cfk = getCommandsIfLoadedUnsafe(key);
         if (cfk == null || cfk.isUnset())
             return null;
         return cfk;
@@ -125,7 +111,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
 
     public TimestampsForKeyType timestampsIfLoadedAndInitialised(RoutingKey key)
     {
-        TimestampsForKeyType cfk = getIfLoaded(key, this::getTimestampsForKeyInternal, this::addTimestampsForKeyInternal, this::getTimestampsForKeyIfLoaded);
+        TimestampsForKeyType cfk = getIfLoadedUnsafe(key, this::getTimestampsForKeyUnsafe, this::addTimestampsForKeyUnsafe, this::getTimestampsForKeyIfUnsafe);
         if (cfk == null)
             return null;
         if (cfk.isUnset())
@@ -137,7 +123,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
 
     public TimestampsForKeyType timestampsForKey(RoutingKey key)
     {
-        TimestampsForKeyType tfk = getIfLoaded(key, this::getTimestampsForKeyInternal, this::addTimestampsForKeyInternal, this::getTimestampsForKeyIfLoaded);
+        TimestampsForKeyType tfk = getIfLoadedUnsafe(key, this::getTimestampsForKeyUnsafe, this::addTimestampsForKeyUnsafe, this::getTimestampsForKeyIfUnsafe);
         Invariants.checkState(tfk != null, "%s was not specified in PreLoadContext", key);
         if (tfk.isUnset())
             tfk.initialize();
@@ -148,17 +134,22 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
     @VisibleForImplementation
     public TimestampsForKeyType maybeTimestampsForKey(RoutingKey key)
     {
-        TimestampsForKeyType tfk = getIfLoaded(key, this::getTimestampsForKeyInternal, this::addTimestampsForKeyInternal, this::getTimestampsForKeyIfLoaded);
+        TimestampsForKeyType tfk = getIfLoadedUnsafe(key, this::getTimestampsForKeyUnsafe, this::addTimestampsForKeyUnsafe, this::getTimestampsForKeyIfUnsafe);
         if (tfk == null || tfk.isUnset())
             return null;
         return tfk;
     }
 
     @Override
-    public boolean canExecuteWith(PreLoadContext context)
+    public PreLoadContext context()
     {
-        // TODO (required): check if data is in cache, and if so simply add it to our context
-        return context.isSubsetOf(this.context);
+        return this.context;
+    }
+
+    @Override
+    public PreLoadContext canExecute(PreLoadContext context)
+    {
+        return context.isSubsetOf(this.context) ? context : null;
     }
 
     public void postExecute()

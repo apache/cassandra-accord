@@ -23,6 +23,7 @@ import accord.api.Data;
 import accord.local.Command;
 import accord.local.Commands;
 import accord.local.Node.Id;
+import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.StoreParticipants;
@@ -38,7 +39,10 @@ import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
+import accord.utils.Invariants;
+import org.agrona.collections.IntHashSet;
 
+import static accord.local.Commands.eraseEphemeralRead;
 import static accord.messages.TxnRequest.computeScope;
 import static accord.messages.TxnRequest.latestRelevantEpochIndex;
 
@@ -54,9 +58,9 @@ public class ReadEphemeralTxnData extends ReadData
 
     private static final ExecuteOn EXECUTE_ON = new ExecuteOn(SaveStatus.ReadyToExecute, SaveStatus.Applied);
 
-    public final @Nonnull PartialTxn partialTxn;
-    public final @Nonnull PartialDeps partialDeps;
-    public final @Nonnull FullRoute<?> route; // TODO (desired): should be unnecessary, only included to not breach Stable command validations
+    private PartialTxn partialTxn;
+    private PartialDeps partialDeps;
+    private FullRoute<?> route; // TODO (desired): should be unnecessary, only included to not breach Stable command validations
 
     public ReadEphemeralTxnData(Id to, Topologies topologies, TxnId txnId, Participants<?> readScope, long executeAtEpoch, @Nonnull Txn txn, @Nonnull Deps deps, @Nonnull FullRoute<?> route)
     {
@@ -71,6 +75,7 @@ public class ReadEphemeralTxnData extends ReadData
     private ReadEphemeralTxnData(TxnId txnId, Participants<?> readScope, Route<?> scope, long executeAtEpoch, @Nonnull Txn txn, @Nonnull Deps deps, @Nonnull FullRoute<?> route)
     {
         super(txnId, readScope.intersecting(scope), executeAtEpoch);
+        Invariants.checkState(executeAtEpoch == txnId.epoch());
         this.route = route;
         this.partialTxn = txn.intersecting(scope, false);
         this.partialDeps = deps.intersecting(scope);
@@ -79,6 +84,7 @@ public class ReadEphemeralTxnData extends ReadData
     public ReadEphemeralTxnData(TxnId txnId, Participants<?> readScope, long executeAtEpoch, @Nonnull PartialTxn partialTxn, @Nonnull PartialDeps partialDeps, @Nonnull FullRoute<?> route)
     {
         super(txnId, readScope, executeAtEpoch);
+        Invariants.checkState(executeAtEpoch == txnId.epoch());
         this.partialTxn = partialTxn;
         this.partialDeps = partialDeps;
         this.route = route;
@@ -87,8 +93,32 @@ public class ReadEphemeralTxnData extends ReadData
     @Override
     protected synchronized CommitOrReadNack apply(SafeCommandStore safeStore, SafeCommand safeCommand, StoreParticipants participants)
     {
-        Commands.ephemeralRead(safeStore, safeCommand, route, txnId, partialTxn, partialDeps, executeAtEpoch);
+        Commands.ephemeralRead(safeStore, safeCommand, route, txnId, partialTxn, partialDeps);
         return super.apply(safeStore, safeCommand, participants);
+    }
+
+    public final PartialTxn partialTxn()
+    {
+        return partialTxn;
+    }
+
+    public final PartialDeps partialDeps()
+    {
+        return partialDeps;
+    }
+
+    public final FullRoute<?> route()
+    {
+        return route;
+    }
+
+    @Override
+    public void accept(CommitOrReadNack reply, Throwable failure)
+    {
+        super.accept(reply, failure);
+        partialTxn = null;
+        partialDeps = null;
+        route = null;
     }
 
     @Override
@@ -137,6 +167,21 @@ public class ReadEphemeralTxnData extends ReadData
         return 0;
     }
 
+    @Override
+    public void timeout()
+    {
+        synchronized (this)
+        {
+            IntHashSet.IntIterator iter = waitingOn.iterator();
+            while (iter.hasNext())
+            {
+                node.commandStores().forId(iter.nextValue())
+                    .execute(PreLoadContext.empty(), safeStore -> eraseEphemeralRead(safeStore, txnId))
+                    .begin(node.agent());
+            }
+        }
+        super.timeout();
+    }
 
     @Override
     protected ReadOk constructReadOk(Ranges unavailable, Data data)

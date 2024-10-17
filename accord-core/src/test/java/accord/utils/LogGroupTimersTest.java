@@ -152,7 +152,7 @@ public class LogGroupTimersTest
                 {
                     Timer first = canonical.first();
                     Assertions.assertTrue(test.wakeAt() <= first.deadline);
-                    Assertions.assertTrue(test.wakeAt() >= test.curEpoch);
+                    Assertions.assertTrue(test.wakeAt() >= Math.min(test.curEpoch, test.buckets[test.bucketsStart].epoch));
                 }
 
                 if (rnd.decide(readChance))
@@ -162,7 +162,7 @@ public class LogGroupTimersTest
                 {
                     Timer first = canonical.first();
                     Assertions.assertTrue(test.wakeAt() <= first.deadline);
-                    Assertions.assertTrue(test.wakeAt() >= test.curEpoch);
+                    Assertions.assertTrue(test.wakeAt() >= Math.min(test.curEpoch, test.buckets[test.bucketsStart].epoch));
                 }
             }
 

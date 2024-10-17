@@ -40,7 +40,7 @@ import accord.utils.Invariants;
 import accord.utils.SortedArrays;
 import accord.utils.btree.BTree;
 
-import static accord.local.KeyHistory.COMMANDS;
+import static accord.local.KeyHistory.SYNC;
 import static accord.local.cfk.CommandsForKey.InternalStatus.APPLIED;
 import static accord.local.cfk.CommandsForKey.InternalStatus.INVALID_OR_TRUNCATED_OR_PRUNED;
 import static accord.local.cfk.CommandsForKey.InternalStatus.STABLE;
@@ -91,10 +91,10 @@ abstract class PostProcess
             for (TxnId txnId : load)
             {
                 safeStore = safeStore; // make it unsafe for use in lambda
-                SafeCommand safeCommand = safeStore.ifLoadedAndInitialised(txnId);
+                SafeCommand safeCommand = safeStore.ifLoadedAndInitialisedAndNotErased(txnId);
                 if (safeCommand != null) load(safeStore, safeCommand, safeCfk, notifySink);
                 else
-                    safeStore.commandStore().execute(PreLoadContext.contextFor(txnId, RoutingKeys.of(key), COMMANDS), safeStore0 -> {
+                    safeStore.commandStore().execute(PreLoadContext.contextFor(txnId, RoutingKeys.of(key), SYNC), safeStore0 -> {
                         load(safeStore0, safeStore0.unsafeGet(txnId), safeStore0.get(key), notifySink);
                     }).begin(safeStore.agent());
             }
@@ -196,7 +196,7 @@ abstract class PostProcess
             List<PostProcess> nestedNotify = new ArrayList<>();
             for (TxnId txnId : notify)
             {
-                SafeCommand safeCommand = safeStore.ifLoadedAndInitialised(txnId);
+                SafeCommand safeCommand = safeStore.ifLoadedAndInitialisedAndNotErased(txnId);
                 if (safeCommand != null)
                 {
                     CommandsForKeyUpdate update = updateUnmanaged(cfk, safeCommand, UPDATE, addUnmanageds);

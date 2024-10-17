@@ -57,6 +57,7 @@ public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node
      */
     protected void append(N node)
     {
+        Invariants.checkState(node.heapIndex < 0);
         if (size == heap.length)
             heap = Arrays.copyOf(heap, Math.max(size * 2, 8));
 
@@ -78,13 +79,19 @@ public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node
         else siftUp(node, index);
     }
 
+    protected boolean contains(N node)
+    {
+        int i = node.heapIndex;
+        return i >= 0 && i < size && heap[i] == node;
+    }
+
     /**
      * remove; can be used as a simple list
      */
     protected void remove(N node)
     {
         int i = node.heapIndex;
-        Invariants.checkArgument(heap[i] == node);
+        Invariants.checkArgument(i >= 0 && i < heap.length && heap[i] == node);
         if (size > 1)
         {
             N tail = (N) heap[--size];
@@ -137,12 +144,15 @@ public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node
         else siftDown(with, i);
     }
 
-    private void replaceHead()
+    protected void replaceHead()
     {
         --size;
         --heapifiedSize;
         if (size == 0)
+        {
+            heap[0] = null;
             return;
+        }
 
         N siftDown = (N) heap[size];
         heap[size] = null;
@@ -152,7 +162,7 @@ public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node
     /**
      * {@code i} is a free position in the heap, siftDown must be safely inserted at a position >= i
      */
-    private void siftDown(N siftDown, int i)
+    protected void siftDown(N siftDown, int i)
     {
         while (true)
         {

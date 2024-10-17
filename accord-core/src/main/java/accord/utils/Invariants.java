@@ -18,6 +18,7 @@
 
 package accord.utils;
 
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import javax.annotation.Nullable;
@@ -85,6 +86,11 @@ public class Invariants
     public static IllegalArgumentException illegalArgument(String msg)
     {
         throw new IllegalArgumentException(msg);
+    }
+
+    public static IllegalArgumentException illegalArgument(String fmt, Object ... args)
+    {
+        throw new IllegalArgumentException(String.format(fmt, args));
     }
 
     private static IllegalArgumentException illegalArgument()
@@ -165,10 +171,35 @@ public class Invariants
             throw illegalState(format(fmt, p1));
     }
 
+    public static <P> void checkState(boolean condition, String fmt, @Nullable P p1, Function<? super P, ?> transformP)
+    {
+        if (!condition)
+            throw illegalState(format(fmt, transformP.apply(p1)));
+    }
+
     public static void checkState(boolean condition, String fmt, @Nullable Object p1, @Nullable Object p2)
     {
         if (!condition)
             throw illegalState(format(fmt, p1, p2));
+    }
+
+    public static <P> void checkState(boolean condition, String fmt, @Nullable Object p1, @Nullable P p2, Function<? super P, ?> transformP2)
+    {
+        if (!condition)
+            throw illegalState(format(fmt, p1, transformP2.apply(p2)));
+    }
+
+
+    public static void checkState(boolean condition, String fmt, @Nullable Object p1, @Nullable Object p2, @Nullable Object p3)
+    {
+        if (!condition)
+            throw illegalState(format(fmt, p1, p2, p3));
+    }
+
+    public static <P> void checkState(boolean condition, String fmt, @Nullable Object p1, @Nullable Object p2, @Nullable P p3, Function<? super P, Object> transformP3)
+    {
+        if (!condition)
+            throw illegalState(format(fmt, p1, p2, transformP3.apply(p3)));
     }
 
     public static void checkState(boolean condition, String fmt, Object... args)

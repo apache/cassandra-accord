@@ -50,6 +50,7 @@ import accord.impl.DefaultLocalListeners;
 import accord.impl.DefaultLocalListeners.DefaultNotifySink;
 import accord.impl.DefaultRemoteListeners;
 import accord.impl.IntKey;
+import accord.impl.SafeTimestampsForKey;
 import accord.local.Command;
 import accord.local.Command.AbstractCommand;
 import accord.local.CommandStore;
@@ -718,7 +719,7 @@ public class CommandsForKeyTest
         }
 
         @Override
-        protected SafeCommand getInternalIfLoadedAndInitialised(TxnId txnId)
+        protected SafeCommand ifLoadedAndInitialisedAndNotErasedInternal(TxnId txnId)
         {
             return getInternal(txnId);
         }
@@ -756,7 +757,7 @@ public class CommandsForKeyTest
         }
 
         @Override
-        public SafeCommand ifLoadedAndInitialised(TxnId txnId)
+        public SafeCommand ifLoadedAndInitialisedAndNotErased(TxnId txnId)
         {
             if (txnId.compareTo(cfk.current.prunedBefore()) < 0)
                 return null;
@@ -776,7 +777,7 @@ public class CommandsForKeyTest
         }
 
         @Override
-        protected SafeCommandsForKey getInternalIfLoadedAndInitialised(RoutingKey key)
+        protected SafeCommandsForKey ifLoadedInternal(RoutingKey key)
         {
             if (key.equals(cfk.key()))
                 return cfk;
@@ -784,9 +785,21 @@ public class CommandsForKeyTest
         }
 
         @Override
-        public boolean canExecuteWith(PreLoadContext context)
+        public SafeTimestampsForKey timestampsForKey(RoutingKey key)
         {
-            return true;
+            return null;
+        }
+
+        @Override
+        public PreLoadContext canExecute(PreLoadContext context)
+        {
+            return context;
+        }
+
+        @Override
+        public PreLoadContext context()
+        {
+            return null;
         }
 
         @Override
@@ -1044,12 +1057,6 @@ public class CommandsForKeyTest
         }
 
         @Override
-        public long replyTimeout(ReplyContext replyContext, TimeUnit units)
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
         public long attemptCoordinationDelay(Node node, SafeCommandStore safeStore, TxnId txnId, TimeUnit units, int retryCount)
         {
             return 0;
@@ -1063,6 +1070,12 @@ public class CommandsForKeyTest
 
         @Override
         public long retryAwaitTimeout(Node node, SafeCommandStore safeStore, TxnId txnId, int retryCount, BlockedUntil retrying, TimeUnit units)
+        {
+            return 0;
+        }
+
+        @Override
+        public long expiresAt(ReplyContext replyContext, TimeUnit unit)
         {
             return 0;
         }

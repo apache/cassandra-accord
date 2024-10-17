@@ -16,17 +16,26 @@
  * limitations under the License.
  */
 
-package accord.local;
+package accord.api;
 
-import accord.api.Timeouts;
-import accord.primitives.Timestamp;
+import java.util.concurrent.TimeUnit;
 
-public interface NodeCommandStoreService extends TimeService
+import accord.utils.async.Cancellable;
+
+public interface Timeouts
 {
-    long epoch();
-    Node.Id id();
-    Timeouts timeouts();
-    DurableBefore durableBefore();
-    Timestamp uniqueNow();
-    Timestamp uniqueNow(Timestamp atLeast);
+    interface Timeout
+    {
+        void timeout();
+        int stripe();
+    }
+
+    interface RegisteredTimeout extends Cancellable
+    {
+        void cancel();
+    }
+
+    RegisteredTimeout registerWithDelay(Timeout timeout, long delay, TimeUnit units);
+    RegisteredTimeout registerAt(Timeout timeout, long deadline, TimeUnit units);
+    void maybeNotify();
 }

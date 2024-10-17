@@ -33,7 +33,6 @@ import accord.api.RoutingKey;
 import accord.api.VisibleForImplementation;
 import accord.impl.CommandsSummary;
 import accord.local.Command;
-import accord.local.CommandStore;
 import accord.local.RedundantBefore;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
@@ -208,7 +207,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
     private static boolean reportLinearizabilityViolations = true;
     private static final boolean ELIDE_TRANSITIVE_DEPENDENCIES = true;
 
-    public static final RedundantBefore.Entry NO_BOUNDS_INFO = new RedundantBefore.Entry(null, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE, null);
+    public static final RedundantBefore.Entry NO_BOUNDS_INFO = new RedundantBefore.Entry(null, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE, null);
     public static final TxnInfo NO_INFO = TxnInfo.create(TxnId.NONE, HISTORICAL, false, TxnId.NONE, Ballot.ZERO);
     public static final TxnInfo[] NO_INFOS = new TxnInfo[0];
     public static final Unmanaged[] NO_PENDING_UNMANAGED = new Unmanaged[0];
@@ -1665,9 +1664,6 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             return new CommandsForKeyUpdateWithPostProcess(newCfk, newPostProcess);
         }
 
-        if (CommandStore.current().toString().equals("DelayedCommandStore{id=33,node=5}") && key.toString().equals("393#12078"))
-            System.out.println();
-
         TxnInfo[] newById = pruneById(byId, boundsInfo, newBoundsInfo);
         int newPrunedBeforeById = prunedBeforeId(newById, prunedBefore(), redundantBefore(newBoundsInfo));
         Object[] newLoadingPruned = Pruning.removeRedundantLoadingPruned(loadingPruned, redundantBefore(newBoundsInfo));
@@ -1700,6 +1696,11 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
     public CommandsForKey maybePrune(int pruneInterval, long minHlcDelta)
     {
         return Pruning.maybePrune(this, pruneInterval, minHlcDelta);
+    }
+
+    public CommandsForKey maximalPrune()
+    {
+        return Pruning.maybePrune(this, 0, 0);
     }
 
     int insertPos(Timestamp timestamp)
@@ -1916,6 +1917,11 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 }
             }
         }
+    }
+
+    public boolean isEmpty()
+    {
+        return byId.length == 0 && unmanageds.length == 0;
     }
 
     public static boolean reportLinearizabilityViolations()

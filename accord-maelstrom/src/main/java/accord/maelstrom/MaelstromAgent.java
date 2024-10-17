@@ -121,9 +121,9 @@ public class MaelstromAgent implements Agent
     }
 
     @Override
-    public long replyTimeout(ReplyContext replyContext, TimeUnit units)
+    public long expiresAt(ReplyContext replyContext, TimeUnit units)
     {
-        return units.convert(1L, SECONDS);
+        return -1;
     }
 
     @Override

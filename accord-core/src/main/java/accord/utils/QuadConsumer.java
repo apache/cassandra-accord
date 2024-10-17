@@ -15,18 +15,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package accord.utils;
 
-package accord.local;
-
-import accord.api.Timeouts;
-import accord.primitives.Timestamp;
-
-public interface NodeCommandStoreService extends TimeService
+public interface QuadConsumer<P1, P2, P3, P4>
 {
-    long epoch();
-    Node.Id id();
-    Timeouts timeouts();
-    DurableBefore durableBefore();
-    Timestamp uniqueNow();
-    Timestamp uniqueNow(Timestamp atLeast);
+    void accept(P1 p1, P2 p2, P3 p3, P4 p4);
 }

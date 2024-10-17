@@ -149,12 +149,6 @@ public class TestAgent implements Agent
     }
 
     @Override
-    public long replyTimeout(ReplyContext replyContext, TimeUnit units)
-    {
-        return units.convert(1L, SECONDS);
-    }
-
-    @Override
     public long attemptCoordinationDelay(Node node, SafeCommandStore safeStore, TxnId txnId, TimeUnit units, int retryCount)
     {
         return units.convert(1L, SECONDS);
@@ -170,5 +164,11 @@ public class TestAgent implements Agent
     public long retryAwaitTimeout(Node node, SafeCommandStore safeStore, TxnId txnId, int retryCount, ProgressLog.BlockedUntil retrying, TimeUnit units)
     {
         return units.convert(1L, SECONDS);
+    }
+
+    @Override
+    public long expiresAt(ReplyContext replyContext, TimeUnit unit)
+    {
+        return 0;
     }
 }

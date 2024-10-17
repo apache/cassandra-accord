@@ -150,6 +150,7 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
         public void receive(Topology topology)
         {
             long epoch = topology.epoch();
+            logger.debug("Receiving epoch {}", epoch);
             Invariants.checkState(lastReceived == epoch - 1 || epoch == 0 || lastReceived == 0,
                                   "Epoch %d != %d + 1", epoch, lastReceived);
             lastReceived = epoch;
@@ -171,6 +172,7 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
         public void acknowledge(EpochReady ready)
         {
             long epoch = ready.epoch;
+            logger.debug("Acknowledging epoch {}", epoch);
             Invariants.checkState(lastAcknowledged == epoch - 1 || epoch == 0 || lastAcknowledged == 0,
                                   "Epoch %d != %d + 1", epoch, lastAcknowledged);
             lastAcknowledged = epoch;
@@ -256,7 +258,7 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
                 epochs.acknowledge(ready);
             }
         });
-        ready.coordination.addCallback(() ->  {
+        ready.fastPath.addCallback(() ->  {
             synchronized (AbstractConfigurationService.this)
             {
                 localSyncComplete(epochs.getOrCreate(ready.epoch).topology, startSync);
@@ -275,6 +277,7 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
 
         if (lastReceived > 0 && topology.epoch() > lastReceived + 1)
         {
+            logger.debug("Epoch {} received; waiting to receive {} before reporting", topology.epoch(), lastReceived + 1);
             fetchTopologyForEpoch(lastReceived + 1);
             epochs.receiveFuture(lastReceived + 1).addCallback(() -> reportTopology(topology, startSync, isLoad));
             return;
@@ -283,15 +286,16 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
         long lastAcked = epochs.lastAcknowledged;
         if (lastAcked == 0 && lastReceived > 0)
         {
+            logger.debug("Epoch {} received; waiting for {} to ack before reporting", topology.epoch(), epochs.minEpoch());
             epochs.acknowledgeFuture(epochs.minEpoch()).addCallback(() -> reportTopology(topology, startSync, isLoad));
             return;
         }
         if (lastAcked > 0 && topology.epoch() > lastAcked + 1)
         {
+            logger.debug("Epoch {} received; waiting for {} to ack before reporting", topology.epoch(), lastAcked + 1);
             epochs.acknowledgeFuture(lastAcked + 1).addCallback(() -> reportTopology(topology, startSync, isLoad));
             return;
         }
-        logger.trace("Epoch {} received by {}", topology.epoch(), localId);
 
         epochs.receive(topology);
         topologyUpdatePreListenerNotify(topology);

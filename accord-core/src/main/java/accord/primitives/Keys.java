@@ -180,12 +180,12 @@ public class Keys extends AbstractKeys<Key> implements Seekables<Key, Keys>
 
     public static Keys of(Key ... keys)
     {
-        return dedupSorted(sort(keys));
+        return ofSorted(sort(keys));
     }
 
     public static Keys copyOf(Key[] keys)
     {
-        return dedupSorted(sort(keys.clone()));
+        return ofSorted(sort(keys.clone()));
     }
 
     public static Keys ofUnique(Key ... keys)
@@ -265,16 +265,16 @@ public class Keys extends AbstractKeys<Key> implements Seekables<Key, Keys>
         return ofUnique(keys.toArray(new Key[0]));
     }
 
+    public static Keys ofSorted(Key ... keys)
+    {
+        return new Keys(SortedArrays.toUnique(keys));
+    }
+
     public static Keys ofSortedUnique(Key ... keys)
     {
         if (!isSortedUnique(keys))
             throw new IllegalArgumentException(Arrays.toString(keys) + " is not sorted");
         return new Keys(keys);
-    }
-
-    private static Keys dedupSorted(Key ... keys)
-    {
-        return new Keys(SortedArrays.toUnique(keys));
     }
 
     public static Keys ofSortedUnique(Collection<? extends Key> keys)

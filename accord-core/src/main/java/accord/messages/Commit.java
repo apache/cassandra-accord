@@ -48,6 +48,7 @@ import accord.topology.Topology;
 import accord.utils.Invariants;
 import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.TriFunction;
+import accord.utils.async.Cancellable;
 import org.agrona.collections.IntHashSet;
 
 import static accord.primitives.SaveStatus.Committed;
@@ -157,54 +158,71 @@ public class Commit extends TxnRequest.WithUnsynced<CommitOrReadNack>
         this.readData = readData;
     }
 
-    public static void commitMinimal(SortedArrayList<Id> contact, Node node, Topologies stabilise, Topologies all, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps unstableDeps, Callback<ReadReply> callback)
+    public static void commitMinimalNoRead(SortedArrayList<Id> contact, Node node, Topologies stabilise, Topologies all, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps unstableDeps, Callback<ReadReply> callback)
     {
         Invariants.checkArgument(stabilise.size() == 1, "Invalid coordinate epochs: %s", stabilise);
         // we want to send to everyone, and we want to include all of the relevant data, but we stabilise on the coordination epoch replica responses
         Topology coordinates = stabilise.forEpoch(txnId.epoch());
 
-        send(contact, null, (i1, i2) -> true, null, node, coordinates, coordinates, all, Kind.CommitSlowPath, ballot,
-             txnId, txn, route, executeAt, unstableDeps, callback);
+        sendTo(contact, null, (i1, i2) -> true, null, node, coordinates, coordinates, all, Kind.CommitSlowPath, ballot,
+               txnId, txn, route, executeAt, unstableDeps, callback, false);
     }
 
     // TODO (desired, efficiency): do not commit if we're already ready to execute (requires extra info in Accept responses)
-    public static void stableAndRead(Node node, Topologies executeEpochOnly, Kind kind, TxnId txnId, Txn txn, FullRoute<?> route, Participants<?> readScope, Timestamp executeAt, Deps stableDeps, IntHashSet readSet, Callback<ReadReply> callback)
+    public static void stableAndRead(Node node, Topologies all, Kind kind, TxnId txnId, Txn txn, FullRoute<?> route, Participants<?> readScope, Timestamp executeAt, Deps stableDeps, IntHashSet readSet, Callback<ReadReply> callback, boolean onlyContactOldAndReadSet)
     {
-        Topologies all = executeEpochOnly;
-        if (txnId.epoch() != executeAt.epoch())
-            all = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
-
-        Topology executes = executeEpochOnly.forEpoch(executeAt.epoch());
+        Invariants.checkState(all.oldestEpoch() == txnId.epoch());
+        Invariants.checkState(all.currentEpoch() == executeAt.epoch());
+        Topology executes = all.forEpoch(executeAt.epoch());
         Topology coordinates = all.forEpoch(txnId.epoch());
 
         SortedArrayList<Id> contact = all.nodes().without(all::isFaulty);
-        send(contact, readSet, (set, id) -> set.contains(id.id), readScope, node, coordinates, executes, all, kind, Ballot.ZERO,
-             txnId, txn, route, executeAt, stableDeps, callback);
+        sendTo(contact, readSet, (set, id) -> set.contains(id.id), readScope, node, coordinates, executes, all, kind, Ballot.ZERO,
+               txnId, txn, route, executeAt, stableDeps, callback, onlyContactOldAndReadSet);
     }
 
-    private static <P> void send(SortedArrayList<Id> contact, P param, BiPredicate<P, Id> shouldRegisterCallback, @Nullable Participants<?> readScopeIfCallback,
-                                 Node node, Topology coordinates, Topology primary, Topologies all, Kind kind, Ballot ballot,
-                                 TxnId txnId, @Nullable Txn txn, FullRoute<?> route, Timestamp executeAt, @Nullable Deps deps,
-                                 Callback<ReadReply> callback)
+    public static void stableAndRead(Id to, Node node, Topologies all, Kind kind, TxnId txnId, Txn txn, FullRoute<?> route, Participants<?> readScope, Timestamp executeAt, Deps stableDeps, Callback<ReadReply> callback, boolean onlyContactOldAndReadSet)
+    {
+        Invariants.checkState(all.oldestEpoch() == txnId.epoch());
+        Invariants.checkState(all.currentEpoch() == executeAt.epoch());
+        Topology executes = all.forEpoch(executeAt.epoch());
+        Topology coordinates = all.forEpoch(txnId.epoch());
+
+        sendTo(to, true, readScope, node, coordinates, executes, all, kind, Ballot.ZERO, txnId, txn, route, executeAt, stableDeps, callback, false);
+    }
+
+    private static <P> void sendTo(SortedArrayList<Id> contact, P param, BiPredicate<P, Id> shouldRegisterCallback, @Nullable Participants<?> readScopeIfCallback,
+                                   Node node, Topology coordinates, Topology primary, Topologies all, Kind kind, Ballot ballot,
+                                   TxnId txnId, @Nullable Txn txn, FullRoute<?> route, Timestamp executeAt, @Nullable Deps deps,
+                                   Callback<ReadReply> callback, boolean onlyContactOldAndCallbacks)
     {
         for (Node.Id to : contact)
         {
-            if (all.size() == 1 || primary.contains(to))
+            boolean registerCallback = shouldRegisterCallback.test(param, to);
+            sendTo(to, registerCallback, readScopeIfCallback, node, coordinates, primary, all, kind, ballot, txnId, txn, route, executeAt, deps, callback, onlyContactOldAndCallbacks);
+        }
+    }
+
+    private static <P> void sendTo(Id to, boolean registerCallback, Participants<?> readScope,
+                                   Node node, Topology coordinates, Topology primary, Topologies all, Kind kind, Ballot ballot,
+                                   TxnId txnId, @Nullable Txn txn, FullRoute<?> route, Timestamp executeAt, @Nullable Deps deps,
+                                   Callback<ReadReply> callback, boolean onlyContactOldAndCallbacks)
+    {
+        if ((all.size() == 1 || primary.contains(to)))
+        {
+            if (registerCallback || onlyContactOldAndCallbacks)
             {
-                boolean registerCallback = shouldRegisterCallback.test(param, to);
                 // if we register a callback, supply the provided readScope (which may be null)
-                Participants<?> readScope = registerCallback ? readScopeIfCallback : null;
                 Commit send = new Commit(kind, to, coordinates, all, txnId, txn, route, ballot, executeAt, deps, readScope);
                 if (registerCallback) node.send(to, send, callback);
                 else node.send(to, send);
             }
-            else
-            {
-                boolean registerCallback = shouldRegisterCallback.test(param, to);
-                Commit send = new Commit(kind, to, coordinates, all, txnId, txn, route, ballot, executeAt, deps, (ReadTxnData) null);
-                if (registerCallback) node.send(to, send, callback);
-                else node.send(to, send);
-            }
+        }
+        else
+        {
+            Commit send = new Commit(kind, to, coordinates, all, txnId, txn, route, ballot, executeAt, deps, (ReadTxnData) null);
+            if (registerCallback) node.send(to, send, callback);
+            else node.send(to, send);
         }
     }
 
@@ -231,13 +249,13 @@ public class Commit extends TxnRequest.WithUnsynced<CommitOrReadNack>
     @Override
     public KeyHistory keyHistory()
     {
-        return KeyHistory.COMMANDS;
+        return KeyHistory.ASYNC;
     }
 
     @Override
-    public void process()
+    public Cancellable submit()
     {
-        node.mapReduceConsumeLocal(this, txnId.epoch(), executeAt.epoch(), this);
+        return node.mapReduceConsumeLocal(this, txnId.epoch(), executeAt.epoch(), this);
     }
 
     // TODO (expected, efficiency, clarity): do not guard with synchronized; let mapReduceLocal decide how to enforce mutual exclusivity
@@ -268,7 +286,7 @@ public class Commit extends TxnRequest.WithUnsynced<CommitOrReadNack>
     }
 
     @Override
-    public synchronized void accept(CommitOrReadNack reply, Throwable failure)
+    protected void acceptInternal(CommitOrReadNack reply, Throwable failure)
     {
         if (reply != null || failure != null)
             node.reply(replyTo, replyContext, reply, failure);

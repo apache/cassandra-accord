@@ -149,11 +149,12 @@ public class DurabilityScheduling implements ConfigurationService.Listener
         int nodeOffset;
 
         int index;
-        int numberOfSplits;
+        int numberOfSplits, maxNumberOfSplits;
         Scheduler.Scheduled scheduled;
         long rangeStartedAtMicros, cycleStartedAtMicros;
         long retryDelayMicros = defaultRetryDelayMicros;
         boolean defunct;
+        SyncPoint<Range> lastApplied, lastAgreed;
 
         private ShardScheduler()
         {
@@ -193,9 +194,14 @@ public class DurabilityScheduling implements ConfigurationService.Listener
             if (nowMicros > scheduleAt + (shardCycleTimeMicros / numberOfSplits))
                 scheduleAt += shardCycleTimeMicros;
 
-            if (numberOfSplits < targetShardSplits)
-                numberOfSplits = targetShardSplits;
+            maxNumberOfSplits = Math.max(1, Math.min(DurabilityScheduling.this.maxNumberOfSplits, node.commandStores().shardDistributor().numberOfSplitsPossible(shard.range)));
+            int target = Math.min(targetShardSplits, maxNumberOfSplits);
+            if (numberOfSplits < target)
+                numberOfSplits = target;
+            if (numberOfSplits > maxNumberOfSplits)
+                numberOfSplits = maxNumberOfSplits;
 
+            index = 0;
             cycleStartedAtMicros = scheduleAt;
             scheduleAt(nowMicros, scheduleAt);
         }
@@ -245,10 +251,23 @@ public class DurabilityScheduling implements ConfigurationService.Listener
                 Invariants.checkState(index < numberOfSplits);
                 int i = index;
                 Range selectRange = null;
-                while (selectRange == null)
-                    selectRange = distributor.splitRange(shard.range, index, ++i, numberOfSplits);
-                range = selectRange;
+                while (selectRange == null && ++i <= numberOfSplits)
+                    selectRange = distributor.splitRange(shard.range, index, i, numberOfSplits);
+                if (selectRange == null)
+                {
+                    if (index == 0)
+                    {
+                        logger.warn("Range {} appears to be impossible to split. Using full range.", shard.range);
+                        selectRange = shard.range;
+                    }
+                    else
+                    {
+                        restart();
+                        return;
+                    }
+                }
                 nextIndex = i;
+                range = selectRange;
             }
 
             Runnable schedule = () -> {
@@ -298,7 +317,8 @@ public class DurabilityScheduling implements ConfigurationService.Listener
                     else
                     {   // TODO (required): decouple CoordinateShardDurable concurrency from CoordinateSyncPoint (i.e., permit at least one CoordinateSyncPoint to queue up while we're coordinating durability)
                         coordinateShardDurableAfterExclusiveSyncPoint(node, success, nextIndex);
-                        logger.trace("{}: Successfully coordinated ExclusiveSyncPoint for local shard durability of {}", syncId, ranges);
+                        logger.debug("{}: Successfully coordinated ExclusiveSyncPoint for local shard durability of {}", syncId, ranges);
+                        lastAgreed = success;
                     }
                 });
             }), txnIdLagMicros, MICROSECONDS);
@@ -326,7 +346,6 @@ public class DurabilityScheduling implements ConfigurationService.Listener
                                     index = nextIndex;
                                     if (index >= numberOfSplits)
                                     {
-                                        index = 0;
                                         long nowMicros = node.elapsed(MICROSECONDS);
                                         long timeTakenSeconds = MICROSECONDS.toSeconds(nowMicros - cycleStartedAtMicros);
                                         long targetTimeSeconds = MICROSECONDS.toSeconds(shardCycleTimeMicros);
@@ -346,11 +365,12 @@ public class DurabilityScheduling implements ConfigurationService.Listener
                                         }
                                         else if (logger.isTraceEnabled())
                                         {
-                                            logger.trace("Successfully coordinated shard durability for range {} in {}s", shard.range, MICROSECONDS.toSeconds(nowMicros - rangeStartedAtMicros));
+                                            logger.debug("Successfully coordinated shard durability for range {} in {}s", shard.range, MICROSECONDS.toSeconds(nowMicros - rangeStartedAtMicros));
                                         }
                                         schedule();
                                     }
                                 }
+                                lastApplied = success;
                             }
                             catch (Throwable t)
                             {

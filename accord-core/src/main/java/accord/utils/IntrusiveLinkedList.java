@@ -64,11 +64,18 @@ public class IntrusiveLinkedList<O extends IntrusiveLinkedListNode> extends Intr
 
     public O poll()
     {
-        if (isEmpty())
-            return null;
-
         IntrusiveLinkedListNode next = this.next;
+        if (next == this)
+            return null;
         next.remove();
+        return (O) next;
+    }
+
+    public O peek()
+    {
+        IntrusiveLinkedListNode next = this.next;
+        if (next == this)
+            return null;
         return (O) next;
     }
 
@@ -80,7 +87,7 @@ public class IntrusiveLinkedList<O extends IntrusiveLinkedListNode> extends Intr
     @Override
     public Iterator<O> iterator()
     {
-        return new Iterator<O>()
+        return new Iterator<>()
         {
             IntrusiveLinkedListNode next = IntrusiveLinkedList.this.next;
 

@@ -18,12 +18,12 @@
 
 package accord.impl;
 
-import accord.local.Node;
+import accord.local.TimeService;
 
-public class DefaultRequestTimeouts extends AbstractRequestTimeouts<AbstractRequestTimeouts.Stripe>
+public class DefaultTimeouts extends AbstractTimeouts<AbstractTimeouts.Stripe>
 {
-    public DefaultRequestTimeouts(Node node)
+    public DefaultTimeouts(TimeService time)
     {
-        super(node, Stripe[]::new, Stripe::new);
+        super(time, Stripe[]::new, Stripe::new);
     }
 }

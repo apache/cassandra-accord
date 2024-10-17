@@ -59,6 +59,13 @@ public class RoutingKeys extends AbstractUnseekableKeys implements Unseekables<R
         return of(keys.toArray(EMPTY_KEYS_ARRAY));
     }
 
+    public static RoutingKeys ofSortedUnique(Collection<? extends RoutingKey> keys)
+    {
+        if (keys.isEmpty())
+            return EMPTY;
+        return ofSortedUnique(keys.toArray(EMPTY_KEYS_ARRAY));
+    }
+
     public static RoutingKeys ofSortedUnique(RoutingKey ... keys)
     {
         checkArgument(isSortedUnique(keys));

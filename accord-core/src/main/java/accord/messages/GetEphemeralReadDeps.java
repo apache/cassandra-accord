@@ -32,6 +32,7 @@ import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
+import accord.utils.async.Cancellable;
 
 import static accord.messages.PreAccept.calculateDeps;
 import static accord.primitives.EpochSupplier.constant;
@@ -61,9 +62,9 @@ public class GetEphemeralReadDeps extends TxnRequest.WithUnsynced<GetEphemeralRe
     }
 
     @Override
-    public void process()
+    public Cancellable submit()
     {
-        node.mapReduceConsumeLocal(this, minEpoch, executionEpoch, this);
+        return node.mapReduceConsumeLocal(this, minEpoch, executionEpoch, this);
     }
 
     @Override
@@ -79,12 +80,6 @@ public class GetEphemeralReadDeps extends TxnRequest.WithUnsynced<GetEphemeralRe
     public GetEphemeralReadDepsOk reduce(GetEphemeralReadDepsOk reply1, GetEphemeralReadDepsOk reply2)
     {
         return new GetEphemeralReadDepsOk(reply1.deps.with(reply2.deps), Math.max(reply1.latestEpoch, reply2.latestEpoch));
-    }
-
-    @Override
-    public void accept(GetEphemeralReadDepsOk result, Throwable failure)
-    {
-        node.reply(replyTo, replyContext, result, failure);
     }
 
     @Override
@@ -117,7 +112,7 @@ public class GetEphemeralReadDeps extends TxnRequest.WithUnsynced<GetEphemeralRe
     @Override
     public KeyHistory keyHistory()
     {
-        return KeyHistory.COMMANDS;
+        return KeyHistory.SYNC;
     }
 
     public static class GetEphemeralReadDepsOk implements Reply

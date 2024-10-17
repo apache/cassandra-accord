@@ -39,6 +39,7 @@ import accord.primitives.Unseekables;
 import accord.primitives.Writes;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
+import accord.utils.async.Cancellable;
 
 import static accord.local.SafeCommandStore.TestDep.WITH;
 import static accord.local.SafeCommandStore.TestDep.WITHOUT;
@@ -90,9 +91,9 @@ public class BeginRecovery extends TxnRequest.WithUnsynced<BeginRecovery.Recover
     }
 
     @Override
-    protected void process()
+    protected Cancellable submit()
     {
-        node.mapReduceConsumeLocal(this, minEpoch, executeAtOrTxnIdEpoch, this);
+        return node.mapReduceConsumeLocal(this, minEpoch, executeAtOrTxnIdEpoch, this);
     }
 
     @Override
@@ -194,12 +195,6 @@ public class BeginRecovery extends TxnRequest.WithUnsynced<BeginRecovery.Recover
     }
 
     @Override
-    public void accept(RecoverReply reply, Throwable failure)
-    {
-        node.reply(replyTo, replyContext, reply, failure);
-    }
-
-    @Override
     public TxnId primaryTxnId()
     {
         return txnId;
@@ -214,7 +209,7 @@ public class BeginRecovery extends TxnRequest.WithUnsynced<BeginRecovery.Recover
     @Override
     public KeyHistory keyHistory()
     {
-        return KeyHistory.RECOVERY;
+        return KeyHistory.RECOVER;
     }
 
     @Override

@@ -22,7 +22,6 @@ import java.util.function.BiConsumer;
 
 import accord.local.SafeCommand;
 import accord.primitives.TxnId;
-import accord.utils.Invariants;
 
 import static accord.impl.progresslog.TxnStateKind.Home;
 import static accord.impl.progresslog.TxnStateKind.Waiting;
@@ -30,17 +29,17 @@ import static accord.local.PreLoadContext.contextFor;
 
 class CallbackInvoker<P, V> implements BiConsumer<V, Throwable>
 {
-    static <P, V> BiConsumer<V, Throwable> invokeWaitingCallback(DefaultProgressLog instance, TxnId txnId, P param, Callback<P, V> callback)
+    static <P, V> CallbackInvoker<P, V> invokeWaitingCallback(DefaultProgressLog instance, TxnId txnId, P param, Callback<P, V> callback)
     {
         return invokeCallback(Waiting, instance, txnId, param, callback);
     }
 
-    static <P, V> BiConsumer<V, Throwable> invokeHomeCallback(DefaultProgressLog owner, TxnId txnId, P param, Callback<P, V> callback)
+    static <P, V> CallbackInvoker<P, V> invokeHomeCallback(DefaultProgressLog owner, TxnId txnId, P param, Callback<P, V> callback)
     {
         return invokeCallback(Home, owner, txnId, param, callback);
     }
 
-    static <P, V> BiConsumer<V, Throwable> invokeCallback(TxnStateKind kind, DefaultProgressLog owner, TxnId txnId, P param, Callback<P, V> callback)
+    static <P, V> CallbackInvoker<P, V> invokeCallback(TxnStateKind kind, DefaultProgressLog owner, TxnId txnId, P param, Callback<P, V> callback)
     {
         CallbackInvoker<P, V> invoker = new CallbackInvoker<>(owner, kind, owner.nextInvokerId(), txnId, param, callback);
         owner.registerActive(kind, txnId, invoker);
@@ -79,8 +78,10 @@ class CallbackInvoker<P, V> implements BiConsumer<V, Throwable>
             if (!owner.deregisterActive(kind(), this))
                 return;
 
-            Invariants.checkState(safeCommand != null);
+            if (safeCommand == null)
+                return;
             callback.callback(safeStore, safeCommand, owner, txnId, param, success, fail);
+            owner.undebugActive(this);
 
         }).begin(owner.commandStore.agent());
     }

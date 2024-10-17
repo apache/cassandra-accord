@@ -47,6 +47,7 @@ import accord.utils.Invariants;
 import accord.utils.LogGroupTimers;
 import accord.utils.btree.BTree;
 import accord.utils.btree.BTreeRemoval;
+import org.agrona.collections.Long2ObjectHashMap;
 import org.agrona.collections.Object2ObjectHashMap;
 import org.agrona.collections.ObjectHashSet;
 
@@ -89,7 +90,8 @@ public class DefaultProgressLog implements ProgressLog, Runnable
     private final ObjectHashSet<Object> activeWaiting = new ObjectHashSet<>();
     private final ObjectHashSet<Object> activeHome = new ObjectHashSet<>();
 
-    private final Map<TxnId, StackTraceElement[]> deleted = Invariants.debug() ? new Object2ObjectHashMap<>() : null;
+    private final Long2ObjectHashMap<Object> debugActive =  Invariants.debug() ? new Long2ObjectHashMap<>() : null;
+    private final Map<TxnId, StackTraceElement[]> debugDeleted = Invariants.debug() ? new Object2ObjectHashMap<>() : null;
 
     private static final Object[] EMPTY_RUN_BUFFER = new Object[0];
 
@@ -133,7 +135,7 @@ public class DefaultProgressLog implements ProgressLog, Runnable
         TxnState result = BTree.<TxnId, TxnState>find(stateMap, (id, state) -> id.compareTo(state.txnId), txnId);
         if (result == null)
         {
-            Invariants.checkState(deleted == null || !deleted.containsKey(txnId));
+            Invariants.checkState(debugDeleted == null || !debugDeleted.containsKey(txnId));
             node.agent().metricsEventsListener().onProgressLogSizeChange(txnId, 1);
             stateMap = BTree.update(stateMap, BTree.singleton(result = new TxnState(txnId)), TxnState::compareTo);
         }
@@ -142,7 +144,7 @@ public class DefaultProgressLog implements ProgressLog, Runnable
 
     private TxnState insert(TxnId txnId)
     {
-        Invariants.checkState(deleted == null || !deleted.containsKey(txnId));
+        Invariants.checkState(debugDeleted == null || !debugDeleted.containsKey(txnId));
         node.agent().metricsEventsListener().onProgressLogSizeChange(txnId, 1);
         TxnState result = new TxnState(txnId);
         stateMap = BTree.update(stateMap, BTree.singleton(result), TxnState::compareTo);
@@ -192,7 +194,7 @@ public class DefaultProgressLog implements ProgressLog, Runnable
 
                 if (after.durability().isDurableOrInvalidated())
                 {
-                    state.setHomeDoneAnyMaybeRemove(this);
+                    state.setHomeDoneAndMaybeRemove(this);
                     state = maybeFetch(safeStore, txnId, after, state);
                 }
                 else
@@ -208,7 +210,7 @@ public class DefaultProgressLog implements ProgressLog, Runnable
         {
             state = get(txnId);
             if (state != null)
-                state.setHomeDoneAnyMaybeRemove(this);
+                state.setHomeDoneAndMaybeRemove(this);
 
             state = maybeFetch(safeStore, txnId, after, state);
         }
@@ -279,8 +281,8 @@ public class DefaultProgressLog implements ProgressLog, Runnable
 
         activeWaiting.clear();
         activeHome.clear();
-        if (deleted != null)
-            deleted.clear();
+        if (debugDeleted != null)
+            debugDeleted.clear();
 
         runBuffer = EMPTY_RUN_BUFFER;
         runBufferCount = 0;
@@ -300,8 +302,8 @@ public class DefaultProgressLog implements ProgressLog, Runnable
         if (stateMap != newStateMap)
             node.agent().metricsEventsListener().onProgressLogSizeChange(txnId, -1);
         stateMap = newStateMap;
-        if (deleted != null)
-            deleted.put(txnId, Thread.currentThread().getStackTrace());
+        if (debugDeleted != null)
+            debugDeleted.put(txnId, Thread.currentThread().getStackTrace());
     }
 
     @Override
@@ -447,12 +449,13 @@ public class DefaultProgressLog implements ProgressLog, Runnable
         @Override
         public void accept(SafeCommandStore safeStore)
         {
-            // we have to read safeCommand first as it may become truncated on load, which may clear the progress log and invalidate us
-            SafeCommand safeCommand = safeStore.ifInitialised(run.txnId);
-            Invariants.checkState(safeCommand != null);
-
             if (!deregisterActive(runKind, this))
                 return; // we've been cancelled
+
+            // we have to read safeCommand first as it may become truncated on load, which may clear the progress log and invalidate us
+            SafeCommand safeCommand = safeStore.ifInitialised(run.txnId);
+            if (safeCommand == null)
+                return;
 
             Invariants.checkState(get(run.txnId) == run, "Transaction state for %s does not match expected one %s", run.txnId, run);
             Invariants.checkState(run.scheduledTimer() != runKind, "We are actively executing %s, but we are also scheduled to run this same TxnState later. This should not happen.", runKind);
@@ -510,6 +513,18 @@ public class DefaultProgressLog implements ProgressLog, Runnable
     boolean hasActive(TxnStateKind kind, TxnId txnId)
     {
         return active(kind).contains(txnId);
+    }
+
+    void debugActive(Object debug, CallbackInvoker<?, ?> invoker)
+    {
+        if (debugActive != null)
+            debugActive.put(invoker.id, debug);
+    }
+
+    void undebugActive(CallbackInvoker<?, ?> invoker)
+    {
+        if (debugActive != null)
+            debugActive.remove(invoker.id);
     }
 
     boolean deregisterActive(TxnStateKind kind, Object object)

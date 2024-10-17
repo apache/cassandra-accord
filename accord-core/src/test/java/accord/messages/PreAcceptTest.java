@@ -208,7 +208,7 @@ public class PreAcceptTest
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID3, messageSink.responses.get(0).to);
             PartialDeps expectedDeps = new PartialDeps(Ranges.of(range(0, 12)), KeyDeps.NONE, RangeDeps.NONE, KeyDeps.NONE);
-            Timestamp expectedTs = Timestamp.fromValues(1, 110, ID1).withExtraFlags(txnId2.flags());
+            Timestamp expectedTs = Timestamp.fromValues(1, 110, ID1);
             Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId2, expectedTs, expectedDeps),
                                     messageSink.responses.get(0).payload);
         }

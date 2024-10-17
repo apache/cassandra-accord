@@ -328,7 +328,7 @@ public class BurnTest
 
         Supplier<LongSupplier> nowSupplier = () -> {
             RandomSource forked = random.fork();
-            // TODO (now): meta-randomise scale of clock drift
+            // TODO (expected): meta-randomise scale of clock drift
             return FrequentLargeRange.builder(forked)
                                                    .ratio(1, 5)
                                                    .small(50, 5000, TimeUnit.MICROSECONDS)

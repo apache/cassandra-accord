@@ -127,6 +127,8 @@ public interface AsyncChain<V>
     /**
      * Causes the chain to begin, starting all work required.  This method must be called exactly once, not calling will
      * not cause any work to start, and calling multiple times will be rejected.
+     *
+     * TODO (expected): Executor with cheap cancel() that cleansup task queue
      */
     @Nullable Cancellable begin(BiConsumer<? super V, Throwable> callback);
 

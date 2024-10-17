@@ -22,21 +22,20 @@ import accord.api.RoutingKey;
 import accord.local.cfk.CommandsForKey;
 import accord.primitives.RoutingKeys;
 import accord.primitives.TxnId;
-import com.google.common.collect.Iterators;
 
 import accord.primitives.Unseekables;
 import accord.utils.Invariants;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
-import com.google.common.collect.Sets;
-
-import java.util.AbstractCollection;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.Set;
+import java.util.AbstractList;
+import java.util.List;
 import java.util.function.Consumer;
 import javax.annotation.Nullable;
+
+import static accord.local.KeyHistory.ASYNC;
+import static accord.local.KeyHistory.INCR;
+import static accord.local.KeyHistory.NONE;
+import static accord.local.KeyHistory.SYNC;
 
 /**
  * Lists txnids and keys of commands and commands for key that will be needed for an operation. Used
@@ -50,32 +49,33 @@ public interface PreLoadContext
     /**
      * @return ids of the {@link Command} objects that need to be loaded into memory before this operation is run
      *
+     * This should ONLY be non-null if primaryTxnId() is non-null
+     *
      * TODO (expected): this is used for Apply, NotifyWaitingOn and listenerContexts; others only use a single txnId
      *  firstly, it would be nice to simply have that txnId as a single value.
      *  In the case of Apply, we can likely avoid loading all dependent transactions, if we can track which ranges
      *  out of memory have un-applied transactions (and try not to evict those that are not applied).
      *  Either way, the information we need in memory is super minimal for secondary transactions.
      */
-    default Collection<TxnId> additionalTxnIds() { return Collections.emptyList(); }
+    default @Nullable TxnId additionalTxnId() { return null; }
 
-    default Collection<TxnId> txnIds()
+    default List<TxnId> txnIds()
     {
         TxnId primaryTxnId = primaryTxnId();
-        Collection<TxnId> additional = additionalTxnIds();
-        if (primaryTxnId == null) return additional;
-        if (additional.isEmpty()) return Collections.singleton(primaryTxnId);
-        return new AbstractCollection<>()
+        TxnId additionalTxnId = additionalTxnId();
+        Invariants.checkState(primaryTxnId != null || additionalTxnId == null);
+        return new AbstractList<>()
         {
             @Override
-            public Iterator<TxnId> iterator()
+            public TxnId get(int index)
             {
-                return Iterators.concat(Iterators.singletonIterator(primaryTxnId), additional.iterator());
+                return index == 0 ? primaryTxnId : additionalTxnId;
             }
 
             @Override
             public int size()
             {
-                return 1 + additional.size();
+                return primaryTxnId == null ? 0 : additionalTxnId == null ? 1 : 2;
             }
         };
     }
@@ -86,7 +86,9 @@ public interface PreLoadContext
         TxnId primaryTxnId = primaryTxnId();
         if (primaryTxnId != null)
             consumer.accept(primaryTxnId);
-        additionalTxnIds().forEach(consumer);
+        TxnId additionalTxnId = additionalTxnId();
+        if (additionalTxnId != null)
+            consumer.accept(additionalTxnId);
     }
 
     /**
@@ -99,57 +101,71 @@ public interface PreLoadContext
     // TODO (required): specify epochs for which we should load, so we can narrow to owned keys
     default Unseekables<?> keys() { return RoutingKeys.EMPTY; }
 
-    default KeyHistory keyHistory() { return KeyHistory.NONE; }
+    default KeyHistory keyHistory() { return NONE; }
 
+    default boolean isEmpty()
+    {
+        boolean isEmpty = primaryTxnId() == null && keys().isEmpty();
+        Invariants.checkState(additionalTxnId() == null);
+        return isEmpty;
+    }
+
+    /**
+     * Is the provided PreLoadContext guaranteed to have a superset of our requested information?
+     * Note that for this calculation we are asking if all the information we want is known to be available,
+     * not whether a subset has been requested - that is, a superset with INCR or ASYNC key information
+     * cannot be relied upon for serving INCR or ASYNC subsets in this calculation.
+     */
     default boolean isSubsetOf(PreLoadContext superset)
     {
-        KeyHistory requiredHistory = keyHistory();
-        if (requiredHistory != KeyHistory.NONE && requiredHistory != superset.keyHistory())
-            return false;
+        Unseekables<?> keys = keys();
+        if (!keys.isEmpty())
+        {
+            KeyHistory requiredHistory = keyHistory();
+            if (requiredHistory != NONE)
+            {
+                if (requiredHistory == INCR || requiredHistory == ASYNC)
+                    requiredHistory = SYNC;
+                if (requiredHistory != superset.keyHistory())
+                    return false;
+            }
 
-        if (superset.keys().domain() != keys().domain() || !superset.keys().containsAll(keys()))
-            return false;
+            Unseekables<?> supersetKeys = superset.keys();
+            if (supersetKeys.domain() != keys.domain() || !supersetKeys.containsAll(keys()))
+                return false;
+        }
 
         TxnId primaryId = primaryTxnId();
-        Collection<TxnId> additionalIds = additionalTxnIds();
-        if (additionalIds.isEmpty())
+        TxnId additionalId = additionalTxnId();
+        if (additionalId == null)
         {
-            if (primaryId == null || primaryId.equals(superset.primaryTxnId()))
-                return true;
-
-            return superset.additionalTxnIds().contains(primaryTxnId());
+            return primaryId == null || primaryId.equals(superset.primaryTxnId()) || primaryId.equals(superset.additionalTxnId());
         }
         else
         {
+            Invariants.checkState(primaryId != null);
             TxnId supersetPrimaryId = superset.primaryTxnId();
-            Set<TxnId> supersetAdditionalIds = superset.additionalTxnIds() instanceof Set ? (Set<TxnId>) superset.additionalTxnIds() : Sets.newHashSet(superset.additionalTxnIds());
-            if (primaryId != null && !primaryId.equals(supersetPrimaryId) && !supersetAdditionalIds.contains(primaryId))
-                return false;
-
-            for (TxnId txnId : additionalIds)
-            {
-                if (!txnId.equals(supersetPrimaryId) && !supersetAdditionalIds.contains(txnId))
-                    return false;
-            }
-            return true;
+            TxnId supersetAdditionalId = superset.additionalTxnId();
+            return (primaryId.equals(supersetPrimaryId) || primaryId.equals(supersetAdditionalId)) && (additionalId.equals(supersetAdditionalId) || additionalId.equals(supersetPrimaryId));
         }
     }
 
-    static PreLoadContext contextFor(TxnId primary, Collection<TxnId> additional, Unseekables<?> keys, KeyHistory keyHistory)
+    static PreLoadContext contextFor(@Nullable TxnId primary, @Nullable TxnId additional, Unseekables<?> keys, KeyHistory keyHistory)
     {
-        Invariants.checkState(!additional.contains(primary));
+        Invariants.checkState(primary == null ? additional == null : !primary.equals(additional));
         return new Standard(primary, additional, keys, keyHistory);
     }
 
     class Standard implements PreLoadContext
     {
-        private final TxnId primary;
-        private final Collection<TxnId> additional;
+        private final @Nullable TxnId primary;
+        private final @Nullable TxnId additional;
         private final Unseekables<?> keys;
         private final KeyHistory keyHistory;
 
-        public Standard(TxnId primary, Collection<TxnId> additional, Unseekables<?> keys, KeyHistory keyHistory)
+        public Standard(@Nullable TxnId primary, @Nullable TxnId additional, Unseekables<?> keys, KeyHistory keyHistory)
         {
+            Invariants.checkState(primary != null || additional == null);
             this.primary = primary;
             this.additional = additional;
             this.keys = keys;
@@ -174,7 +190,7 @@ public interface PreLoadContext
         }
 
         @Override
-        public Collection<TxnId> additionalTxnIds()
+        public TxnId additionalTxnId()
         {
             return additional;
         }
@@ -189,29 +205,24 @@ public interface PreLoadContext
         }
     }
 
-    static PreLoadContext contextFor(TxnId primary, Collection<TxnId> additional, Unseekables<?> keys)
+    static PreLoadContext contextFor(TxnId primary, TxnId additional, Unseekables<?> keys)
     {
-        return contextFor(primary, additional, keys, KeyHistory.NONE);
+        return contextFor(primary, additional, keys, NONE);
     }
 
     static PreLoadContext contextFor(TxnId primary, TxnId additional)
     {
-        return contextFor(primary, Collections.singletonList(additional), RoutingKeys.EMPTY);
-    }
-
-    static PreLoadContext contextFor(TxnId primary, TxnId additional, Unseekables<?> keys)
-    {
-        return contextFor(primary, Collections.singletonList(additional), keys);
+        return contextFor(primary, additional, RoutingKeys.EMPTY);
     }
 
     static PreLoadContext contextFor(TxnId txnId, Unseekables<?> keysOrRanges, KeyHistory keyHistory)
     {
-        return contextFor(txnId, Collections.emptyList(), keysOrRanges, keyHistory);
+        return contextFor(txnId, null, keysOrRanges, keyHistory);
     }
 
     static PreLoadContext contextFor(TxnId txnId, Unseekables<?> keysOrRanges)
     {
-        return contextFor(txnId, keysOrRanges, KeyHistory.NONE);
+        return contextFor(txnId, keysOrRanges, NONE);
     }
 
     static PreLoadContext contextFor(TxnId txnId)
@@ -219,34 +230,24 @@ public interface PreLoadContext
         return contextFor(txnId, RoutingKeys.EMPTY);
     }
 
-    static PreLoadContext contextFor(TxnId primary, Collection<TxnId> additional)
-    {
-        return contextFor(primary, additional, RoutingKeys.EMPTY);
-    }
-
     static PreLoadContext contextFor(RoutingKey key, KeyHistory keyHistory)
     {
-        return contextFor(null, Collections.emptyList(), RoutingKeys.of(key), keyHistory);
+        return contextFor(null, null, RoutingKeys.of(key), keyHistory);
     }
 
     static PreLoadContext contextFor(RoutingKey key)
     {
-        return contextFor(key, KeyHistory.NONE);
-    }
-
-    static PreLoadContext contextFor(Collection<TxnId> ids, Unseekables<?> keys)
-    {
-        return contextFor(null, ids, keys);
+        return contextFor(key, NONE);
     }
 
     static PreLoadContext contextFor(Unseekables<?> keys)
     {
-        return contextFor(null, Collections.emptyList(), keys);
+        return contextFor(null, null, keys);
     }
 
     static PreLoadContext contextFor(Unseekables<?> keys, KeyHistory keyHistory)
     {
-        return contextFor(null, Collections.emptyList(), keys, keyHistory);
+        return contextFor(null, null, keys, keyHistory);
     }
 
     static PreLoadContext empty()
@@ -254,5 +255,5 @@ public interface PreLoadContext
         return EMPTY_PRELOADCONTEXT;
     }
 
-    PreLoadContext EMPTY_PRELOADCONTEXT = contextFor(null, Collections.emptyList(), RoutingKeys.EMPTY);
+    PreLoadContext EMPTY_PRELOADCONTEXT = contextFor(null, null, RoutingKeys.EMPTY);
 }

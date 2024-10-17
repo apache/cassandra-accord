@@ -27,6 +27,7 @@ import java.io.Closeable;
 import java.lang.reflect.Array;
 import java.util.AbstractList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.function.IntFunction;
 
 import static accord.utils.Invariants.illegalState;
@@ -825,6 +826,17 @@ public class ArrayBuffers
             if (size == buffer.length)
                 buffer = cachedAny().resize(buffer, size, Math.max(8, size * 2));
             buffer[size++] = e;
+            return true;
+        }
+
+        @Override
+        public boolean addAll(Collection<? extends E> es)
+        {
+            int newSize = size + es.size();
+            if (newSize >= buffer.length)
+                buffer = cachedAny().resize(buffer, size, newSize);
+            for (E e : es)
+                buffer[size++] = e;
             return true;
         }
 

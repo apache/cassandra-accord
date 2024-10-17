@@ -52,7 +52,6 @@ import static accord.utils.Functions.foldl;
  */
 abstract class CoordinatePreAccept<T> extends AbstractCoordinatePreAccept<T, PreAcceptReply>
 {
-    // TODO (required): do not use FastPathTracker for coordinating exclusive sync points - these always take the slow path
     final PreAcceptTracker<?> tracker;
     // TODO (expected): this can be cleared after preaccept
     // TODO (expected): back by SortedListMap; must handle additional preaccepts (but this is no longer ordinarily enabled)

@@ -46,6 +46,7 @@ import accord.primitives.Unseekables;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
+import accord.utils.async.Cancellable;
 
 public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
 {
@@ -98,13 +99,13 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
     @Override
     public KeyHistory keyHistory()
     {
-        return KeyHistory.COMMANDS;
+        return KeyHistory.SYNC;
     }
 
     @Override
-    protected void process()
+    protected Cancellable submit()
     {
-        node.mapReduceConsumeLocal(this, minEpoch, acceptEpoch, this);
+        return node.mapReduceConsumeLocal(this, minEpoch, acceptEpoch, this);
     }
 
     @Override
@@ -156,12 +157,6 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         if (deps == okMax.deps && witnessedAt == okMax.witnessedAt)
             return okMax;
         return new PreAcceptOk(txnId, witnessedAt, deps);
-    }
-
-    @Override
-    public void accept(PreAcceptReply reply, Throwable failure)
-    {
-        node.reply(replyTo, replyContext, reply, failure);
     }
 
     @Override

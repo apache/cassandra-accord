@@ -104,7 +104,7 @@ public class FastPathTracker extends PreAcceptTracker<FastPathTracker.FastPathSh
 
         final boolean isNewFastPathSuccess()
         {
-            return fastPathAccepts == shard.fastPathQuorumSize && fastPathDelayed < shard.fastPathRejectSize;
+            return fastPathAccepts == shard.fastPathQuorumSize && (fastPathDelayed < shard.fastPathRejectSize || isNewSlowPathSuccess());
         }
 
         @VisibleForTesting

@@ -31,6 +31,7 @@ import accord.primitives.Route;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
+import accord.utils.async.Cancellable;
 
 import static accord.local.PreLoadContext.contextFor;
 import static accord.messages.SimpleReply.Ok;
@@ -63,11 +64,11 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
     }
 
     @Override
-    public void process()
+    public Cancellable submit()
     {
         // TODO (expected, efficiency): do not load from disk to perform this update
         // TODO (expected, consider): do we need to send this to all epochs in between, or just execution epoch?
-        node.mapReduceConsumeLocal(contextFor(txnId), scope, txnId.epoch(), executeAt != null ? executeAt.epoch() : txnId.epoch(), this);
+        return node.mapReduceConsumeLocal(contextFor(txnId), scope, txnId.epoch(), executeAt != null ? executeAt.epoch() : txnId.epoch(), this);
     }
 
     @Override
@@ -86,12 +87,6 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
     public Reply reduce(Reply o1, Reply o2)
     {
         return Ok;
-    }
-
-    @Override
-    public void accept(Reply reply, Throwable failure)
-    {
-        node.reply(replyTo, replyContext, reply, failure);
     }
 
     @Override

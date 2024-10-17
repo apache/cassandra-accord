@@ -25,7 +25,6 @@ import accord.topology.Topologies;
 
 import static accord.primitives.SaveStatus.ReadyToExecute;
 
-// TODO (required, efficiency): dedup - can currently have infinite pending reads that will be executed independently
 public class ReadTxnData extends ReadData
 {
     public static class SerializerSupport

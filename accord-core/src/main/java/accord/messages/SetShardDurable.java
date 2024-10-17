@@ -23,10 +23,11 @@ import accord.local.SafeCommandStore;
 import accord.primitives.AbstractRanges;
 import accord.primitives.SyncPoint;
 import accord.utils.MapReduceConsume;
+import accord.utils.async.Cancellable;
 
 import static accord.messages.SimpleReply.Ok;
 
-public class SetShardDurable extends AbstractEpochRequest<SimpleReply>
+public class SetShardDurable extends AbstractRequest<SimpleReply>
         implements Request, PreLoadContext, MapReduceConsume<SafeCommandStore, SimpleReply>
 {
     public final SyncPoint exclusiveSyncPoint;
@@ -38,13 +39,14 @@ public class SetShardDurable extends AbstractEpochRequest<SimpleReply>
     }
 
     @Override
-    public void process()
+    public Cancellable submit()
     {
         node.markDurable(exclusiveSyncPoint.route.toRanges(), exclusiveSyncPoint.syncId, exclusiveSyncPoint.syncId)
         .addCallback((success, fail) -> {
             if (fail != null) node.reply(replyTo, replyContext, null, fail);
             else node.mapReduceConsumeLocal(this, exclusiveSyncPoint.route, waitForEpoch(), waitForEpoch(), this);
         });
+        return null;
     }
 
     @Override
@@ -61,7 +63,7 @@ public class SetShardDurable extends AbstractEpochRequest<SimpleReply>
     }
 
     @Override
-    public void accept(SimpleReply ok, Throwable failure)
+    protected void acceptInternal(SimpleReply ok, Throwable failure)
     {
     }
 

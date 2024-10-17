@@ -18,8 +18,6 @@
 
 package accord.local;
 
-import java.util.Collection;
-import java.util.Collections;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import javax.annotation.Nonnull;
@@ -81,6 +79,7 @@ import static accord.primitives.Status.PreCommitted;
 import static accord.primitives.Status.Stable;
 import static accord.primitives.Status.Truncated;
 import static accord.primitives.Route.isFullRoute;
+import static accord.primitives.Txn.Kind.EphemeralRead;
 import static accord.primitives.Txn.Kind.Read;
 import static accord.utils.Invariants.illegalState;
 
@@ -338,17 +337,12 @@ public class Commands
         safeStore.notifyListeners(safeCommand, command);
     }
 
-    public static void ephemeralRead(SafeCommandStore safeStore, SafeCommand safeCommand, Route<?> route, TxnId txnId, PartialTxn partialTxn, PartialDeps partialDeps, long executeAtEpoch)
+    public static void ephemeralRead(SafeCommandStore safeStore, SafeCommand safeCommand, Route<?> route, TxnId txnId, PartialTxn partialTxn, PartialDeps partialDeps)
     {
         // TODO (expected): introduce in-memory only commands
         Command command = safeCommand.current();
         if (command.hasBeen(Stable))
             return;
-
-        // TODO (required): by creating synthetic TxnId in future epochs we may not be evictable
-        //   but for ephemeral reads we want parallel eviction - or preferably no durability - anyway
-        //   REVISIT
-        txnId = txnId.withEpoch(executeAtEpoch);
 
         // BREAKING CHANGE NOTE: if in future we support a CommandStore adopting additional ranges (rather than only shedding them)
         //                       then we need to revisit how we execute transactions that awaitsOnlyDeps, as they may need additional
@@ -359,6 +353,19 @@ public class Commands
         CommonAttributes attrs = set(safeStore, SaveStatus.Stable, command, command, participants, Ballot.ZERO, partialTxn, partialDeps);
         safeCommand.stable(safeStore, attrs, Ballot.ZERO, txnId, initialiseWaitingOn(safeStore, txnId, attrs, txnId, route));
         maybeExecute(safeStore, safeCommand, false, true);
+    }
+
+    public static void eraseEphemeralRead(SafeCommandStore safeStore, TxnId txnId)
+    {
+        SafeCommand safeCommand = safeStore.unsafeGetNoCleanup(txnId);
+        if (safeCommand == null)
+            return;
+
+        Command command = safeCommand.current();
+        if (command.hasBeen(Truncated))
+            return;
+
+        safeCommand.set(erased(command));
     }
 
     public static void markBootstrapComplete(SafeCommandStore safeStore, TxnId localSyncId, Seekables<?, ?> keys)
@@ -641,7 +648,7 @@ public class Commands
             redundantBefore.removeRedundantDependencies(participants, update);
 
         update.forEachWaitingOnId(safeStore, update, waiting, executeAt, (store, upd, w, exec, i) -> {
-            SafeCommand dep = store.ifLoadedAndInitialised(upd.txnId(i));
+            SafeCommand dep = store.ifLoadedAndInitialisedAndNotErased(upd.txnId(i));
             if (dep == null || !dep.current().hasBeen(PreCommitted))
                 return;
             updateWaitingOn(store, w, exec, upd, dep);
@@ -737,17 +744,24 @@ public class Commands
 
     public static void removeWaitingOnKeyAndMaybeExecute(SafeCommandStore safeStore, SafeCommand safeCommand, RoutingKey key)
     {
-        if (safeCommand.current().hasBeen(Applied))
+        Command current = safeCommand.current();
+        if (current.saveStatus().compareTo(SaveStatus.Applied) >= 0)
             return;
 
-        Command.Committed command = safeCommand.current().asCommitted();
+        if (current.saveStatus().compareTo(SaveStatus.Committed) < 0)
+        {   // ephemeral reads can be erased without warning
+            Invariants.checkState(current.txnId().is(EphemeralRead));
+            return;
+        }
 
-        WaitingOn currentWaitingOn = command.waitingOn;
+        Command.Committed committed = safeCommand.current().asCommitted();
+
+        WaitingOn currentWaitingOn = committed.waitingOn;
         int keyIndex = currentWaitingOn.keys.indexOf(key);
         if (keyIndex < 0 || !currentWaitingOn.isWaitingOnKey(keyIndex))
             return;
 
-        WaitingOn.Update waitingOn = new WaitingOn.Update(command);
+        WaitingOn.Update waitingOn = new WaitingOn.Update(committed);
         waitingOn.removeWaitingOnKey(keyIndex);
         safeCommand.updateWaitingOn(waitingOn);
         if (!waitingOn.isWaiting())
@@ -815,7 +829,7 @@ public class Commands
         safeCommand.update(safeStore, result);
         safeStore.progressLog().clear(safeCommand.txnId());
         if (notifyListeners)
-            safeStore.notifyListeners(safeCommand, result);
+            safeStore.notifyListeners(safeCommand, command);
         return result;
     }
 
@@ -984,7 +998,7 @@ public class Commands
                         }
                     }
 
-                    depSafe = safeStore.ifLoadedAndInitialised(directlyBlockedOn);
+                    depSafe = safeStore.ifLoadedAndInitialisedAndNotErased(directlyBlockedOn);
                     if (depSafe == null)
                     {
                         loadDepId = directlyBlockedOn;
@@ -1094,9 +1108,9 @@ public class Commands
         }
 
         @Override
-        public Collection<TxnId> additionalTxnIds()
+        public TxnId additionalTxnId()
         {
-            return loadDepId == null ? Collections.emptyList() : Collections.singletonList(loadDepId);
+            return loadDepId;
         }
     }
 

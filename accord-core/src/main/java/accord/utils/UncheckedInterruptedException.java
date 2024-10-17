@@ -16,17 +16,32 @@
  * limitations under the License.
  */
 
-package accord.local;
+package accord.utils;
 
-import accord.api.Timeouts;
-import accord.primitives.Timestamp;
-
-public interface NodeCommandStoreService extends TimeService
+public class UncheckedInterruptedException extends RuntimeException
 {
-    long epoch();
-    Node.Id id();
-    Timeouts timeouts();
-    DurableBefore durableBefore();
-    Timestamp uniqueNow();
-    Timestamp uniqueNow(Timestamp atLeast);
+    public UncheckedInterruptedException()
+    {
+        super();
+    }
+
+    public UncheckedInterruptedException(String message)
+    {
+        super(message);
+    }
+
+    public UncheckedInterruptedException(String message, InterruptedException cause)
+    {
+        super(message, cause);
+    }
+
+    public UncheckedInterruptedException(InterruptedException cause)
+    {
+        super(cause);
+    }
+
+    protected UncheckedInterruptedException(String message, InterruptedException cause, boolean enableSuppression, boolean writableStackTrace)
+    {
+        super(message, cause, enableSuppression, writableStackTrace);
+    }
 }

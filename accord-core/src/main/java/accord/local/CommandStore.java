@@ -103,13 +103,13 @@ public abstract class CommandStore implements AgentExecutor
         // TODO (desired): can better encapsulate by accepting only the newRangesForEpoch and deriving the add/remove ranges
         public void add(long epoch, RangesForEpoch newRangesForEpoch, Ranges addRanges)
         {
-            RedundantBefore addRedundantBefore = RedundantBefore.create(addRanges, epoch, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.minForEpoch(epoch));
+            RedundantBefore addRedundantBefore = RedundantBefore.create(addRanges, epoch, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.minForEpoch(epoch));
             update(newRangesForEpoch, addRedundantBefore);
         }
 
         public void remove(long epoch, RangesForEpoch newRangesForEpoch, Ranges removeRanges)
         {
-            RedundantBefore addRedundantBefore = RedundantBefore.create(removeRanges, Long.MIN_VALUE, epoch, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE);
+            RedundantBefore addRedundantBefore = RedundantBefore.create(removeRanges, Long.MIN_VALUE, epoch, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE);
             update(newRangesForEpoch, addRedundantBefore);
         }
 
@@ -225,12 +225,25 @@ public abstract class CommandStore implements AgentExecutor
             safeStore.setRangesForEpoch(update.newRangesForEpoch);
     }
 
+    @VisibleForTesting
+    public void unsafeUpdateRangesForEpoch()
+    {
+        EpochUpdate update = epochUpdateHolder.getAndSet(null);
+        if (update == null)
+            return;
+
+        if (update.addRedundantBefore.size() > 0)
+            unsafeUpsertRedundantBefore(update.addRedundantBefore);
+        if (update.newRangesForEpoch != null)
+            unsafeSetRangesForEpoch(update.newRangesForEpoch);
+    }
+
     public RangesForEpoch unsafeRangesForEpoch()
     {
         return rangesForEpoch;
     }
 
-    protected void unsafeSetRangesForEpoch(RangesForEpoch newRangesForEpoch)
+    public void unsafeSetRangesForEpoch(RangesForEpoch newRangesForEpoch)
     {
         rangesForEpoch = nonNull(newRangesForEpoch);
     }
@@ -342,7 +355,7 @@ public abstract class CommandStore implements AgentExecutor
     {
         // TODO (desired): narrow ranges to those that are owned
         Invariants.checkArgument(txnId.is(ExclusiveSyncPoint));
-        RedundantBefore newRedundantBefore = RedundantBefore.merge(redundantBefore, RedundantBefore.create(ranges, txnId, TxnId.NONE, TxnId.NONE, TxnId.NONE));
+        RedundantBefore newRedundantBefore = RedundantBefore.merge(redundantBefore, RedundantBefore.create(ranges, txnId, txnId, TxnId.NONE, TxnId.NONE, TxnId.NONE));
         unsafeSetRedundantBefore(newRedundantBefore);
         updatedRedundantBefore(safeStore, txnId, ranges);
     }
@@ -466,7 +479,7 @@ public abstract class CommandStore implements AgentExecutor
             }).beginAsResult();
 
             return new EpochReady(epoch, metadata.<Void>map(ignore -> null).beginAsResult(),
-                metadata.flatMap(e -> e.coordination).beginAsResult(),
+                metadata.flatMap(e -> e.fastPath).beginAsResult(),
                 metadata.flatMap(e -> e.data).beginAsResult(),
                 metadata.flatMap(e -> e.reads).beginAsResult());
         };
@@ -478,12 +491,15 @@ public abstract class CommandStore implements AgentExecutor
      * So, the outer future's success is sufficient for the topology to be acknowledged, and the inner future for the
      * bootstrap to be complete.
      */
-    protected Supplier<EpochReady> sync(Node node, Ranges ranges, long epoch, boolean isLoad)
+    protected Supplier<EpochReady> sync(Node node, Ranges ranges, long epoch)
     {
         return () -> {
+            if (redundantBefore.min(ranges, RedundantBefore.Entry::locallyWitnessedBefore).epoch() >= epoch)
+                return new EpochReady(epoch, DONE, DONE, DONE, DONE);
+
             AsyncResults.SettableResult<Void> whenDone = new AsyncResults.SettableResult<>();
             waitingOnSync.put(epoch, new WaitingOnSync(whenDone, ranges));
-            return new EpochReady(epoch, DONE, whenDone, whenDone, whenDone);
+            return new EpochReady(epoch, DONE, whenDone, DONE, DONE);
         };
     }
 
@@ -512,7 +528,7 @@ public abstract class CommandStore implements AgentExecutor
     final void markBootstrapping(SafeCommandStore safeStore, TxnId globalSyncId, Ranges ranges)
     {
         safeStore.setBootstrapBeganAt(bootstrap(globalSyncId, ranges, bootstrapBeganAt));
-        RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, TxnId.NONE, globalSyncId);
+        RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE, globalSyncId);
         safeStore.upsertRedundantBefore(addRedundantBefore);
         updatedRedundantBefore(safeStore, globalSyncId, ranges);
     }
@@ -522,7 +538,7 @@ public abstract class CommandStore implements AgentExecutor
     {
         final Ranges slicedRanges = durableRanges.slice(safeStore.ranges().allUntil(globalSyncId.epoch()), Minimal);
         TxnId locallyRedundantBefore = safeStore.redundantBefore().min(slicedRanges, e -> e.locallyAppliedOrInvalidatedBefore);
-        RedundantBefore addShardRedundant = RedundantBefore.create(slicedRanges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, globalSyncId, TxnId.NONE, TxnId.NONE);
+        RedundantBefore addShardRedundant = RedundantBefore.create(slicedRanges, Long.MIN_VALUE, Long.MAX_VALUE, globalSyncId, TxnId.NONE, globalSyncId, TxnId.NONE, TxnId.NONE);
         safeStore.upsertRedundantBefore(addShardRedundant);
         updatedRedundantBefore(safeStore, globalSyncId, slicedRanges);
         safeStore = safeStore; // make unusable in lambda
@@ -546,7 +562,7 @@ public abstract class CommandStore implements AgentExecutor
             }
 
             execute(PreLoadContext.empty(), safeStore0 -> {
-                RedundantBefore addGc = RedundantBefore.create(slicedRanges, Long.MIN_VALUE, Long.MAX_VALUE, globalSyncId, globalSyncId, globalSyncId, TxnId.NONE);
+                RedundantBefore addGc = RedundantBefore.create(slicedRanges, Long.MIN_VALUE, Long.MAX_VALUE, globalSyncId, globalSyncId, globalSyncId, globalSyncId, TxnId.NONE);
                 safeStore0.upsertRedundantBefore(addGc);
             }).begin(agent());
         });
@@ -556,8 +572,12 @@ public abstract class CommandStore implements AgentExecutor
     {
     }
 
-    protected void markSynced(TxnId syncId, Ranges ranges)
+    protected void markSynced(SafeCommandStore safeStore, TxnId syncId, Ranges ranges)
     {
+        RedundantBefore newRedundantBefore = RedundantBefore.merge(redundantBefore, RedundantBefore.create(ranges, syncId, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE));
+        unsafeSetRedundantBefore(newRedundantBefore);
+        updatedRedundantBefore(safeStore, syncId, ranges);
+
         if (waitingOnSync.isEmpty())
             return;
 
@@ -605,7 +625,7 @@ public abstract class CommandStore implements AgentExecutor
         }
         agent.onStale(staleSince, ranges);
 
-        RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE, staleUntilAtLeast);
+        RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE, staleUntilAtLeast);
         safeStore.upsertRedundantBefore(addRedundantBefore);
         // find which ranges need to bootstrap, subtracting those already in progress that cover the id
 
@@ -626,6 +646,7 @@ public abstract class CommandStore implements AgentExecutor
                 // TODO (review): Convoluted check to not overwrite existing bootstraps with TxnId.NONE
                 // If loading from disk didn't finish before this then we might initialize the range at TxnId.NONE?
                 // Does CommandStores.topology ensure that doesn't happen? Is it fine if it does because it will get superseded?
+
                 Ranges newBootstrapRanges = ranges;
                 for (Ranges existing : bootstrapBeganAt.values())
                     newBootstrapRanges = newBootstrapRanges.without(existing);
@@ -721,5 +742,11 @@ public abstract class CommandStore implements AgentExecutor
         if (without == in.getValue())
             return in;
         return new SimpleImmutableEntry<>(in.getKey(), without);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return id;
     }
 }

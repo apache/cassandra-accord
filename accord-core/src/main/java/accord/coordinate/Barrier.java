@@ -233,7 +233,7 @@ public class Barrier extends AsyncResults.AbstractResult<TxnId>
         ExistingTransactionCheck check = new ExistingTransactionCheck();
         RoutingKey k = route.get(0).asRoutingKey();
         node.commandStores().mapReduceConsume(
-                contextFor(k, KeyHistory.COMMANDS),
+                contextFor(k, KeyHistory.SYNC),
                 k.toUnseekable(),
                 minEpoch,
                 Long.MAX_VALUE,

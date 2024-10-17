@@ -69,6 +69,12 @@ public class DefaultLocalListeners implements LocalListeners
     {
         void notify(SafeCommandStore safeStore, SafeCommand safeCommand, TxnId listener);
         boolean notify(SafeCommandStore safeStore, SafeCommand safeCommand, ComplexListener listener);
+
+        class NoOpNotifySink implements NotifySink
+        {
+            @Override public void notify(SafeCommandStore safeStore, SafeCommand safeCommand, TxnId listener) {}
+            @Override public boolean notify(SafeCommandStore safeStore, SafeCommand safeCommand, LocalListeners.ComplexListener listener) { return false; }
+        }
     }
 
     public static class DefaultNotifySink implements NotifySink
@@ -78,7 +84,7 @@ public class DefaultLocalListeners implements LocalListeners
         @Override
         public void notify(SafeCommandStore safeStore, SafeCommand safeCommand, TxnId listenerId)
         {
-            SafeCommand listener = safeStore.ifLoadedAndInitialised(listenerId);
+            SafeCommand listener = safeStore.ifLoadedAndInitialisedAndNotErased(listenerId);
             if (listener != null) Commands.listenerUpdate(safeStore, listener, safeCommand);
             else
             {

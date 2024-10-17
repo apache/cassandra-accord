@@ -83,7 +83,7 @@ public abstract class Stabilise<R> implements Callback<ReadReply>
             contact = contact.with(allTopologies.nodes().without(stableTracker.nodes()).without(allTopologies::isFaulty));
 
         if (contact == null) callback.accept(null, new Exhausted(txnId, route.homeKey(), null));
-        else Commit.commitMinimal(contact, node, stableTracker.topologies(), allTopologies, ballot, txnId, txn, route, executeAt, stabiliseDeps, this);
+        else Commit.commitMinimalNoRead(contact, node, stableTracker.topologies(), allTopologies, ballot, txnId, txn, route, executeAt, stabiliseDeps, this);
     }
 
     @Override

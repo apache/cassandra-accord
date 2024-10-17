@@ -140,7 +140,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 node.agent().metricsEventsListener().onPreempted(txnId);
             else if (failure instanceof Timeout)
                 node.agent().metricsEventsListener().onTimeout(txnId);
-            else if (failure instanceof Invalidated)
+            else if (failure instanceof Invalidated) // TODO (expected): should we tick this counter? we haven't invalidated anything
                 node.agent().metricsEventsListener().onInvalidated(txnId);
         }
 

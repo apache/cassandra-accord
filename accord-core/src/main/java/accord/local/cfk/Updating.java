@@ -46,7 +46,7 @@ import accord.utils.RelationMultiMap;
 import accord.utils.SortedArrays;
 import accord.utils.SortedCursor;
 
-import static accord.local.KeyHistory.COMMANDS;
+import static accord.local.KeyHistory.SYNC;
 import static accord.local.cfk.CommandsForKey.InternalStatus.APPLIED;
 import static accord.local.cfk.CommandsForKey.InternalStatus.COMMITTED;
 import static accord.local.cfk.CommandsForKey.InternalStatus.INVALID_OR_TRUNCATED_OR_PRUNED;
@@ -702,7 +702,7 @@ class Updating
 
     static void updateUnmanagedAsync(CommandStore commandStore, TxnId txnId, RoutingKey key, NotifySink notifySink)
     {
-        PreLoadContext context = PreLoadContext.contextFor(txnId, RoutingKeys.of(key), COMMANDS);
+        PreLoadContext context = PreLoadContext.contextFor(txnId, RoutingKeys.of(key), SYNC);
         commandStore.execute(context, safeStore -> {
             SafeCommandsForKey safeCommandsForKey = safeStore.get(key);
             CommandsForKey cur = safeCommandsForKey.current();

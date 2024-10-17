@@ -30,6 +30,7 @@ import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
+import accord.utils.async.Cancellable;
 
 public class GetMaxConflict extends TxnRequest.WithUnsynced<GetMaxConflict.GetMaxConflictOk>
 {
@@ -56,9 +57,9 @@ public class GetMaxConflict extends TxnRequest.WithUnsynced<GetMaxConflict.GetMa
     }
 
     @Override
-    public void process()
+    public Cancellable submit()
     {
-        node.mapReduceConsumeLocal(this, minEpoch, executionEpoch, this);
+        return node.mapReduceConsumeLocal(this, minEpoch, executionEpoch, this);
     }
 
     @Override
@@ -72,12 +73,6 @@ public class GetMaxConflict extends TxnRequest.WithUnsynced<GetMaxConflict.GetMa
     public GetMaxConflictOk reduce(GetMaxConflictOk reply1, GetMaxConflictOk reply2)
     {
         return new GetMaxConflictOk(Timestamp.max(reply1.maxConflict, reply2.maxConflict), Math.max(reply1.latestEpoch, reply2.latestEpoch));
-    }
-
-    @Override
-    public void accept(GetMaxConflictOk result, Throwable failure)
-    {
-        node.reply(replyTo, replyContext, result, failure);
     }
 
     @Override

@@ -54,6 +54,8 @@ public class ExecuteTxn extends ReadCoordinator<ReadReply>
 {
     @SuppressWarnings("unused")
     private static final Logger logger = LoggerFactory.getLogger(ExecuteTxn.class);
+    private static boolean SEND_MINIMUM_STABLE_MESSAGES = true;
+    public static void setSendMinimumStableMessages(boolean sendMin) {SEND_MINIMUM_STABLE_MESSAGES = sendMin; }
 
     final ExecutePath path;
     final Txn txn;
@@ -85,22 +87,25 @@ public class ExecuteTxn extends ReadCoordinator<ReadReply>
     {
         IntHashSet readSet = new IntHashSet();
         to.forEach(i -> readSet.add(i.id));
-        Commit.Kind kind;
+        Commit.stableAndRead(node, allTopologies, commitKind(), txnId, txn, route, readScope, executeAt, stableDeps, readSet, this, SEND_MINIMUM_STABLE_MESSAGES);
+    }
+
+    private Commit.Kind commitKind()
+    {
         switch (path)
         {
             default: throw new AssertionError("Unhandled path: " + path);
-            case FAST:    kind = StableFastPath; break;
-            case SLOW:    kind = StableSlowPath; break;
-            case RECOVER: kind = StableWithTxnAndDeps; break;
+            case FAST:    return StableFastPath;
+            case SLOW:    return StableSlowPath;
+            case RECOVER: return StableWithTxnAndDeps;
         }
-        // we want to send to all topologies, but we only want to track responses from the readScope
-        Commit.stableAndRead(node, allTopologies, kind, txnId, txn, route, readScope, executeAt, stableDeps, readSet, this);
     }
 
     @Override
     public void contact(Id to)
     {
-        node.send(to, new ReadTxnData(to, topologies(), txnId, readScope, executeAt.epoch()), this);
+        if (SEND_MINIMUM_STABLE_MESSAGES) Commit.stableAndRead(to, node, allTopologies, commitKind(), txnId, txn, route, readScope, executeAt, stableDeps, this, SEND_MINIMUM_STABLE_MESSAGES);
+        else node.send(to, new ReadTxnData(to, topologies(), txnId, readScope, executeAt.epoch()), this);
     }
 
     @Override
