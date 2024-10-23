@@ -47,6 +47,7 @@ public interface ShardDistributor
     {
         public interface Splitter<T>
         {
+            default boolean splittable(Range range, int numSplits) { return true; }
             T sizeOf(Range range);
             Range subRange(Range range, T start, T end);
 
@@ -76,6 +77,8 @@ public interface ShardDistributor
             Invariants.checkArgument(from <= to);
             Invariants.checkArgument(to <= numSplits);
             Splitter<T> splitter = this.splitter.apply(Ranges.single(range));
+            if (!splitter.splittable(range, numSplits))
+                return range;
             T size = splitter.sizeOf(range);
             T splitSize = splitter.divide(size, numSplits);
             T remainder = splitter.subtract(size, splitter.multiply(splitSize, numSplits));
