@@ -390,11 +390,12 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
     public static class Clock implements TimeService
     {
         private final AtomicLong now;
-        private final ToLongFunction<TimeUnit> elapsed = elapsedWrapperFromNonMonotonicSource(TimeUnit.MILLISECONDS, this::now);
+        private final ToLongFunction<TimeUnit> elapsed;
 
         public Clock(long now)
         {
             this.now = new AtomicLong(now);
+            this.elapsed = elapsedWrapperFromNonMonotonicSource(TimeUnit.MILLISECONDS, this::now);
         }
 
         public long increment(long by)
