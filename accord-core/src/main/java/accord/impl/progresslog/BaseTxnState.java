@@ -161,6 +161,11 @@ abstract class BaseTxnState extends LogGroupTimers.Timer implements Comparable<B
         return pendingTimerDelay == 0 ? 0 : deadline() + pendingTimerDelay;
     }
 
+    long scheduledTimerDeadline()
+    {
+        return deadline();
+    }
+
     boolean isScheduled()
     {
         return isInHeap();

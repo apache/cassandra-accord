@@ -751,12 +751,10 @@ public abstract class CommandStores
 
     public int[] ids()
     {
-        Snapshot snapshot = current;
-        Int2ObjectHashMap<CommandStore>.KeySet set = snapshot.byId.keySet();
-        int[] ids = new int[set.size()];
-        int idx = 0;
-        for (int a : set)
-            ids[idx++] = a;
+        ShardHolder[] shards = current.shards;
+        int[] ids = new int[shards.length];
+        for (int i = 0; i < ids.length; i++)
+            ids[i] = shards[i].store.id;
         Arrays.sort(ids);
         return ids;
     }

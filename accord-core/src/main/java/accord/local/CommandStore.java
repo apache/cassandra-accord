@@ -667,9 +667,20 @@ public abstract class CommandStore implements AgentExecutor
         return rejectBefore.rejects(txnId, participants);
     }
 
+    public final MaxConflicts unsafeGetMaxConflicts()
+    {
+        return maxConflicts;
+    }
+
     public final RedundantBefore unsafeGetRedundantBefore()
     {
         return redundantBefore;
+    }
+
+    @Nullable
+    public final RejectBefore unsafeGetRejectBefore()
+    {
+        return rejectBefore;
     }
 
     public final DurableBefore durableBefore()

@@ -18,7 +18,7 @@
 
 package accord.impl.progresslog;
 
-enum Progress
+public enum Progress
 {
     /**
      * We do not expect any progress for this state machine at present

@@ -140,6 +140,11 @@ abstract class WaitingState extends BaseTxnState
         return waitingProgress(encodedState);
     }
 
+    final @Nonnull long waitingKeyTrackerBits()
+    {
+        return (encodedState >>> AWAIT_SHIFT) & (-1L >>> (64 - AWAIT_BITS));
+    }
+
     private static @Nonnull BlockedUntil blockedUntil(long encodedState)
     {
         return BlockedUntil.forOrdinal((int) ((encodedState >>> BLOCKED_UNTIL_SHIFT) & BLOCKED_UNTIL_MASK));

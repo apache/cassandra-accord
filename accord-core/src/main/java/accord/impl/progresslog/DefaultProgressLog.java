@@ -19,9 +19,11 @@
 package accord.impl.progresslog;
 
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
@@ -565,6 +567,125 @@ public class DefaultProgressLog implements ProgressLog, Runnable
             long now = node.elapsed(MICROSECONDS);
             if (timers.shouldWake(now))
                 commandStore.execute(this);
+        }
+    }
+
+    public ImmutableView immutableView()
+    {
+        return new ImmutableView(commandStore.id(), stateMap);
+    }
+
+    public static class ImmutableView
+    {
+        private final int storeId;
+        private final Object[] snapshot;
+
+        ImmutableView(int storeId, Object[] snapshot)
+        {
+            this.storeId = storeId;
+            this.snapshot = snapshot;
+        }
+
+        public boolean isEmpty()
+        {
+            return BTree.isEmpty(snapshot);
+        }
+
+        private Iterator<TxnState> iterator = null;
+        private TxnState current = null;
+
+        public boolean advance()
+        {
+            if (iterator == null)
+                iterator = BTree.iterator(snapshot);
+
+            if (!iterator.hasNext())
+            {
+                current = null;
+                return false;
+            }
+
+            current = iterator.next();
+            return true;
+        }
+
+        public int storeId()
+        {
+            return storeId;
+        }
+
+        @Nonnull
+        public TxnId txnId()
+        {
+            return current.txnId;
+        }
+
+        @Nullable
+        public Long timerScheduledAt(TxnStateKind kind)
+        {
+            // TODO (expected): global constant declaring granularity of these timer deadlines
+            if (current.scheduledTimer() == kind)
+                return current.scheduledTimerDeadline();
+            if (current.pendingTimer() == kind)
+                return current.pendingTimerDeadline();
+            return null;
+        }
+
+        public boolean contactEveryone()
+        {
+            return current.contactEveryone();
+        }
+
+        public boolean isWaitingUninitialised()
+        {
+            return current.isUninitialised();
+        }
+
+        @Nonnull
+        public BlockedUntil waitingIsBlockedUntil()
+        {
+            return current.blockedUntil();
+        }
+
+        @Nonnull
+        public BlockedUntil waitingHomeSatisfies()
+        {
+            return current.homeSatisfies();
+        }
+
+        @Nonnull
+        public Progress waitingProgress()
+        {
+            return current.waitingProgress();
+        }
+
+        @Nonnull
+        public long waitingPackedKeyTrackerBits()
+        {
+            return current.waitingKeyTrackerBits();
+        }
+
+        @Nonnull
+        public int waitingRetryCounter()
+        {
+            return current.waitingRetryCounter();
+        }
+
+        @Nonnull
+        public CoordinatePhase homePhase()
+        {
+            return current.phase();
+        }
+
+        @Nonnull
+        public Progress homeProgress()
+        {
+            return current.homeProgress();
+        }
+
+        public int homeRetryCounter()
+        {
+            return current.homeRetryCounter();
         }
     }
 }

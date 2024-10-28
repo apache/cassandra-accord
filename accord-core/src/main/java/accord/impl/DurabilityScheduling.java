@@ -21,8 +21,10 @@ package accord.impl;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.primitives.Ints;
@@ -527,6 +529,85 @@ public class DurabilityScheduling implements ConfigurationService.Listener
             }
         }
         prev.forEach((r, s) -> s.markDefunct());
+    }
+
+    public synchronized ImmutableView immutableView()
+    {
+        TreeMap<Range, ShardScheduler> schedulers = new TreeMap<>(Range::compare);
+        schedulers.putAll(shardSchedulers);
+        return new ImmutableView(schedulers);
+    }
+
+    public static class ImmutableView
+    {
+        private final TreeMap<Range, ShardScheduler> schedulers;
+
+        ImmutableView(TreeMap<Range, ShardScheduler> schedulers)
+        {
+            this.schedulers = schedulers;
+        }
+
+        private Iterator<Map.Entry<Range, ShardScheduler>> iterator = null;
+        private Range range = null;
+        private ShardScheduler scheduler = null;
+
+        public boolean advance()
+        {
+            if (iterator == null)
+                iterator = schedulers.entrySet().iterator();
+
+            if (!iterator.hasNext())
+            {
+                range = null;
+                scheduler = null;
+                return false;
+            }
+
+            Map.Entry<Range, ShardScheduler> next = iterator.next();
+            range = next.getKey();
+            scheduler = next.getValue();
+            return false;
+        }
+
+        public Range range()
+        {
+            return range;
+        }
+
+        public int nodeOffset()
+        {
+            return scheduler.nodeOffset;
+        }
+
+        public int index()
+        {
+            return scheduler.index;
+        }
+
+        public int numberOfSplits()
+        {
+            return scheduler.numberOfSplits;
+        }
+
+        public long rangeStartedAtMicros()
+        {
+            return scheduler.rangeStartedAtMicros;
+        }
+
+        public long cycleStartedAtMicros()
+        {
+            return scheduler.cycleStartedAtMicros;
+        }
+
+        public long retryDelayMicros()
+        {
+            return scheduler.retryDelayMicros;
+        }
+
+        public boolean isDefunct()
+        {
+            return scheduler.defunct;
+        }
     }
 
     /**

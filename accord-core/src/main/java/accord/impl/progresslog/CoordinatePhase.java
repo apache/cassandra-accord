@@ -19,7 +19,7 @@
 package accord.impl.progresslog;
 
 // the phase of the distributed state machine
-enum CoordinatePhase
+public enum CoordinatePhase
 {
     /**
      * This replica is not known to be a home shard of the transaction
