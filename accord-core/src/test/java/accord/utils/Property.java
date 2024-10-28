@@ -535,6 +535,58 @@ public class Property
         }
     }
 
+    public static class ForwardingCommand<State, SystemUnderTest, Result> implements Command<State, SystemUnderTest, Result>
+    {
+        private final Command<State, SystemUnderTest, Result> delegate;
+
+        public ForwardingCommand(Command<State, SystemUnderTest, Result> delegate)
+        {
+            this.delegate = delegate;
+        }
+
+        protected Command<State, SystemUnderTest, Result> delegate()
+        {
+            return delegate;
+        }
+
+        @Override
+        public PreCheckResult checkPreconditions(State state)
+        {
+            return delegate().checkPreconditions(state);
+        }
+
+        @Override
+        public Result apply(State state) throws Throwable
+        {
+            return delegate().apply(state);
+        }
+
+        @Override
+        public Result run(SystemUnderTest sut) throws Throwable
+        {
+            return delegate().run(sut);
+        }
+
+        @Override
+        public void checkPostconditions(State state, Result expected, SystemUnderTest sut, Result actual) throws Throwable
+        {
+            delegate().checkPostconditions(state, expected, sut, actual);
+        }
+
+        @Override
+        public String detailed(State state)
+        {
+            return delegate().detailed(state);
+        }
+
+        @Override
+        public void process(State state, SystemUnderTest sut) throws Throwable
+        {
+            // don't call delegate here else the process function calls the delegate and not this class
+            Command.super.process(state, sut);
+        }
+    }
+
     public static <State, SystemUnderTest> MultistepCommand<State, SystemUnderTest> multistep(Command<State, SystemUnderTest, ?>... cmds)
     {
         return multistep(Arrays.asList(cmds));
