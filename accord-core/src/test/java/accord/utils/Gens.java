@@ -147,6 +147,28 @@ public class Gens {
         };
     }
 
+    public static <T> PickBuilder<T> pick()
+    {
+        return new PickBuilder<>();
+    }
+
+    public static class PickBuilder<T>
+    {
+        private final Map<Gen<T>, Integer> commands = new LinkedHashMap<>();
+
+        public PickBuilder<T> add(Gen<T> gen)
+        {
+            commands.put(gen, 1);
+            return this;
+        }
+
+        public Gen<T> build()
+        {
+            var top = pick(commands);
+            return rs -> top.next(rs).next(rs);
+        }
+    }
+
     public static Gen.IntGen pickZipf(int[] array)
     {
         if (array == null || array.length == 0)
