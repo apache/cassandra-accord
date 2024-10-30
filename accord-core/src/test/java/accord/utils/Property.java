@@ -19,6 +19,7 @@
 package accord.utils;
 
 import accord.utils.async.TimeoutUtils;
+import org.agrona.collections.LongArrayList;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -445,6 +446,7 @@ public class Property
             {
                 State state = null;
                 List<String> history = new ArrayList<>(steps);
+                LongArrayList historyTiming = stepTimeout == null ? null : new LongArrayList();
                 try
                 {
                     checkInterrupted();
@@ -469,18 +471,18 @@ public class Property
                                 for (Command<State, SystemUnderTest, ?> sub : ((MultistepCommand<State, SystemUnderTest>) cmd))
                                 {
                                     history.add(sub.detailed(state));
-                                    process(sub, state, sut, history.size());
+                                    process(sub, state, sut, history.size(), historyTiming);
                                 }
                             }
                             else
                             {
                                 history.add(cmd.detailed(state));
-                                process(cmd, state, sut, history.size());
+                                process(cmd, state, sut, history.size(), historyTiming);
                             }
                         }
                         commands.destroySut(sut, null);
                         commands.destroyState(state, null);
-                        commands.onSuccess(state, sut, history);
+                        commands.onSuccess(state, sut, maybeRewriteHistory(history, historyTiming));
                     }
                     catch (Throwable t)
                     {
@@ -498,7 +500,8 @@ public class Property
                 }
                 catch (Throwable t)
                 {
-                    throw new PropertyError(statefulPropertyError(this, t, state, history), t);
+
+                    throw new PropertyError(statefulPropertyError(this, t, state, maybeRewriteHistory(history, historyTiming)), t);
                 }
                 if (pure)
                 {
@@ -508,14 +511,35 @@ public class Property
             }
         }
 
-        private <State, SystemUnderTest> void process(Command cmd, State state, SystemUnderTest sut, int id) throws Throwable
+        private static List<String> maybeRewriteHistory(List<String> history, @Nullable LongArrayList historyTiming)
+        {
+            if (historyTiming == null) return history;
+            List<String> newHistory = new ArrayList<>(history.size());
+            for (int i = 0; i < history.size(); i++)
+            {
+                String step = history.get(i);
+                long timeNanos = historyTiming.getLong(i);
+                newHistory.add(step + ";\tDuration " + Duration.ofNanos(timeNanos));
+            }
+            return newHistory;
+        }
+
+        private <State, SystemUnderTest> void process(Command cmd, State state, SystemUnderTest sut, int id, @Nullable LongArrayList stepTiming) throws Throwable
         {
             if (stepTimeout == null)
             {
                 cmd.process(state, sut);
                 return;
             }
-            TimeoutUtils.runBlocking(stepTimeout, "Stateful Step " + id + ": " + cmd.detailed(state), () -> cmd.process(state, sut));
+            long startNanos = System.nanoTime();
+            try
+            {
+                TimeoutUtils.runBlocking(stepTimeout, "Stateful Step " + id + ": " + cmd.detailed(state), () -> cmd.process(state, sut));
+            }
+            finally
+            {
+                stepTiming.add(System.nanoTime() - startNanos);
+            }
         }
     }
 
