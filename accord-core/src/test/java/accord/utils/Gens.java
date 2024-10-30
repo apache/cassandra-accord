@@ -29,6 +29,7 @@ import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableSet;
@@ -90,6 +91,63 @@ public class Gens {
         return rs -> gen.next(rs).next(rs);
     }
 
+    public static <T> OneOfBuilder<T> oneOf()
+    {
+        return new OneOfBuilder<>();
+    }
+
+    public static class OneOfBuilder<T>
+    {
+        private final Map<Gen<T>, Integer> weighted = new LinkedHashMap<>();
+        private final Set<Gen<T>> unweighted = new LinkedHashSet<>();
+        private Gen.IntGen unknownWeightGen = Gens.ints().between(1, 10);
+
+        public OneOfBuilder<T> add(Gen<T> gen)
+        {
+            unweighted.add(gen);
+            return this;
+        }
+
+        public OneOfBuilder<T> add(int weight, Gen<T> gen)
+        {
+            weighted.put(gen, weight);
+            return this;
+        }
+
+        public OneOfBuilder<T> unknownWeights(Gen.IntGen gen)
+        {
+            this.unknownWeightGen = gen;
+            return this;
+        }
+
+        public Gen<Gen<T>> buildWithDynamicWeights()
+        {
+            if (unweighted.isEmpty())
+            {
+                Gen<T> gen = build();
+                return i -> gen;
+            }
+            return rs -> {
+                Map<Gen<T>, Integer> commands = new LinkedHashMap<>();
+                commands.putAll(weighted);
+                for (var gen : unweighted)
+                    commands.put(gen, unknownWeightGen.nextInt(rs));
+                var top = pick(commands);
+                return rs2 -> top.next(rs2).next(rs2);
+            };
+        }
+
+        public Gen<T> build()
+        {
+            Map<Gen<T>, Integer> commands = new LinkedHashMap<>();
+            commands.putAll(weighted);
+            for (var gen : unweighted)
+                commands.put(gen, 1);
+            var top = pick(commands);
+            return rs -> top.next(rs).next(rs);
+        }
+    }
+
     public static Gen.IntGen pickInt(int... ts)
     {
         return rs -> ts[rs.nextInt(0, ts.length)];
@@ -145,28 +203,6 @@ public class Gens {
             }
             return list.get(list.size() - 1).value;
         };
-    }
-
-    public static <T> PickBuilder<T> pick()
-    {
-        return new PickBuilder<>();
-    }
-
-    public static class PickBuilder<T>
-    {
-        private final Map<Gen<T>, Integer> commands = new LinkedHashMap<>();
-
-        public PickBuilder<T> add(Gen<T> gen)
-        {
-            commands.put(gen, 1);
-            return this;
-        }
-
-        public Gen<T> build()
-        {
-            var top = pick(commands);
-            return rs -> top.next(rs).next(rs);
-        }
     }
 
     public static Gen.IntGen pickZipf(int[] array)
