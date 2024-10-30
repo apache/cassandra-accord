@@ -470,14 +470,14 @@ public abstract class CommandStore implements AgentExecutor
      */
     protected Supplier<EpochReady> sync(Node node, Ranges ranges, long epoch, boolean isLoad)
     {
-        return () -> syncInternal(node, ranges, epoch, isLoad);
+        return () -> syncInternal(node, ranges, epoch, DONE, isLoad);
     }
 
-    protected EpochReady syncInternal(Node node, Ranges ranges, long epoch, boolean isLoad)
+    protected EpochReady syncInternal(Node node, Ranges ranges, long epoch, AsyncResult<Void> metadata, boolean isLoad)
     {
         AsyncResults.SettableResult<Void> whenDone = new AsyncResults.SettableResult<>();
         fetchMajorityDeps(whenDone, node, epoch, ranges);
-        return new EpochReady(epoch, DONE, whenDone, whenDone, whenDone);
+        return new EpochReady(epoch, metadata, whenDone, whenDone, whenDone);
     }
 
     private MajorityDepsFetcher fetcher;
