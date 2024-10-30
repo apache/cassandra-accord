@@ -29,8 +29,6 @@ import accord.utils.SortedArrays.SortedArrayList;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.IntFunction;
@@ -229,13 +227,11 @@ public abstract class AbstractTracker<ST extends ShardTracker>
         Object[] buffer = null;
         int bufferCount = 0;
         int previ = 0;
-        List<Id> faultyNodes = new ArrayList<>();
         for (int i = 0 ; i < nodes.size() ; ++i)
         {
             Id node = nodes.get(i);
             if (sorter.isFaulty(node))
             {
-                faultyNodes.add(node);
                 if (Failed == reportTo.prerecordFailure(node))
                     return null;
 
