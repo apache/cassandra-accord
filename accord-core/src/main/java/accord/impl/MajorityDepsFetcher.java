@@ -193,12 +193,13 @@ public class MajorityDepsFetcher
                             {
                                 try
                                 {
+                                    boolean notifyWaiting = false;
                                     synchronized (MajorityDepsFetcher.this)
                                     {
                                         index = nextIndex;
                                         if (index >= numberOfSplits)
                                         {
-                                            waiting.forEach(w -> w.trySuccess(null));
+                                            notifyWaiting = true;
                                             logger.info("Successfully fetched majority deps for {} at epoch {}", this.range, epoch);
                                             defunct = true;
                                             shardSchedulers.remove(this.range, ShardScheduler.this);
@@ -208,6 +209,8 @@ public class MajorityDepsFetcher
                                             schedule();
                                         }
                                     }
+                                    if (notifyWaiting)
+                                        waiting.forEach(w -> w.trySuccess(null));
                                 }
                                 catch (Throwable t)
                                 {
