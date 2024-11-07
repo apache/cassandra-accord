@@ -328,6 +328,12 @@ public class AsyncResults
         {
             return failure == null;
         }
+
+        @Override
+        public String toString()
+        {
+            return "Immediate{" + (isSuccess() ? "success" : "failure") + "}";
+        }
     }
 
     /**
