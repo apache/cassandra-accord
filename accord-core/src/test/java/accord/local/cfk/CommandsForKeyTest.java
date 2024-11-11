@@ -39,6 +39,7 @@ import org.slf4j.LoggerFactory;
 import accord.api.Agent;
 import accord.api.Data;
 import accord.api.DataStore;
+import accord.api.Journal;
 import accord.api.ProgressLog;
 import accord.api.ProgressLog.BlockedUntil;
 import accord.api.Query;
@@ -947,6 +948,11 @@ public class CommandsForKeyTest
 
             queue.poll().run(safeStore);
             return true;
+        }
+
+        public Journal.Loader loader()
+        {
+            throw new UnsupportedOperationException();
         }
 
         @Override

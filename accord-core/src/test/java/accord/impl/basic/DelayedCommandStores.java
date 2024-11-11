@@ -22,7 +22,6 @@ import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Queue;
 import java.util.concurrent.Callable;
 import java.util.function.BiConsumer;
@@ -33,6 +32,7 @@ import com.google.common.collect.Iterables;
 
 import accord.api.Agent;
 import accord.api.DataStore;
+import accord.api.Journal;
 import accord.api.LocalListeners;
 import accord.api.ProgressLog;
 import accord.api.RoutingKey;
@@ -46,9 +46,11 @@ import accord.impl.basic.TaskExecutorService.Task;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.CommandStores;
+import accord.local.DurableBefore;
 import accord.local.Node;
 import accord.local.NodeCommandStoreService;
 import accord.local.PreLoadContext;
+import accord.local.RedundantBefore;
 import accord.local.SafeCommandStore;
 import accord.local.ShardDistributor;
 import accord.primitives.Range;
@@ -153,7 +155,8 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
                 return;
 
             // Journal will not have result persisted. This part is here for test purposes and ensuring that we have strict object equality.
-            Command reconstructed = journal.reconstruct(id, current.txnId());
+            // TODO: redundant/durable before
+            Command reconstructed = journal.loadCommand(id, current.txnId(), RedundantBefore.EMPTY, DurableBefore.EMPTY);
             List<Difference<?>> diff = ReflectionUtils.recursiveEquals(current, reconstructed);
             Invariants.checkState(diff.isEmpty(), "Commands did not match: expected %s, given %s, node %s, store %d, diff %s", current, reconstructed, node, id(), new LazyToString(() -> String.join("\n", Iterables.transform(diff, Object::toString))));
         }
@@ -283,7 +286,8 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
 
                 Command before = safe.original();
                 Command after = safe.current();
-                commandStore.journal.onExecute(commandStore.id(), before, after, Objects.equals(context.primaryTxnId(), after.txnId()));
+                // TODO: do we want to use AccordCommandStore, since it handles caches?
+                commandStore.journal.saveCommand(commandStore.id(), new Journal.CommandUpdate(before, after), () -> {});
                 commandStore.validateRead(safe.current());
             });
             super.postExecute();

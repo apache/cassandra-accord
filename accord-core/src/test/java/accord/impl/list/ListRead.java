@@ -46,7 +46,7 @@ public class ListRead implements Read
     private static final Logger logger = LoggerFactory.getLogger(ListRead.class);
 
     private final Function<? super CommandStore, AsyncExecutor> executor;
-    private final boolean isEphemeralRead;
+    public final boolean isEphemeralRead;
     public final Seekables<?, ?> userReadKeys; // those only to be returned to user
     public final Seekables<?, ?> keys; // those including necessary for writes
 

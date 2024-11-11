@@ -33,17 +33,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.NetworkFilter;
-import accord.api.MessageSink;
+import accord.Utils;
 import accord.api.LocalConfig;
+import accord.api.MessageSink;
 import accord.coordinate.CoordinationAdapter;
+import accord.impl.DefaultLocalListeners;
+import accord.impl.DefaultRemoteListeners;
 import accord.impl.DefaultTimeouts;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.IntKey;
-import accord.impl.DefaultLocalListeners;
-import accord.impl.progresslog.DefaultProgressLogs;
-import accord.impl.DefaultRemoteListeners;
 import accord.impl.SizeOfIntersectionSorter;
 import accord.impl.TestAgent;
+import accord.impl.progresslog.DefaultProgressLogs;
 import accord.local.AgentExecutor;
 import accord.local.DurableBefore;
 import accord.local.Node;
@@ -64,8 +65,6 @@ import accord.utils.Invariants;
 import accord.utils.RandomSource;
 import accord.utils.ThreadPoolScheduler;
 
-import static accord.Utils.id;
-import static accord.Utils.idList;
 import static accord.local.TimeService.elapsedWrapperFromNonMonotonicSource;
 import static accord.primitives.Routable.Domain.Key;
 import static accord.primitives.Txn.Kind.Write;
@@ -116,7 +115,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
 
     private synchronized Id nextNodeId()
     {
-        return id(nextNodeId++);
+        return Utils.id(nextNodeId++);
     }
 
     private synchronized long nextMessageId()
@@ -258,7 +257,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
 
     public Node get(int i)
     {
-        return get(id(i));
+        return get(Utils.id(i));
     }
 
     public static MockConfigurationService configService(Node node)
@@ -276,7 +275,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
 
     public MockConfigurationService configService(int i)
     {
-        return configService(id(i));
+        return configService(Utils.id(i));
     }
 
     public Iterable<MockConfigurationService> configServices(int... ids)
@@ -299,7 +298,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
     public Iterable<Node> nodes(int... ids)
     {
         assert ids.length > 0;
-        return nodes(idList(ids));
+        return nodes(Utils.idList(ids));
     }
 
     public static class Config

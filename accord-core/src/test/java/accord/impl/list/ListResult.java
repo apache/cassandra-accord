@@ -42,7 +42,7 @@ public class ListResult implements Result, Reply
     public final Keys responseKeys;
     public final int[][] read; // equal in size to keys.size()
     public final ListUpdate update;
-    private final Status status;
+    public final Status status;
 
     public ListResult(Status status, Id client, long requestId, TxnId txnId, Seekables<?, ?> readKeys, Keys responseKeys, int[][] read, ListUpdate update)
     {

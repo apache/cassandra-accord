@@ -38,6 +38,7 @@ import org.junit.jupiter.api.Test;
 
 import accord.api.Agent;
 import accord.api.DataStore;
+import accord.api.Journal;
 import accord.api.ProgressLog;
 import accord.api.RemoteListeners;
 import accord.api.RemoteListeners.Registration;
@@ -392,6 +393,12 @@ public class RemoteListenersTest
                                                       DefaultLocalListeners.DefaultNotifySink.INSTANCE),
                   new EpochUpdateHolder());
             this.storeId = id;
+        }
+
+        @Override
+        public Journal.Loader loader()
+        {
+            throw new UnsupportedOperationException();
         }
 
         @Override public boolean inStore() { return false; }

@@ -16,15 +16,28 @@
  * limitations under the License.
  */
 
-package accord.burn;
+package accord.utils;
 
-import org.junit.jupiter.api.Test;
+import java.time.Duration;
+import java.util.concurrent.TimeUnit;
 
-public class BurnTest extends BurnTestBase
+import org.awaitility.Awaitility;
+import org.awaitility.core.ThrowingRunnable;
+
+public class TestUtils
 {
-    @Test
-    public void testOne()
+    public static void spinUntilSuccess(ThrowingRunnable runnable)
     {
-        run(System.nanoTime());
+        spinUntilSuccess(runnable, 10);
+    }
+
+    public static void spinUntilSuccess(ThrowingRunnable runnable, int timeoutInSeconds)
+    {
+        Awaitility.await()
+                  .pollInterval(Duration.ofMillis(100))
+                  .pollDelay(0, TimeUnit.MILLISECONDS)
+                  .atMost(timeoutInSeconds, TimeUnit.SECONDS)
+                  .ignoreExceptions()
+                  .untilAsserted(runnable);
     }
 }

@@ -53,8 +53,8 @@ import accord.utils.RandomSource;
 import accord.utils.SortedArrays.SortedArrayList;
 import org.agrona.collections.IntHashSet;
 
-import static accord.burn.BurnTest.HASH_RANGE_END;
-import static accord.burn.BurnTest.HASH_RANGE_START;
+import static accord.burn.BurnTestBase.HASH_RANGE_END;
+import static accord.burn.BurnTestBase.HASH_RANGE_START;
 
 // TODO (testing): add change replication factor
 public class TopologyRandomizer

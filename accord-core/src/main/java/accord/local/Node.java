@@ -671,7 +671,9 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
      */
     public TxnId nextTxnId(Txn.Kind rw, Domain domain)
     {
-        return new TxnId(uniqueNow(), rw, domain);
+        TxnId txnId = new TxnId(uniqueNow(), rw, domain);
+        Invariants.checkState((txnId.lsb & (0xffff & ~TxnId.IDENTITY_FLAGS)) == 0);
+        return txnId;
     }
 
     public AsyncResult<Result> coordinate(Txn txn)

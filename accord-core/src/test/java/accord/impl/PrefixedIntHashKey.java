@@ -157,7 +157,7 @@ public class PrefixedIntHashKey implements RoutableKey
 
     public static final class Hash extends PrefixedIntRoutingKey
     {
-        private Hash(int prefix, int hash)
+        public Hash(int prefix, int hash)
         {
             super(prefix, hash);
         }

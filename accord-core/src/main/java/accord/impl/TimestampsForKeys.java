@@ -21,6 +21,7 @@ package accord.impl;
 import accord.api.RoutingKey;
 import accord.api.VisibleForImplementation;
 import accord.local.SafeCommandStore;
+import accord.local.cfk.CommandsForKey;
 import accord.primitives.RoutingKeys;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -48,7 +49,8 @@ public class TimestampsForKeys
         {
             if (safeStore.redundantBefore().preBootstrapOrStale(TxnId.min(txnId, current.lastWriteId()), RoutingKeys.of(tfk.key().toUnseekable())) == FULLY)
                 return current;
-            throw illegalState("%s is less than the most recent write timestamp %s", executeAt, lastWrite);
+            if (CommandsForKey.reportLinearizabilityViolations())
+                throw illegalState("%s is less than the most recent write timestamp %s", executeAt, lastWrite);
         }
 
         Timestamp lastExecuted = current.lastExecutedTimestamp();
@@ -61,7 +63,8 @@ public class TimestampsForKeys
         {
             if (!safeStore.safeToReadAt(executeAt).contains(tfk.key().toUnseekable()))
                 return current;
-            throw illegalState("%s is less than the most recent executed timestamp %s", executeAt, lastExecuted);
+            if (CommandsForKey.reportLinearizabilityViolations())
+                throw illegalState("%s is less than the most recent executed timestamp %s", executeAt, lastExecuted);
         }
 
         long micros = executeAt.hlc();

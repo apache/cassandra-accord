@@ -24,8 +24,7 @@ import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
-
-import org.junit.jupiter.api.Assertions;
+import accord.utils.Invariants;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -78,8 +77,8 @@ public class RecordingMessageSink extends SimpleMessageSink
 
     public void assertHistorySizes(int requests, int responses)
     {
-        Assertions.assertEquals(requests, this.requests.size());
-        Assertions.assertEquals(responses, this.responses.size());
+        Invariants.checkArgument(requests == this.requests.size());
+        Invariants.checkArgument(responses == this.responses.size());
     }
 
     public void clearHistory()

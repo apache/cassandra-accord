@@ -46,11 +46,11 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import javax.annotation.Nullable;
 
-import org.junit.jupiter.api.Assertions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.api.BarrierType;
+import accord.api.Journal;
 import accord.api.LocalConfig;
 import accord.api.MessageSink;
 import accord.api.RoutingKey;
@@ -82,6 +82,7 @@ import accord.impl.progresslog.DefaultProgressLogs;
 import accord.local.AgentExecutor;
 import accord.local.Command;
 import accord.local.CommandStore;
+import accord.local.CommandStores;
 import accord.local.DurableBefore;
 import accord.local.Node;
 import accord.local.Node.Id;
@@ -450,7 +451,8 @@ public class Cluster
                                                                 }
                                                             },
                                                             Runnable::run,
-                                                            nodeMap::set);
+                                                            nodeMap::set,
+                                                            InMemoryJournal::new);
         if (!failures.isEmpty())
         {
             AssertionError error = new AssertionError("Unexpected errors detected");
@@ -465,7 +467,7 @@ public class Cluster
                                               Runnable checkFailures, Consumer<Packet> responseSink,
                                               Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplierSupplier,
                                               TopologyFactory topologyFactory, Supplier<Packet> in, Consumer<Runnable> noMoreWorkSignal,
-                                              Consumer<Map<Id, Node>> readySignal)
+                                              Consumer<Map<Id, Node>> readySignal, Function<Node.Id, Journal> journalFactory)
     {
         Topology topology = topologyFactory.toTopology(nodes);
         Map<Id, Node> nodeMap = new LinkedHashMap<>();
@@ -523,7 +525,7 @@ public class Cluster
                 BiConsumer<Timestamp, Ranges> onStale = (sinceAtLeast, ranges) -> configRandomizer.onStale(id, sinceAtLeast, ranges);
                 AgentExecutor nodeExecutor = nodeExecutorSupplier.apply(id, onStale);
                 executorMap.put(id, nodeExecutor);
-                Journal journal = new Journal(id);
+                Journal journal = journalFactory.apply(id);
                 journalMap.put(id, journal);
                 BurnTestConfigurationService configService = new BurnTestConfigurationService(id, nodeExecutor, randomSupplier, topology, nodeMap::get, topologyUpdates);
                 DelayedCommandStores.CacheLoadingChance isLoadedCheck = new DelayedCommandStores.CacheLoadingChance()
@@ -596,7 +598,7 @@ public class Cluster
 
             AsyncResult<?> startup = AsyncChains.reduce(nodeMap.values().stream().map(Node::unsafeStart).collect(toList()), (a, b) -> null).beginAsResult();
             while (sinks.processPending());
-            Assertions.assertTrue(startup.isDone());
+            Invariants.checkArgument(startup.isDone());
 
             ClusterScheduler clusterScheduler = sinks.new ClusterScheduler(-1);
             List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));
@@ -626,14 +628,14 @@ public class Cluster
                     listStore.restoreFromSnapshot();
                     // we are simulating node restart, so its remote listeners will also be gone
                     ((DefaultRemoteListeners)nodeMap.get(id).remoteListeners()).clear();
-                    Journal journal = journalMap.get(id);
                     Int2ObjectHashMap<NavigableMap<TxnId, Command>> beforeStores = copyCommands(stores);
                     for (CommandStore s : stores)
                     {
                         DelayedCommandStores.DelayedCommandStore store = (DelayedCommandStores.DelayedCommandStore) s;
                         store.clearForTesting();
-                        journal.reconstructAll(store.loader(), store.id());
                     }
+                    Journal journal = journalMap.get(id);
+                    journal.replay(nodeMap.get(id).commandStores());
                     while (sinks.drain(pred));
                     CommandsForKey.enableLinearizabilityViolationsReporting();
                     Invariants.checkState(listStore.equals(prevData));
@@ -713,10 +715,10 @@ public class Cluster
             Node node = nodeMap.get(id);
 
             Journal journal = journalMap.get(node.id());
-            CommandStore[] stores = nodeMap.get(node.id()).commandStores().all();
+            CommandStores stores = nodeMap.get(node.id()).commandStores();
             // run on node scheduler so doesn't run during replay
             scheduled = node.scheduler().selfRecurring(() -> {
-                journal.purge(j -> j < stores.length ? stores[j] : null);
+                journal.purge(stores);
                 schedule(clusterScheduler, rs, nodes, nodeMap, journalMap);
             }, 0, SECONDS);
         }
@@ -778,7 +780,7 @@ public class Cluster
                     if (!store.unsafeCommands().containsKey(txnId))
                     {
                         Command beforeCommand = before.get(txnId);
-                        if (beforeCommand.saveStatus() == SaveStatus.Erased)
+                        if (beforeCommand.saveStatus() == SaveStatus.Erased || beforeCommand.saveStatus() == SaveStatus.Uninitialised)
                             continue;
 
                         if (store.unsafeGetRedundantBefore().min(beforeCommand.participants().owns(), RedundantBefore.Entry::shardRedundantBefore).compareTo(txnId) > 0)

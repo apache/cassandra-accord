@@ -18,6 +18,7 @@
 
 package accord.local;
 
+import accord.api.Journal;
 import accord.api.LocalListeners;
 import accord.api.ProgressLog;
 import accord.api.DataStore;
@@ -206,6 +207,8 @@ public abstract class CommandStore implements AgentExecutor
     {
         return id;
     }
+
+    public abstract Journal.Loader loader();
 
     @Override
     public Agent agent()

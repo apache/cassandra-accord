@@ -328,8 +328,8 @@ public abstract class Command implements CommonAttributes
                 {
                     default: throw new AssertionError("Unhandled Outcome: " + known.outcome);
                     case Apply:
-                        Invariants.checkState(writes != null, "Writes is null");
-                        Invariants.checkState(result != null, "Result is null");
+                        Invariants.checkState(writes != null, "Writes is null %s", validate);
+                        Invariants.checkState(result != null, "Result is null %s", validate);
                         break;
                     case Invalidated:
                         Invariants.checkState(validate.durability().isMaybeInvalidated(), "%s is not invalidated", validate.durability());
@@ -337,8 +337,8 @@ public abstract class Command implements CommonAttributes
                         Invariants.checkState(validate.durability() != Local);
                     case Erased:
                     case WasApply:
-                        Invariants.checkState(writes == null, "Writes exist");
-                        Invariants.checkState(result == null, "Results exist");
+                        Invariants.checkState(writes == null, "Writes exist for %s", validate);
+                        Invariants.checkState(result == null, "Results exist %s", validate);
                         break;
                 }
             }

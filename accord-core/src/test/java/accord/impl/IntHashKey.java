@@ -111,7 +111,7 @@ public abstract class IntHashKey implements RoutableKey
 
     public static final class Key extends IntHashKey implements accord.api.Key
     {
-        private Key(int key)
+        public Key(int key)
         {
             super(key);
         }

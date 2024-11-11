@@ -44,6 +44,7 @@ import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import accord.api.Journal;
 import accord.api.LocalListeners;
 import accord.api.RoutingKey;
 import accord.impl.progresslog.DefaultProgressLog;
@@ -130,10 +131,12 @@ public abstract class InMemoryCommandStore extends CommandStore
     protected Timestamp maxRedundant = Timestamp.NONE;
 
     private InMemorySafeStore current;
+    private final Journal.Loader loader;
 
     public InMemoryCommandStore(int id, NodeCommandStoreService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder)
     {
         super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder);
+        this.loader = new CommandLoader(this);
     }
 
     protected boolean canExposeUnloaded()
@@ -1377,88 +1380,107 @@ public abstract class InMemoryCommandStore extends CommandStore
         unsafeSetRejectBefore(new RejectBefore());
     }
 
-    public interface Loader
+    public Journal.Loader loader()
     {
-        void load(Command next);
-        void apply(Command next);
+        return loader;
     }
 
-    public Loader loader()
+    private static class CommandLoader implements Journal.Loader
     {
-        return new Loader()
+        private final InMemoryCommandStore commandStore;
+
+        private CommandLoader(InMemoryCommandStore commandStore)
         {
-            private PreLoadContext context(Command command, KeyHistory keyHistory)
+            this.commandStore = commandStore;
+        }
+
+        private PreLoadContext context(Command command, KeyHistory keyHistory)
+        {
+            TxnId txnId = command.txnId();
+            AbstractUnseekableKeys keys = null;
+
+            if (CommandsForKey.manages(txnId))
+                keys = (AbstractUnseekableKeys) command.participants().hasTouched();
+            else if (!CommandsForKey.managesExecution(txnId) && command.hasBeen(Status.Stable) && !command.hasBeen(Status.Truncated))
+                keys = command.asCommitted().waitingOn.keys;
+
+            if (keys != null)
             {
-                TxnId txnId = command.txnId();
-                AbstractUnseekableKeys keys = null;
-
-                if (CommandsForKey.manages(txnId))
-                    keys = (AbstractUnseekableKeys) command.participants().hasTouched();
-                else if (!CommandsForKey.managesExecution(txnId) && command.hasBeen(Status.Stable) && !command.hasBeen(Status.Truncated))
-                    keys = command.asCommitted().waitingOn.keys;
-
-                if (keys != null)
-                {
-                    return PreLoadContext.contextFor(txnId, keys, keyHistory);
-                }
-
-                return PreLoadContext.contextFor(txnId);
+                return PreLoadContext.contextFor(txnId, keys, keyHistory);
             }
 
-            public void load(Command command)
+            return PreLoadContext.contextFor(txnId);
+        }
+
+        @Override
+        public void load(Command command, Journal.OnDone onDone)
+        {
+            TxnId txnId = command.txnId();
+
+            try
             {
-                TxnId txnId = command.txnId();
+                commandStore.executeInContext(commandStore,
+                                              context(command, ASYNC),
+                                              safeStore -> {
+                                                  Command local = command;
+                                                  if (local.status() != Truncated && local.status() != Invalidated)
+                                                  {
+                                                      Cleanup cleanup = Cleanup.shouldCleanup(safeStore, local, local.participants());
+                                                      switch (cleanup)
+                                                      {
+                                                          case NO:
+                                                              break;
+                                                          case INVALIDATE:
+                                                          case TRUNCATE_WITH_OUTCOME:
+                                                          case TRUNCATE:
+                                                          case ERASE:
+                                                              local = Commands.purge(local, local.participants(), cleanup);
+                                                      }
+                                                  }
 
-                executeInContext(InMemoryCommandStore.this,
-                                 context(command, ASYNC),
-                                 safeStore -> {
-                                     Command local = command;
-                                     if (local.status() != Truncated && local.status() != Invalidated)
-                                     {
-                                         Cleanup cleanup = Cleanup.shouldCleanup(safeStore, local, local.participants());
-                                         switch (cleanup)
-                                         {
-                                             case NO:
-                                                 break;
-                                             case INVALIDATE:
-                                             case TRUNCATE_WITH_OUTCOME:
-                                             case TRUNCATE:
-                                             case ERASE:
-                                                 local = Commands.purge(local, local.participants(), cleanup);
-                                         }
-                                     }
-
-                                     local = safeStore.unsafeGet(txnId).update(safeStore, local);
-                                     if (local.status() == Truncated)
-                                         safeStore.progressLog().clear(local.txnId());
-                                     return local;
-                                 });
-
-
+                                                  local = safeStore.unsafeGet(txnId).update(safeStore, local);
+                                                  if (local.status() == Truncated)
+                                                      safeStore.progressLog().clear(local.txnId());
+                                                  return local;
+                                              });
+                onDone.success();
             }
-
-            public void apply(Command command)
+            catch (Throwable t)
             {
-                TxnId txnId = command.txnId();
+                onDone.failure(t);
+            }
+        }
 
+        @Override
+        public void apply(Command command, Journal.OnDone onDone)
+        {
+            TxnId txnId = command.txnId();
+
+            try
+            {
                 PreLoadContext context = context(command, KeyHistory.TIMESTAMPS);
-                executeInContext(InMemoryCommandStore.this,
-                                 context,
-                                 safeStore -> {
-                                     SafeCommand safeCommand = safeStore.unsafeGet(txnId);
-                                     Command local = safeCommand.current();
-                                     if (local.is(Stable) || local.is(PreApplied))
-                                     {
-                                         Commands.maybeExecute(safeStore, safeCommand, local, true, true);
-                                     }
-                                     else if (local.saveStatus().compareTo(Applying) >= 0 && !local.hasBeen(Truncated))
-                                     {
-                                         unsafeApplyWrites(safeStore, safeCommand, local);
-                                     }
-                                     return null;
-                                 });
+                commandStore.executeInContext(commandStore,
+                                              context,
+                                              safeStore -> {
+                                                  SafeCommand safeCommand = safeStore.unsafeGet(txnId);
+                                                  Command local = safeCommand.current();
+                                                  if (local.is(Stable) || local.is(PreApplied))
+                                                  {
+                                                      Commands.maybeExecute(safeStore, safeCommand, local, true, true);
+                                                  }
+                                                  else if (local.saveStatus().compareTo(Applying) >= 0 && !local.hasBeen(Truncated))
+                                                  {
+                                                      unsafeApplyWrites(safeStore, safeCommand, local);
+                                                  }
+                                                  return null;
+                                              });
+                onDone.success();
             }
-        };
+            catch (Throwable t)
+            {
+                onDone.failure(t);
+            }
+        }
     }
 
     public static void unsafeApplyWrites(SafeCommandStore safeStore, SafeCommand safeCommand, Command command)

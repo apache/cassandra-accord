@@ -18,17 +18,17 @@
 
 package accord.impl.mock;
 
+import accord.api.ConfigurationService;
 import accord.api.MessageSink;
 import accord.api.TestableConfigurationService;
 import accord.local.Node;
 import accord.primitives.Ranges;
 import accord.topology.Topology;
 import accord.utils.EpochFunction;
+import accord.utils.Invariants;
 import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
-
-import org.junit.jupiter.api.Assertions;
 
 import java.util.*;
 
@@ -36,9 +36,9 @@ public class MockConfigurationService implements TestableConfigurationService
 {
     private final MessageSink messageSink;
     private final List<Topology> epochs = new ArrayList<>();
-    private final Map<Long, EpochReady> acks = new HashMap<>();
+    private final Map<Long, ConfigurationService.EpochReady> acks = new HashMap<>();
     private final List<AsyncResult<Void>> syncs = new ArrayList<>();
-    private final List<Listener> listeners = new ArrayList<>();
+    private final List<ConfigurationService.Listener> listeners = new ArrayList<>();
     private final EpochFunction<MockConfigurationService> fetchTopologyHandler;
 
     public MockConfigurationService(MessageSink messageSink, EpochFunction<MockConfigurationService> fetchTopologyHandler)
@@ -55,7 +55,7 @@ public class MockConfigurationService implements TestableConfigurationService
     }
 
     @Override
-    public synchronized void registerListener(Listener listener)
+    public synchronized void registerListener(ConfigurationService.Listener listener)
     {
         listeners.add(listener);
     }
@@ -83,13 +83,13 @@ public class MockConfigurationService implements TestableConfigurationService
     }
 
     @Override
-    public synchronized void acknowledgeEpoch(EpochReady epoch, boolean startSync)
+    public synchronized void acknowledgeEpoch(ConfigurationService.EpochReady epoch, boolean startSync)
     {
-        Assertions.assertFalse(acks.containsKey(epoch.epoch));
+        Invariants.checkArgument(!acks.containsKey(epoch.epoch));
         acks.put(epoch.epoch, epoch);
     }
 
-    public synchronized EpochReady ackFor(long epoch)
+    public synchronized ConfigurationService.EpochReady ackFor(long epoch)
     {
         return acks.get(epoch);
     }
@@ -110,11 +110,11 @@ public class MockConfigurationService implements TestableConfigurationService
         if (topology.epoch() > epochs.size())
             return;
 
-        Assertions.assertEquals(topology.epoch(), epochs.size());
+        Invariants.checkArgument(topology.epoch() == epochs.size());
         epochs.add(topology);
 
         List<AsyncResult<Void>> futures = new ArrayList<>();
-        for (Listener listener : listeners)
+        for (ConfigurationService.Listener listener : listeners)
             futures.add(listener.onTopologyUpdate(topology, false, true));
 
         AsyncResult<Void> result = futures.isEmpty()
@@ -126,7 +126,7 @@ public class MockConfigurationService implements TestableConfigurationService
 
     public synchronized void reportSyncComplete(Node.Id node, long epoch)
     {
-        for (Listener listener : listeners)
+        for (ConfigurationService.Listener listener : listeners)
             listener.onRemoteSyncComplete(node, epoch);
     }
 }

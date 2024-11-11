@@ -27,6 +27,9 @@ import java.util.function.Function;
 import java.util.function.IntFunction;
 import java.util.stream.IntStream;
 
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
 import accord.api.Key;
 import accord.api.RoutingKey;
 import accord.impl.IntKey;
@@ -42,9 +45,6 @@ import accord.utils.Gen;
 import accord.utils.Gens;
 import accord.utils.RandomTestRunner;
 import org.agrona.collections.IntHashSet;
-
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
 
 import static accord.impl.IntKey.keys;
 import static accord.impl.IntKey.range;

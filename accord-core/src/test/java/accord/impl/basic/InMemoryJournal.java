@@ -20,38 +20,41 @@ package accord.impl.basic;
 
 import java.util.AbstractList;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Objects;
-import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
-import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.ImmutableSortedMap;
+
+import accord.api.Journal;
 import accord.api.Result;
 import accord.impl.InMemoryCommandStore;
 import accord.local.Cleanup;
 import accord.local.Command;
 import accord.local.CommandStore;
+import accord.local.CommandStores;
 import accord.local.Commands;
 import accord.local.CommonAttributes;
+import accord.local.DurableBefore;
 import accord.local.Node;
+import accord.local.RedundantBefore;
 import accord.local.StoreParticipants;
 import accord.primitives.Ballot;
 import accord.primitives.Known;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
+import accord.primitives.Ranges;
 import accord.primitives.SaveStatus;
 import accord.primitives.Status;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.utils.Invariants;
-import org.agrona.collections.Long2ObjectHashMap;
+import org.agrona.collections.Int2ObjectHashMap;
 
 import static accord.primitives.SaveStatus.NotDefined;
 import static accord.primitives.SaveStatus.Stable;
@@ -59,24 +62,105 @@ import static accord.primitives.Status.Invalidated;
 import static accord.primitives.Status.Truncated;
 import static accord.utils.Invariants.illegalState;
 
-public class Journal
+public class InMemoryJournal implements Journal
 {
-    private final Long2ObjectHashMap<NavigableMap<TxnId, List<Diff>>> diffsPerCommandStore = new Long2ObjectHashMap<>();
+    private final Int2ObjectHashMap<NavigableMap<TxnId, List<Diff>>> diffsPerCommandStore = new Int2ObjectHashMap<>();
+    private final FieldStates fieldStates;
+
+    private static class FieldStates
+    {
+        RedundantBefore redundantBefore = RedundantBefore.EMPTY;
+        NavigableMap<TxnId, Ranges> bootstrapBeganAt = ImmutableSortedMap.of(TxnId.NONE, Ranges.EMPTY);
+        NavigableMap<Timestamp, Ranges> safeToRead = ImmutableSortedMap.of(Timestamp.NONE, Ranges.EMPTY);
+        CommandStores.RangesForEpoch.Snapshot rangesForEpoch = null;
+    }
 
     private final Node.Id id;
 
-    public Journal(Node.Id id)
+    public InMemoryJournal(Node.Id id)
     {
         this.id = id;
+        this.fieldStates = new FieldStates();
     }
 
-    public void purge(IntFunction<CommandStore> storeSupplier)
+    @Override
+    public Command loadCommand(int commandStoreId, TxnId txnId,
+                               // TODO: currently unused!
+                               RedundantBefore redundantBefore, DurableBefore durableBefore)
     {
-        for (Map.Entry<Long, NavigableMap<TxnId, List<Diff>>> e : diffsPerCommandStore.entrySet())
+        NavigableMap<TxnId, List<Diff>> commandStore = this.diffsPerCommandStore.get(commandStoreId);
+
+        if (commandStore == null)
+            return null;
+
+        List<Diff> saved = this.diffsPerCommandStore.get(commandStoreId).get(txnId);
+        if (saved == null)
+            return null;
+
+        return reconstruct(saved);
+    }
+
+    @Override
+    public void saveCommand(int store, CommandUpdate diff, Runnable onFlush)
+    {
+        if (diff == null)
+            return;
+
+        diffsPerCommandStore.computeIfAbsent(store, (k) -> new TreeMap<>())
+                            .computeIfAbsent(diff.txnId, (k_) -> new ArrayList<>())
+                            .add(diff(diff.before, diff.after));
+
+        if (onFlush!= null)
+            onFlush.run();
+    }
+
+    @Override
+    public RedundantBefore loadRedundantBefore(int commandStoreId)
+    {
+        return fieldStates.redundantBefore;
+    }
+
+    @Override
+    public NavigableMap<TxnId, Ranges> loadBootstrapBeganAt(int commandStoreId)
+    {
+        return fieldStates.bootstrapBeganAt;
+    }
+
+    @Override
+    public NavigableMap<Timestamp, Ranges> loadSafeToRead(int commandStoreId)
+    {
+        return fieldStates.safeToRead;
+    }
+
+    @Override
+    public CommandStores.RangesForEpoch.Snapshot loadRangesForEpoch(int commandStoreId)
+    {
+        return fieldStates.rangesForEpoch;
+    }
+
+    public void saveStoreState(int store, FieldUpdates fieldUpdates, Runnable onFlush)
+    {
+        if (fieldUpdates.newRedundantBefore != null)
+            fieldStates.redundantBefore = fieldUpdates.newRedundantBefore;
+        if (fieldUpdates.newSafeToRead != null)
+            fieldStates.safeToRead = fieldUpdates.newSafeToRead;
+        if (fieldUpdates.newBootstrapBeganAt != null)
+            fieldStates.bootstrapBeganAt = fieldUpdates.newBootstrapBeganAt;
+        if (fieldUpdates.newRangesForEpoch != null)
+            fieldStates.rangesForEpoch = fieldUpdates.newRangesForEpoch;
+
+        if (onFlush!= null)
+            onFlush.run();
+    }
+
+    @Override
+    public void purge(CommandStores commandStores)
+    {
+        for (Map.Entry<Integer, NavigableMap<TxnId, List<Diff>>> e : diffsPerCommandStore.entrySet())
         {
-            int commandStoreId = e.getKey().intValue();
+            int commandStoreId = e.getKey();
             Map<TxnId, List<Diff>> localJournal = e.getValue();
-            CommandStore store = storeSupplier.apply(commandStoreId);
+            CommandStore store = commandStores.forId(commandStoreId);
             if (store == null)
                 continue;
 
@@ -84,7 +168,7 @@ public class Journal
             {
                 List<Diff> diffs = e2.getValue();
                 if (diffs.isEmpty()) continue;
-                Command command = reconstruct(diffs, Reconstruct.Last).get(0);
+                Command command =  reconstruct(diffs);
                 if (command.status() == Truncated || command.status() == Invalidated)
                     continue; // Already truncated
                 Cleanup cleanup = Cleanup.shouldCleanup(store.agent(), command, store.unsafeGetRedundantBefore(), store.durableBefore());
@@ -110,30 +194,35 @@ public class Journal
         }
     }
 
-    public void reconstructAll(InMemoryCommandStore.Loader loader, int commandStoreId)
+    @Override
+    public void replay(CommandStores commandStores)
     {
-        // Nothing to do here, journal is empty for this command store
-        if (!diffsPerCommandStore.containsKey(commandStoreId))
-            return;
+        OnDone sync = new OnDone() {
+            public void success() {}
+            public void failure(Throwable t) { throw new RuntimeException("Caught an exception during replay", t); }
+        };
 
-        // copy to avoid concurrent modification when appending to journal
-        Map<TxnId, List<Diff>> diffs = new TreeMap<>(diffsPerCommandStore.get(commandStoreId));
-        for (Map.Entry<TxnId, List<Diff>> e : diffs.entrySet())
-            e.setValue(new ArrayList<>(e.getValue()));
-
-        List<Command> toApply = new ArrayList<>();
-        for (Map.Entry<TxnId, List<Diff>> e : diffs.entrySet())
+        for (Map.Entry<Integer, NavigableMap<TxnId, List<Diff>>> diffEntry : diffsPerCommandStore.entrySet())
         {
-            if (e.getValue().isEmpty()) continue;
-            Command command = reconstruct(commandStoreId, e.getKey(), e.getValue());
-            if (command.saveStatus().compareTo(Stable) >= 0 && !command.hasBeen(Truncated))
-                toApply.add(command);
-            loader.load(command);
-        }
+            int commandStoreId = diffEntry.getKey();
+            // copy to avoid concurrent modification when appending to journal
+            Map<TxnId, List<Diff>> diffs = new TreeMap<>(diffEntry.getValue());
 
-        toApply.sort(Comparator.comparing(Command::executeAt));
-        for (Command command : toApply)
-            loader.apply(command);
+            InMemoryCommandStore commandStore = (InMemoryCommandStore) commandStores.forId(commandStoreId);
+            Loader loader = commandStore.loader();
+
+            for (Map.Entry<TxnId, List<Diff>> e : diffs.entrySet())
+                e.setValue(new ArrayList<>(e.getValue()));
+
+            for (Map.Entry<TxnId, List<Diff>> e : diffs.entrySet())
+            {
+                if (e.getValue().isEmpty()) continue;
+                Command command =  reconstruct(e.getValue());
+                loader.load(command, sync);
+                if (command.saveStatus().compareTo(Stable) >= 0 && !command.hasBeen(Truncated))
+                    loader.apply(command, sync);
+            }
+        }
     }
 
     static class ErasedList extends AbstractList<Diff>
@@ -204,27 +293,9 @@ public class Journal
         }
     }
 
-    private enum Reconstruct
-    {
-        Each,
-        Last
-    }
-
-    public Command reconstruct(int commandStoreId, TxnId txnId)
-    {
-        return reconstruct(commandStoreId, txnId, diffsPerCommandStore.get(commandStoreId).get(txnId));
-    }
-
-    public Command reconstruct(int commandStoreId, TxnId txnId, List<Diff> diffs)
-    {
-        return reconstruct(diffs, Reconstruct.Last).get(0);
-    }
-
-    private List<Command> reconstruct(List<Diff> diffs, Reconstruct reconstruct)
+    private Command reconstruct(List<Diff> diffs)
     {
         Invariants.checkState(diffs != null && !diffs.isEmpty());
-
-        List<Command> results = new ArrayList<>();
 
         TxnId txnId = null;
         Timestamp executeAt = null;
@@ -253,13 +324,7 @@ public class Journal
             if (diff.executesAtLeast != null)
                 executesAtLeast = diff.executesAtLeast.get();
             if (diff.saveStatus != null)
-            {
-                Set<SaveStatus> allowed = new HashSet<>();
-                allowed.add(SaveStatus.TruncatedApply);
-                allowed.add(SaveStatus.TruncatedApplyWithOutcome);
-
                 saveStatus = diff.saveStatus.get();
-            }
             if (diff.durability != null)
                 durability = diff.durability.get();
 
@@ -300,75 +365,68 @@ public class Journal
                     result = null;
                     break;
             }
-
-            CommonAttributes.Mutable attrs = new CommonAttributes.Mutable(txnId);
-            if (partialTxn != null)
-                attrs.partialTxn(partialTxn);
-            if (durability != null)
-                attrs.durability(durability);
-            if (participants != null) attrs.setParticipants(participants);
-            else attrs.setParticipants(StoreParticipants.empty(txnId));
-
-            // TODO (desired): we can simplify this logic if, instead of diffing, we will infer the diff from the status
-            if (partialDeps != null &&
-                (saveStatus.known.deps != Known.KnownDeps.NoDeps &&
-                 saveStatus.known.deps != Known.KnownDeps.DepsErased &&
-                 saveStatus.known.deps != Known.KnownDeps.DepsUnknown))
-                attrs.partialDeps(partialDeps);
-            Invariants.checkState(saveStatus != null,
-                                  "Save status is null after applying %s", diffs);
-
-            try
-            {
-                if (reconstruct == Reconstruct.Each ||
-                    (reconstruct == Reconstruct.Last && i == diffs.size() - 1))
-                {
-                    Command current;
-                    switch (saveStatus.status)
-                    {
-                        case NotDefined:
-                            current = saveStatus == SaveStatus.Uninitialised ? Command.NotDefined.uninitialised(attrs.txnId())
-                                                                             : Command.NotDefined.notDefined(attrs, promised);
-                            break;
-                        case PreAccepted:
-                            current = Command.PreAccepted.preAccepted(attrs, executeAt, promised);
-                            break;
-                        case AcceptedInvalidate:
-                        case Accepted:
-                        case PreCommitted:
-                            if (saveStatus == SaveStatus.AcceptedInvalidate)
-                                current = Command.AcceptedInvalidateWithoutDefinition.acceptedInvalidate(attrs, promised, acceptedOrCommitted);
-                            else
-                                current = Command.Accepted.accepted(attrs, saveStatus, executeAt, promised, acceptedOrCommitted);
-                            break;
-                        case Committed:
-                        case Stable:
-                            current = Command.Committed.committed(attrs, saveStatus, executeAt, promised, acceptedOrCommitted, waitingOn);
-                            break;
-                        case PreApplied:
-                        case Applied:
-                            current = Command.Executed.executed(attrs, saveStatus, executeAt, promised, acceptedOrCommitted, waitingOn, writes, result);
-                            break;
-                        case Invalidated:
-                        case Truncated:
-                            current = truncated(attrs, saveStatus, executeAt, executesAtLeast, writes, result);
-                            break;
-                        default:
-                            throw new IllegalStateException("Do not know " + saveStatus.status + " " + saveStatus);
-                    }
-
-                    results.add(current);
-                }
-            }
-            catch (Throwable t)
-            {
-
-                throw new RuntimeException("Can not reconstruct from diff:\n" + diffs.stream().map(o -> o.toString())
-                                                                                     .collect(Collectors.joining("\n")),
-                                           t);
-            }
         }
-        return results;
+
+        CommonAttributes.Mutable attrs = new CommonAttributes.Mutable(txnId);
+        if (partialTxn != null)
+            attrs.partialTxn(partialTxn);
+        if (durability != null)
+            attrs.durability(durability);
+        if (participants != null) attrs.setParticipants(participants);
+        else attrs.setParticipants(StoreParticipants.empty(txnId));
+
+        // TODO (desired): we can simplify this logic if, instead of diffing, we will infer the diff from the status
+        if (partialDeps != null &&
+            (saveStatus.known.deps != Known.KnownDeps.NoDeps &&
+             saveStatus.known.deps != Known.KnownDeps.DepsErased &&
+             saveStatus.known.deps != Known.KnownDeps.DepsUnknown))
+            attrs.partialDeps(partialDeps);
+
+        try
+        {
+
+            Command current;
+            switch (saveStatus.status)
+            {
+                case NotDefined:
+                    current = saveStatus == SaveStatus.Uninitialised ? Command.NotDefined.uninitialised(attrs.txnId())
+                                                                     : Command.NotDefined.notDefined(attrs, promised);
+                    break;
+                case PreAccepted:
+                    current = Command.PreAccepted.preAccepted(attrs, executeAt, promised);
+                    break;
+                case AcceptedInvalidate:
+                case Accepted:
+                case PreCommitted:
+                    if (saveStatus == SaveStatus.AcceptedInvalidate)
+                        current = Command.AcceptedInvalidateWithoutDefinition.acceptedInvalidate(attrs, promised, acceptedOrCommitted);
+                    else
+                        current = Command.Accepted.accepted(attrs, saveStatus, executeAt, promised, acceptedOrCommitted);
+                    break;
+                case Committed:
+                case Stable:
+                    current = Command.Committed.committed(attrs, saveStatus, executeAt, promised, acceptedOrCommitted, waitingOn);
+                    break;
+                case PreApplied:
+                case Applied:
+                    current = Command.Executed.executed(attrs, saveStatus, executeAt, promised, acceptedOrCommitted, waitingOn, writes, result);
+                    break;
+                case Invalidated:
+                case Truncated:
+                    current = truncated(attrs, saveStatus, executeAt, executesAtLeast, writes, result);
+                    break;
+                default:
+                    throw new IllegalStateException("Do not know " + saveStatus.status + " " + saveStatus);
+            }
+
+            return current;
+        }
+        catch (Throwable t)
+        {
+            throw new RuntimeException("Can not reconstruct from diff:\n" + diffs.stream().map(o -> o.toString())
+                                                                                 .collect(Collectors.joining("\n")),
+                                       t);
+        }
     }
 
     private static Command.Truncated truncated(CommonAttributes.Mutable attrs, SaveStatus status, Timestamp executeAt, Timestamp executesAtLeast, Writes writes, Result result)
@@ -387,23 +445,6 @@ public class Journal
                 return Command.Truncated.erased(attrs.txnId(), attrs.durability(), attrs.participants());
             case Invalidated:
                 return Command.Truncated.invalidated(attrs.txnId());
-        }
-    }
-
-    public void onExecute(int commandStoreId, Command before, Command after, boolean isPrimary)
-    {
-        if (before == null && after == null)
-            return;
-
-        Diff diff = diff(before, after);
-        if (!isPrimary)
-            diff = diff.asNonPrimary();
-
-        if (diff != null)
-        {
-            diffsPerCommandStore.computeIfAbsent(commandStoreId, (k) -> new TreeMap<>())
-                                .computeIfAbsent(after.txnId(), (k_) -> new ArrayList<>())
-                                .add(diff);
         }
     }
 
@@ -461,12 +502,6 @@ public class Journal
             this.writes = writes;
             this.waitingOn = waitingOn;
             this.result = result;
-        }
-
-        // We allow only save status, and waitingOn to be updated by non-primary transactions
-        public Diff asNonPrimary()
-        {
-            return new Diff(txnId, null, null, saveStatus, null, null, null, null, null, null, waitingOn, null, null);
         }
 
         public boolean allNulls()
@@ -539,7 +574,7 @@ public class Journal
                              ifNotEqual(before, after, Command::participants, true),
                              ifNotEqual(before, after, Command::partialTxn, false),
                              ifNotEqual(before, after, Command::partialDeps, false),
-                             ifNotEqual(before, after, Journal::getWaitingOn, true),
+                             ifNotEqual(before, after, InMemoryJournal::getWaitingOn, true),
                              ifNotEqual(before, after, Command::writes, false),
                              ifNotEqual(before, after, Command::result, false));
         if (diff.allNulls())
@@ -616,5 +651,4 @@ public class Journal
             throw new UnsupportedOperationException();
         }
     }
-
 }

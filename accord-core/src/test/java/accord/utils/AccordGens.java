@@ -373,7 +373,7 @@ public class AccordGens
             else if (chance < 0.7f) { rf = 5; }
             else if (chance < 0.8f) { rf = 7; }
             else                    { rf = 9; }
-            Node.Id[] nodes = Utils.toArray(Gens.lists(nodeGen).unique().ofSizeBetween(rf, rf * 3).next(rs), Node.Id[]::new);
+            Node.Id[] nodes = toArray(Gens.lists(nodeGen).unique().ofSizeBetween(rf, rf * 3).next(rs), Node.Id[]::new);
             Ranges ranges = rangesGenFactory.apply(nodes.length, rf).next(rs);
 
             int numElectorate = nodes.length + rf - 1;

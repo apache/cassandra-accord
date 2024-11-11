@@ -38,9 +38,9 @@ import javax.annotation.Nonnull;
 
 public class ListQuery implements Query
 {
-    final Id client;
-    final long requestId;
-    final boolean isEphemeralRead;
+    public final Id client;
+    public final long requestId;
+    public final boolean isEphemeralRead;
 
     public ListQuery(Id client, long requestId, boolean isEphemeralRead)
     {
