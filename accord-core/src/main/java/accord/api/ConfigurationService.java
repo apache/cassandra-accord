@@ -110,7 +110,7 @@ public interface ConfigurationService
             return "EpochReady{" +
                    "epoch=" + epoch +
                    ", metadata=" + metadata +
-                   ", coordination=" + coordination +
+                   ", fastPath=" + fastPath +
                    ", data=" + data +
                    ", reads=" + reads +
                    '}';
