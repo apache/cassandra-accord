@@ -20,6 +20,8 @@ package accord.coordinate;
 
 import java.util.List;
 
+import javax.annotation.Nullable;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,6 +29,7 @@ import accord.coordinate.CoordinationAdapter.Adapters;
 import accord.coordinate.CoordinationAdapter.Adapters.SyncPointAdapter;
 import accord.local.Node;
 import accord.messages.Apply;
+import accord.messages.Callback;
 import accord.messages.PreAccept.PreAcceptOk;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
@@ -176,15 +179,25 @@ public class CoordinateSyncPoint<U extends Unseekable> extends CoordinatePreAcce
     {
         // TODO (required): consider, document and add invariants checking if this topologies is correct in all cases
         //  (notably ExclusiveSyncPoints should execute in earlier epochs for durability, but not for fetching )
-        Topologies executes = executes(node, syncPoint.route, syncPoint.syncId);
-        sendApply(node, to, syncPoint, executes);
+        sendApply(node, to, syncPoint, executes(node, syncPoint.route, syncPoint.syncId));
     }
+
     public static void sendApply(Node node, Node.Id to, SyncPoint<?> syncPoint, Topologies executes)
+    {
+        sendApply(node, to, syncPoint, executes, null);
+    }
+
+    public static void sendApply(Node node, Node.Id to, SyncPoint<?> syncPoint, @Nullable Callback<Apply.ApplyReply> callback)
+    {
+        sendApply(node, to, syncPoint, executes(node, syncPoint.route, syncPoint.syncId), callback);
+    }
+
+    public static void sendApply(Node node, Node.Id to, SyncPoint<?> syncPoint, Topologies executes, @Nullable Callback<Apply.ApplyReply> callback)
     {
         TxnId txnId = syncPoint.syncId;
         Timestamp executeAt = txnId;
         Txn txn = node.agent().emptySystemTxn(txnId.kind(), txnId.domain());
         Deps deps = syncPoint.waitFor;
-        Apply.sendMaximal(node, to, executes, txnId, syncPoint.route(), txn, executeAt, deps, txn.execute(txnId, executeAt, null), txn.result(txnId, executeAt, null), syncPoint.route());
+        Apply.sendMaximal(node, to, executes, txnId, syncPoint.route(), txn, executeAt, deps, txn.execute(txnId, executeAt, null), txn.result(txnId, executeAt, null), syncPoint.route(), callback);
     }
 }

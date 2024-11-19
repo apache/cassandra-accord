@@ -24,7 +24,7 @@ import javax.annotation.Nullable;
 
 import accord.api.ProtocolModifiers;
 import accord.api.Result;
-import accord.coordinate.ExecuteSyncPoint.ExecuteBlocking;
+import accord.coordinate.ExecuteSyncPoint.ExecuteInclusive;
 import accord.coordinate.tracking.FastPathTracker;
 import accord.coordinate.tracking.PreAcceptTracker;
 import accord.coordinate.tracking.QuorumTracker;
@@ -71,6 +71,11 @@ public interface CoordinationAdapter<R>
         @Override
         public <R> CoordinationAdapter<R> get(TxnId txnId, Step step)
         {
+            switch (txnId.kind())
+            {
+                case ExclusiveSyncPoint: return (CoordinationAdapter<R>) Adapters.exclusiveSyncPoint();
+                case SyncPoint: return (CoordinationAdapter<R>) Adapters.inclusiveSyncPoint();
+            }
             switch (step)
             {
                 default: throw new AssertionError("Unhandled step: " + step);
@@ -219,18 +224,17 @@ public interface CoordinationAdapter<R>
             @Override
             public void execute(Node node, Topologies any, FullRoute<?> route, ExecutePath path, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super SyncPoint<U>, Throwable> callback)
             {
-                Topologies all = forExecution(node, route, txnId, executeAt, deps);
-                persist(node, all, route, txnId, txn, executeAt, deps, txn.execute(txnId, executeAt, null), txn.result(txnId, executeAt, null), callback);
+                persist(node, null, route, txnId, txn, executeAt, deps, txn.execute(txnId, executeAt, null), txn.result(txnId, executeAt, null), callback);
             }
 
             @Override
-            public void persist(Node node, Topologies any, FullRoute<?> route, Route<?> participants, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result, BiConsumer<? super SyncPoint<U>, Throwable> callback)
+            public void persist(Node node, Topologies ignore, FullRoute<?> route, Route<?> participants, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result, BiConsumer<? super SyncPoint<U>, Throwable> callback)
             {
                 Topologies all = forExecution(node, route, txnId, executeAt, deps);
 
                 invokeSuccess(node, route, txnId, txn, deps, callback);
                 new PersistSyncPoint(node, all, txnId, route, txn, executeAt, deps, writes, result)
-                    .start(Apply.FACTORY, Maximal, any, writes, result);
+                .start(Apply.FACTORY, Maximal, all, writes, result);
             }
         }
 
@@ -283,18 +287,6 @@ public interface CoordinationAdapter<R>
             {
                 return node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
             }
-
-            @Override
-            public void execute(Node node, Topologies any, FullRoute<?> route, ExecutePath path, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super SyncPoint<U>, Throwable> callback)
-            {
-                Topologies all = forExecution(node, route, txnId, executeAt, deps);
-
-                ExecuteBlocking<U> execute = ExecuteBlocking.atQuorum(node, all, new SyncPoint<>(txnId, deps, (FullRoute<U>) route), executeAt);
-                execute.start();
-                addOrExecuteCallback(execute, callback);
-            }
-
-            protected abstract void addOrExecuteCallback(ExecuteBlocking<U> execute, BiConsumer<? super SyncPoint<U>, Throwable> callback);
         }
 
         /*
@@ -310,14 +302,6 @@ public interface CoordinationAdapter<R>
             protected AsyncInclusiveSyncPointAdapter() {
                 super();
             }
-
-            @Override
-            protected void addOrExecuteCallback(ExecuteBlocking<U> execute, BiConsumer<? super SyncPoint<U>, Throwable> callback)
-            {
-                // If this is the async adapter then we want to invoke the callback immediately
-                // and the caller can wait on the txn locally if they want
-                callback.accept(execute.syncPoint, null);
-            }
         }
 
         private static class InclusiveSyncPointBlockingAdapter<U extends Unseekable> extends AbstractInclusiveSyncPointAdapter<U>
@@ -329,9 +313,13 @@ public interface CoordinationAdapter<R>
             }
 
             @Override
-            protected void addOrExecuteCallback(ExecuteBlocking<U> execute, BiConsumer<? super SyncPoint<U>, Throwable> callback)
+            public void execute(Node node, Topologies any, FullRoute<?> route, ExecutePath path, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super SyncPoint<U>, Throwable> callback)
             {
+                Topologies all = forExecution(node, route, txnId, executeAt, deps);
+
+                ExecuteInclusive<U> execute = ExecuteInclusive.atQuorum(node, all, new SyncPoint<>(txnId, deps, (FullRoute<U>) route), executeAt);
                 execute.addCallback(callback);
+                execute.start();
             }
 
             @Override

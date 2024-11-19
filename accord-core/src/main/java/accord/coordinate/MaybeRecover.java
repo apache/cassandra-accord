@@ -30,6 +30,7 @@ import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
 
 import static accord.coordinate.Infer.InvalidateAndCallback.locallyInvalidateAndCallback;
+import static accord.primitives.Status.Durability.Majority;
 
 /**
  * A result of null indicates the transaction is globally persistent
@@ -112,7 +113,7 @@ public class MaybeRecover extends CheckShards<Route<?>>
                     if (hasMadeProgress(full))
                     {
                         if (full.durability.isDurable())
-                            node.send(topologies.forEpoch(txnId.epoch()).forKey(route.homeKey()).nodes, to -> new InformDurable(to, topologies, route, txnId, full.executeAtIfKnown(), full.durability));
+                            InformDurable.informHome(node, topologies, txnId, route, full.executeAtIfKnown(), full.durability);
                         callback.accept(full.toProgressToken(), null);
                     }
                     else

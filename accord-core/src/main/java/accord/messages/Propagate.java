@@ -304,9 +304,9 @@ public class Propagate implements PreLoadContext, MapReduceConsume<SafeCommandSt
             didNotAchieveTarget = owns;
         }
 
-        FetchResult current = fetchResult;
         while (true)
         {
+            FetchResult current = fetchResult;
             FetchResult next = current == null ? new FetchResult(achieved, achievedTarget, didNotAchieveTarget)
                                : new FetchResult(achieved.reduce(current.achieved),
                                                  achievedTarget.with((Unseekables)current.achievedTarget),

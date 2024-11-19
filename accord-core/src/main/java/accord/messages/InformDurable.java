@@ -20,6 +20,7 @@ package accord.messages;
 import javax.annotation.Nullable;
 
 import accord.local.Commands;
+import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
@@ -30,11 +31,14 @@ import accord.local.StoreParticipants;
 import accord.primitives.Route;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.topology.Shard;
 import accord.topology.Topologies;
+import accord.topology.Topology;
 import accord.utils.async.Cancellable;
 
 import static accord.local.PreLoadContext.contextFor;
 import static accord.messages.SimpleReply.Ok;
+import static accord.primitives.Status.Durability.Majority;
 
 public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
 {
@@ -61,6 +65,22 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
         super(txnId, scope, waitForEpoch);
         this.executeAt = executeAt;
         this.durability = durability;
+    }
+
+    public static void informHome(Node node, Topologies any, TxnId txnId, Route<?> route, Timestamp executeAt, Durability durability)
+    {
+        long homeEpoch = txnId.epoch();
+        Topology homeEpochTopology = any.forEpoch(homeEpoch);
+        int homeShardIndex = homeEpochTopology.indexForKey(route.homeKey());
+        if (homeShardIndex < 0)
+        {
+            homeEpochTopology = node.topology().globalForEpoch(homeEpoch);
+            homeShardIndex = homeEpochTopology.indexForKey(route.homeKey());
+        }
+
+        Shard homeShard = homeEpochTopology.get(homeShardIndex);
+        Topologies homeTopology = new Topologies.Single(any, new Topology(homeEpoch, homeShard));
+        node.send(homeShard.nodes, to -> new InformDurable(to, homeTopology, route.homeKeyOnlyRoute(), txnId, executeAt, durability));
     }
 
     @Override

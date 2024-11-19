@@ -18,7 +18,7 @@
 
 package accord.coordinate;
 
-import accord.coordinate.ExecuteSyncPoint.ExecuteExclusiveSyncPoint;
+import accord.coordinate.ExecuteSyncPoint.ExecuteExclusive;
 import accord.coordinate.tracking.AllTracker;
 import accord.coordinate.tracking.RequestStatus;
 import accord.local.Node;
@@ -32,7 +32,7 @@ import accord.utils.Invariants;
 import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.async.AsyncResult;
 
-public class CoordinateShardDurable extends ExecuteExclusiveSyncPoint implements Callback<ReadReply>
+public class CoordinateShardDurable extends ExecuteExclusive implements Callback<ReadReply>
 {
     private CoordinateShardDurable(Node node, SyncPoint<Range> exclusiveSyncPoint)
     {

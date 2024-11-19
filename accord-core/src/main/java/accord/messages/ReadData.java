@@ -520,10 +520,17 @@ public abstract class ReadData implements PreLoadContext, Request, MapReduceCons
          * The commit has been rejected due to stale ballot.
          */
         Rejected("CommitRejected"),
+
         /**
          * Either not committed, or not stable
          */
         Insufficient("CommitInsufficient"),
+
+        /**
+         * PreApplied successfully, but the request is blocking so waiting to reply
+         */
+        Waiting("ApplyWaiting"),
+
         Redundant("CommitOrReadRedundant");
 
         final String fullname;

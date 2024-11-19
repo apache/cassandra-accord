@@ -18,53 +18,60 @@
 
 package accord.coordinate.tracking;
 
+import java.util.Set;
+
 import accord.local.Node;
 import accord.topology.Shard;
 import accord.topology.Topologies;
+import org.agrona.collections.ObjectHashSet;
 
-import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.*;
+import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Fail;
+import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.NoChange;
+import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Success;
 
-public class QuorumTracker extends SimpleTracker<QuorumTracker.QuorumShardTracker> implements ResponseTracker
+public class QuorumIdTracker extends SimpleTracker<QuorumIdTracker.QuorumIdShardTracker> implements ResponseTracker
 {
-    public static class QuorumShardTracker extends ShardTracker
+    public static class QuorumIdShardTracker extends ShardTracker
     {
-        protected int successes;
-        protected int failures;
+        protected final Set<Node.Id> successes = new ObjectHashSet<>();
+        protected Set<Node.Id> failures;
 
-        public QuorumShardTracker(Shard shard)
+        public QuorumIdShardTracker(Shard shard)
         {
             super(shard);
         }
 
-        public ShardOutcomes onSuccess(Object ignore)
+        public ShardOutcomes onSuccess(Node.Id from)
         {
-            return ++successes == shard.slowPathQuorumSize ? Success : NoChange;
+            return successes.add(from) && successes.size() == shard.slowPathQuorumSize ? Success : NoChange;
         }
 
         // return true iff hasFailed()
-        public ShardOutcomes onFailure(Object ignore)
+        public ShardOutcomes onFailure(Node.Id from)
         {
-            return failures++ == shard.maxFailures ? Fail : NoChange;
+            if (failures == null)
+                failures = new ObjectHashSet<>();
+            return failures.add(from) && failures.size() == 1 + shard.maxFailures ? Fail : NoChange;
         }
 
         public boolean hasReachedQuorum()
         {
-            return successes >= shard.slowPathQuorumSize;
+            return successes.size() >= shard.slowPathQuorumSize;
         }
 
         boolean hasInFlight()
         {
-            return successes + failures < shard.rf();
+            return successes.size() + (failures == null ? 0 : failures.size()) < shard.rf();
         }
 
         boolean hasFailures()
         {
-            return failures > 0;
+            return failures != null;
         }
 
         boolean hasFailed()
         {
-            return failures > shard.maxFailures;
+            return failures != null && failures.size() > shard.maxFailures;
         }
 
         @Override
@@ -77,39 +84,39 @@ public class QuorumTracker extends SimpleTracker<QuorumTracker.QuorumShardTracke
         }
     }
 
-    public QuorumTracker(Topologies topologies)
+    public QuorumIdTracker(Topologies topologies)
     {
-        super(topologies, QuorumShardTracker[]::new, QuorumShardTracker::new);
+        super(topologies, QuorumIdShardTracker[]::new, QuorumIdShardTracker::new);
     }
 
     public RequestStatus recordSuccess(Node.Id node)
     {
-        return recordResponse(this, node, QuorumShardTracker::onSuccess, null);
+        return recordResponse(this, node, QuorumIdShardTracker::onSuccess, node);
     }
 
     // return true iff hasFailed()
     public RequestStatus recordFailure(Node.Id node)
     {
-        return recordResponse(this, node, QuorumShardTracker::onFailure, null);
+        return recordResponse(this, node, QuorumIdShardTracker::onFailure, node);
     }
 
     public boolean hasFailures()
     {
-        return any(QuorumShardTracker::hasFailures);
+        return any(QuorumIdShardTracker::hasFailures);
     }
 
     public boolean hasFailed()
     {
-        return any(QuorumShardTracker::hasFailed);
+        return any(QuorumIdShardTracker::hasFailed);
     }
 
     public boolean hasInFlight()
     {
-        return any(QuorumShardTracker::hasInFlight);
+        return any(QuorumIdShardTracker::hasInFlight);
     }
 
     public boolean hasReachedQuorum()
     {
-        return all(QuorumShardTracker::hasReachedQuorum);
+        return all(QuorumIdShardTracker::hasReachedQuorum);
     }
 }

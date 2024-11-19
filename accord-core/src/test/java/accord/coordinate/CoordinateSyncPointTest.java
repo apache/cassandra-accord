@@ -102,7 +102,7 @@ class CoordinateSyncPointTest
                                        .flatMap(syncPoint ->
                                                         // the test uses an executor that runs everything right away, so this gets called outside the CommandStore
                                                         node.commandStores().forId(0).submit(() -> {
-                                                            ExecuteSyncPoint.ExecuteExclusiveSyncPoint execute = new ExecuteSyncPoint.ExecuteExclusiveSyncPoint(node, syncPoint, AllTracker::new);
+                                                            ExecuteSyncPoint.ExecuteExclusive execute = new ExecuteSyncPoint.ExecuteExclusive(node, syncPoint, AllTracker::new);
                                                             execute.start();
                                                             return execute;
                                                         })

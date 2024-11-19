@@ -18,9 +18,6 @@
 
 package accord.coordinate;
 
-import java.util.HashSet;
-import java.util.Set;
-
 import accord.api.Result;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.local.Node;
@@ -37,7 +34,6 @@ import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.topology.Topologies;
-import accord.topology.Topology;
 import accord.utils.SortedArrays;
 
 import static accord.coordinate.tracking.RequestStatus.Success;
@@ -55,8 +51,8 @@ public abstract class Persist implements Callback<ApplyReply>
     protected final Result result;
     protected final FullRoute<?> route;
     protected final Topologies topologies;
+    // TODO (expected): track separate ALL and Quorum, so we can report Universal durability to permit faster GC
     protected final QuorumTracker tracker;
-    protected final Set<Id> persistedOn;
     boolean isDone;
 
     protected Persist(Node node, Topologies all, TxnId txnId, Route<?> sendTo, Txn txn, Timestamp executeAt, Deps stableDeps, Writes writes, Result result, FullRoute<?> route)
@@ -72,7 +68,6 @@ public abstract class Persist implements Callback<ApplyReply>
         this.route = route;
         this.topologies = all;
         this.tracker = new QuorumTracker(all);
-        this.persistedOn = new HashSet<>();
     }
 
     @Override
@@ -83,18 +78,12 @@ public abstract class Persist implements Callback<ApplyReply>
             default: throw new IllegalStateException();
             case Redundant:
             case Applied:
-                persistedOn.add(from);
                 if (sendTo == route && tracker.recordSuccess(from) == Success)
                 {
                     if (!isDone)
                     {
                         isDone = true;
-                        Topologies topologies = tracker.topologies();
-                        Topology topology = topologies.forEpoch(txnId.epoch());
-                        int homeShardIndex = topology.indexForKey(route.homeKey());
-                        // we can persist only partially if some shards are already completed; in this case the home shard may not participate
-                        if (homeShardIndex >= 0)
-                            node.send(topology.get(homeShardIndex).nodes, to -> new InformDurable(to, topologies, route, txnId, executeAt, Majority));
+                        InformDurable.informHome(node, topologies, txnId, route, executeAt, Majority);
                     }
                 }
                 break;

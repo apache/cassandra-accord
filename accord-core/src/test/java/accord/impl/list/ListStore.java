@@ -675,7 +675,7 @@ public class ListStore implements DataStore
         });
     }
 
-    private static class Await extends ExecuteSyncPoint.ExecuteExclusiveSyncPoint
+    private static class Await extends ExecuteSyncPoint.ExecuteExclusive
     {
         public Await(Node node, SyncPoint<Range> syncPoint)
         {

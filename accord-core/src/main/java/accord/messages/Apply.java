@@ -113,14 +113,16 @@ public class Apply extends TxnRequest<ApplyReply>
     public static void sendMaximal(Node node, Id to, TxnId txnId, Route<?> sendTo, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result, FullRoute<?> fullRoute)
     {
         Topologies executes = executes(node, sendTo, executeAt);
-        sendMaximal(node, to, executes, txnId, sendTo, txn, executeAt, deps, writes, result, fullRoute);
+        sendMaximal(node, to, executes, txnId, sendTo, txn, executeAt, deps, writes, result, fullRoute, null);
     }
 
-    public static void sendMaximal(Node node, Id to, Topologies executes, TxnId txnId, Route<?> sendTo, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result, FullRoute<?> fullRoute)
+    public static void sendMaximal(Node node, Id to, Topologies executes, TxnId txnId, Route<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result, FullRoute<?> fullRoute, @Nullable Callback<ApplyReply> callback)
     {
-        Topologies participates = participates(node, sendTo, txnId, executeAt, executes);
-        // TODO (expected): should this FACTORY be user configurable? Perhaps via CoordinationAdapter?
-        node.send(to, applyMaximal(FACTORY, to, participates, txnId, sendTo, txn, executeAt, deps, writes, result, fullRoute));
+        Topologies participates = participates(node, route, txnId, executeAt, executes);
+        // TODO (required): should this FACTORY be overridden by the implementation???
+        Apply apply = applyMaximal(FACTORY, to, participates, txnId, route, txn, executeAt, deps, writes, result, fullRoute);
+        if (callback == null) node.send(to, apply);
+        else node.send(to, apply, callback);
     }
 
     public static Topologies executes(Node node, Unseekables<?> route, Timestamp executeAt)
