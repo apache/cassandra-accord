@@ -896,6 +896,11 @@ public class Property
             return addIf(predicate, (rs, state) -> cmd.next(rs));
         }
 
+        public CommandsBuilder<State, SystemUnderTest> addIf(Predicate<State> predicate, Command<State, SystemUnderTest, ?> cmd)
+        {
+            return addIf(predicate, (rs, state) -> cmd);
+        }
+
         public CommandsBuilder<State, SystemUnderTest> addIf(Predicate<State> predicate, Setup<State, SystemUnderTest> cmd)
         {
             if (conditionalCommands == null)
