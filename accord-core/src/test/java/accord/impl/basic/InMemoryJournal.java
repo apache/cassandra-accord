@@ -59,30 +59,18 @@ import org.agrona.collections.Int2ObjectHashMap;
 
 import static accord.api.Journal.Load.ALL;
 import static accord.impl.CommandChange.*;
-import static accord.impl.CommandChange.Fields.ACCEPTED;
-import static accord.impl.CommandChange.Fields.DURABILITY;
-import static accord.impl.CommandChange.Fields.EXECUTES_AT_LEAST;
-import static accord.impl.CommandChange.Fields.EXECUTE_AT;
-import static accord.impl.CommandChange.Fields.PARTIAL_DEPS;
-import static accord.impl.CommandChange.Fields.PARTIAL_TXN;
-import static accord.impl.CommandChange.Fields.PARTICIPANTS;
-import static accord.impl.CommandChange.Fields.PROMISED;
-import static accord.impl.CommandChange.Fields.RESULT;
-import static accord.impl.CommandChange.Fields.SAVE_STATUS;
-import static accord.impl.CommandChange.Fields.WAITING_ON;
-import static accord.impl.CommandChange.Fields.WRITES;
-import static accord.impl.CommandChange.anyFieldChanged;
-import static accord.impl.CommandChange.getFieldChanged;
-import static accord.impl.CommandChange.getFieldIsNull;
-import static accord.impl.CommandChange.getFlags;
-import static accord.impl.CommandChange.getWaitingOn;
-import static accord.impl.CommandChange.nextSetField;
-import static accord.impl.CommandChange.setFieldChanged;
-import static accord.impl.CommandChange.setFieldIsNull;
-import static accord.impl.CommandChange.toIterableSetFields;
-import static accord.impl.CommandChange.unsetFieldIsNull;
-import static accord.impl.CommandChange.unsetIterableFields;
-import static accord.impl.CommandChange.validateFlags;
+import static accord.impl.CommandChange.Field.ACCEPTED;
+import static accord.impl.CommandChange.Field.DURABILITY;
+import static accord.impl.CommandChange.Field.EXECUTES_AT_LEAST;
+import static accord.impl.CommandChange.Field.EXECUTE_AT;
+import static accord.impl.CommandChange.Field.PARTIAL_DEPS;
+import static accord.impl.CommandChange.Field.PARTIAL_TXN;
+import static accord.impl.CommandChange.Field.PARTICIPANTS;
+import static accord.impl.CommandChange.Field.PROMISED;
+import static accord.impl.CommandChange.Field.RESULT;
+import static accord.impl.CommandChange.Field.SAVE_STATUS;
+import static accord.impl.CommandChange.Field.WAITING_ON;
+import static accord.impl.CommandChange.Field.WRITES;
 import static accord.primitives.SaveStatus.ErasedOrVestigial;
 import static accord.primitives.SaveStatus.Stable;
 import static accord.primitives.Status.Invalidated;
@@ -463,20 +451,20 @@ public class InMemoryJournal implements Journal
     private static class Diff
     {
         public final TxnId txnId;
-        public final Map<Fields, Object> changes;
+        public final Map<Field, Object> changes;
         public final int flags;
 
         private Diff(int flags, CommandUpdate update)
         {
             this.flags = flags;
             this.txnId = update.txnId;
-            this.changes = new EnumMap<>(Fields.class);
+            this.changes = new EnumMap<>(Field.class);
 
             Command after = update.after;
             int iterable = toIterableSetFields(flags);
             while (iterable != 0)
             {
-                Fields field = nextSetField(iterable);
+                Field field = nextSetField(iterable);
                 if (!getFieldChanged(field, flags) || getFieldIsNull(field, flags))
                 {
                     iterable = unsetIterableFields(field, iterable);
@@ -547,7 +535,7 @@ public class InMemoryJournal implements Journal
             int iterable = toIterableSetFields(diff.flags);
             while (iterable != 0)
             {
-                Fields field = nextSetField(iterable);
+                Field field = nextSetField(iterable);
                 if (getFieldChanged(field, diff.flags))
                 {
                     this.flags = setFieldChanged(field, this.flags);
@@ -567,7 +555,7 @@ public class InMemoryJournal implements Journal
             }
         }
 
-        private void setNull(Fields field)
+        private void setNull(Field field)
         {
             switch (field)
             {
@@ -612,7 +600,7 @@ public class InMemoryJournal implements Journal
             }
         }
 
-        private void deserialize(Diff diff, Fields field)
+        private void deserialize(Diff diff, Field field)
         {
             switch (field)
             {

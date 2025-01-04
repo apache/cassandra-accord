@@ -26,13 +26,16 @@ import java.util.function.Predicate;
 import javax.annotation.Nullable;
 
 import accord.api.RoutingKey;
+import accord.local.Command;
 import accord.local.PreLoadContext;
 import accord.local.RedundantBefore;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
+import accord.local.StoreParticipants;
 import accord.local.cfk.CommandsForKey.TxnInfo;
 import accord.local.cfk.CommandsForKey.Unmanaged;
 import accord.local.cfk.CommandsForKeyUpdate.CommandsForKeyUpdateWithPostProcess;
+import accord.primitives.Routable;
 import accord.primitives.RoutingKeys;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -104,7 +107,11 @@ abstract class PostProcess
 
         static void load(SafeCommandStore safeStore, SafeCommand safeCommand, SafeCommandsForKey safeCfk, NotifySink notifySink)
         {
-            safeCfk.updatePruned(safeStore, safeCommand.current(), notifySink);
+            Command command = safeCommand.current();
+            StoreParticipants participants = command.participants();
+            if (participants.owns().domain() == Routable.Domain.Key && !participants.hasTouched(safeCfk.key()))
+                command = safeCommand.updateParticipants(safeStore, participants.supplementHasTouched(RoutingKeys.of(safeCfk.key())));
+            safeCfk.updatePruned(safeStore, command, notifySink);
         }
 
         static CommandsForKeyUpdate load(TxnId[] txnIds, CommandsForKeyUpdate result)

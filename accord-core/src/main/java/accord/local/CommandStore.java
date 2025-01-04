@@ -80,27 +80,16 @@ public abstract class CommandStore implements AgentExecutor
     {
         final RangesForEpoch newRangesForEpoch;
         final RedundantBefore addRedundantBefore;
-        final Ranges addGlobalRanges;
 
-        EpochUpdate(RangesForEpoch newRangesForEpoch, RedundantBefore addRedundantBefore, Ranges addGlobalRanges)
+        EpochUpdate(RangesForEpoch newRangesForEpoch, RedundantBefore addRedundantBefore)
         {
             this.newRangesForEpoch = newRangesForEpoch;
             this.addRedundantBefore = addRedundantBefore;
-            this.addGlobalRanges = addGlobalRanges;
         }
     }
 
     public static class EpochUpdateHolder extends AtomicReference<EpochUpdate>
     {
-        // TODO (required, eventually): support removing ranges
-        public void updateGlobal(Ranges addGlobalRanges)
-        {
-            EpochUpdate baseUpdate = new EpochUpdate(null, RedundantBefore.EMPTY, addGlobalRanges);
-            EpochUpdate cur = get();
-            if (cur == null || !compareAndSet(cur, new EpochUpdate(cur.newRangesForEpoch, cur.addRedundantBefore, cur.addGlobalRanges.with(addGlobalRanges))))
-                set(baseUpdate);
-        }
-
         // TODO (desired): can better encapsulate by accepting only the newRangesForEpoch and deriving the add/remove ranges
         public void add(long epoch, RangesForEpoch newRangesForEpoch, Ranges addRanges)
         {
@@ -116,9 +105,9 @@ public abstract class CommandStore implements AgentExecutor
 
         private void update(RangesForEpoch newRangesForEpoch, RedundantBefore addRedundantBefore)
         {
-            EpochUpdate baseUpdate = new EpochUpdate(newRangesForEpoch, addRedundantBefore, Ranges.EMPTY);
+            EpochUpdate baseUpdate = new EpochUpdate(newRangesForEpoch, addRedundantBefore);
             EpochUpdate cur = get();
-            if (cur == null || !compareAndSet(cur, new EpochUpdate(newRangesForEpoch, RedundantBefore.merge(cur.addRedundantBefore, addRedundantBefore), cur.addGlobalRanges)))
+            if (cur == null || !compareAndSet(cur, new EpochUpdate(newRangesForEpoch, RedundantBefore.merge(cur.addRedundantBefore, addRedundantBefore))))
                 set(baseUpdate);
         }
     }
@@ -145,7 +134,7 @@ public abstract class CommandStore implements AgentExecutor
     protected final EpochUpdateHolder epochUpdateHolder;
 
     // Used in markShardStale to make sure the staleness includes in progress bootstraps
-    private transient NavigableMap<TxnId, Ranges> bootstrapBeganAt = ImmutableSortedMap.of(TxnId.NONE, Ranges.EMPTY); // additive (i.e. once inserted, rolled-over until invalidated, and the floor entry contains additions)
+    private transient NavigableMap<TxnId, Ranges> bootstrapBeganAt = emptyBootstrapBeganAt(); // additive (i.e. once inserted, rolled-over until invalidated, and the floor entry contains additions)
     private RedundantBefore redundantBefore = RedundantBefore.EMPTY;
     private MaxConflicts maxConflicts = MaxConflicts.EMPTY;
     private int maxConflictsUpdates = 0;
@@ -168,7 +157,7 @@ public abstract class CommandStore implements AgentExecutor
      * TODO (expected): merge with redundantBefore
      * TODO (required): if we ever actually erase data on disk (after losing ownership), make sure to mark the range unsafe to read
      */
-    private NavigableMap<Timestamp, Ranges> safeToRead = ImmutableSortedMap.of(Timestamp.NONE, Ranges.EMPTY);
+    private NavigableMap<Timestamp, Ranges> safeToRead = emptySafeToRead();
     private final Set<Bootstrap> bootstraps = Collections.synchronizedSet(new DeterministicIdentitySet<>());
     @Nullable private RejectBefore rejectBefore;
 
@@ -249,9 +238,20 @@ public abstract class CommandStore implements AgentExecutor
         return rangesForEpoch;
     }
 
-    public void unsafeSetRangesForEpoch(RangesForEpoch newRangesForEpoch)
+    final void unsafeSetRangesForEpoch(RangesForEpoch newRangesForEpoch)
     {
         rangesForEpoch = nonNull(newRangesForEpoch);
+    }
+
+    protected final void unsafeClearRangesForEpoch()
+    {
+        rangesForEpoch = null;
+    }
+
+    protected void loadRangesForEpoch(RangesForEpoch newRangesForEpoch)
+    {
+        Invariants.checkState(this.rangesForEpoch == null);
+        unsafeSetRangesForEpoch(newRangesForEpoch);
     }
 
     public abstract boolean inStore();
@@ -274,9 +274,21 @@ public abstract class CommandStore implements AgentExecutor
         this.rejectBefore = newRejectBefore;
     }
 
-    protected void unsafeSetRedundantBefore(RedundantBefore newRedundantBefore)
+    final void unsafeSetRedundantBefore(RedundantBefore newRedundantBefore)
     {
         redundantBefore = newRedundantBefore;
+    }
+
+    protected void unsafeClearRedundantBefore()
+    {
+        unsafeSetRedundantBefore(null);
+    }
+
+    protected void loadRedundantBefore(RedundantBefore newRedundantBefore)
+    {
+        Invariants.checkState(redundantBefore == null || redundantBefore.equals(RedundantBefore.EMPTY));
+        Invariants.checkState(newRedundantBefore != null);
+        unsafeSetRedundantBefore(newRedundantBefore);
     }
 
     protected void unsafeUpsertRedundantBefore(RedundantBefore addRedundantBefore)
@@ -287,14 +299,40 @@ public abstract class CommandStore implements AgentExecutor
     /**
      * This method may be invoked on a non-CommandStore thread
      */
-    protected synchronized void unsafeSetSafeToRead(NavigableMap<Timestamp, Ranges> newSafeToRead)
+    final void unsafeSetSafeToRead(NavigableMap<Timestamp, Ranges> newSafeToRead)
     {
         this.safeToRead = newSafeToRead;
     }
 
-    protected void unsafeSetBootstrapBeganAt(NavigableMap<TxnId, Ranges> newBootstrapBeganAt)
+    protected final void unsafeClearSafeToRead()
+    {
+        unsafeSetSafeToRead(null);
+    }
+
+    protected void loadSafeToRead(NavigableMap<Timestamp, Ranges> newSafeToRead)
+    {
+        Invariants.checkState(safeToRead == null || safeToRead.equals(emptySafeToRead()));
+        Invariants.checkState(newSafeToRead != null);
+        unsafeSetSafeToRead(newSafeToRead);
+        updateMaxConflicts(newSafeToRead);
+    }
+
+    final void unsafeSetBootstrapBeganAt(NavigableMap<TxnId, Ranges> newBootstrapBeganAt)
     {
         this.bootstrapBeganAt = newBootstrapBeganAt;
+    }
+
+    protected final void unsafeClearBootstrapBeganAt()
+    {
+        unsafeSetBootstrapBeganAt(null);
+    }
+
+    protected synchronized void loadBootstrapBeganAt(NavigableMap<TxnId, Ranges> newBootstrapBeganAt)
+    {
+        Invariants.checkState(bootstrapBeganAt == null || bootstrapBeganAt.equals(emptyBootstrapBeganAt()));
+        Invariants.checkState(newBootstrapBeganAt != null);
+        unsafeSetBootstrapBeganAt(newBootstrapBeganAt);
+        updateMaxConflicts(newBootstrapBeganAt);
     }
 
     /**
@@ -313,8 +351,34 @@ public abstract class CommandStore implements AgentExecutor
         if (executeAt == null) return;
         if (prev != null && prev.executeAt() != null && prev.executeAt().compareTo(executeAt) >= 0) return;
 
-
         MaxConflicts updatedMaxConflicts = maxConflicts.update(updated.participants().hasTouched(), executeAt);
+        updateMaxConflicts(executeAt, updatedMaxConflicts);
+    }
+
+    protected void updateMaxConflicts(Ranges ranges, Timestamp executeAt)
+    {
+        updateMaxConflicts(executeAt, maxConflicts.update(ranges, executeAt));
+    }
+
+    protected void updateMaxConflicts(NavigableMap<? extends Timestamp, Ranges> map)
+    {
+        Timestamp max = Timestamp.NONE;
+        MaxConflicts updated = maxConflicts;
+        for (Map.Entry<? extends Timestamp, Ranges> e : map.entrySet())
+        {
+            Timestamp at = e.getKey();
+            if (at.compareTo(Timestamp.NONE) > 0)
+            {
+                updated = updated.update(e.getValue(), at);
+                max = Timestamp.max(max, at);
+            }
+        }
+        if (updated != maxConflicts)
+            updateMaxConflicts(max, updated);
+    }
+
+    protected void updateMaxConflicts(Timestamp executeAt, MaxConflicts updatedMaxConflicts)
+    {
         if (++maxConflictsUpdates >= agent.maxConflictsPruneInterval())
         {
             int initialSize = updatedMaxConflicts.size();
@@ -542,6 +606,7 @@ public abstract class CommandStore implements AgentExecutor
     final void markBootstrapping(SafeCommandStore safeStore, TxnId globalSyncId, Ranges ranges)
     {
         safeStore.setBootstrapBeganAt(bootstrap(globalSyncId, ranges, bootstrapBeganAt));
+        updateMaxConflicts(ranges, globalSyncId);
         RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, TxnId.NONE, TxnId.NONE, globalSyncId);
         safeStore.upsertRedundantBefore(addRedundantBefore);
         updatedRedundantBefore(safeStore, globalSyncId, ranges);
@@ -723,6 +788,7 @@ public abstract class CommandStore implements AgentExecutor
         execute(empty(), safeStore -> {
             Ranges validatedSafeToRead = redundantBefore.validateSafeToRead(forBootstrapAt, ranges);
             safeStore.setSafeToRead(purgeAndInsert(safeToRead, at, validatedSafeToRead));
+            updateMaxConflicts(ranges, at);
         }).beginAsResult();
     }
 
@@ -778,5 +844,15 @@ public abstract class CommandStore implements AgentExecutor
     public boolean isBootstrapping()
     {
         return !bootstraps.isEmpty();
+    }
+
+    public static NavigableMap<TxnId, Ranges> emptyBootstrapBeganAt()
+    {
+        return ImmutableSortedMap.of(TxnId.NONE, Ranges.EMPTY);
+    }
+
+    public static NavigableMap<Timestamp, Ranges> emptySafeToRead()
+    {
+        return ImmutableSortedMap.of(Timestamp.NONE, Ranges.EMPTY);
     }
 }

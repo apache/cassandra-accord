@@ -49,16 +49,17 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
     void updatePruned(SafeCommandStore safeStore, Command nextCommand, NotifySink notifySink)
     {
         CommandsForKey prevCfk = current();
-        update(safeStore, nextCommand, prevCfk, prevCfk.updatePruned(nextCommand), notifySink);
+        update(safeStore, nextCommand, prevCfk, prevCfk.prunedCallback(nextCommand), notifySink);
     }
 
-    public void update(SafeCommandStore safeStore, Command nextCommand, boolean isOutOfRange)
+    public void update(SafeCommandStore safeStore, Command nextCommand)
     {
         CommandsForKey prevCfk = current();
-        update(safeStore, nextCommand, prevCfk, prevCfk.update(nextCommand, isOutOfRange));
+        update(safeStore, nextCommand, prevCfk, prevCfk.update(nextCommand));
     }
 
-    void callback(SafeCommandStore safeStore, Command nextCommand)
+    // equivalent to update, but for async callbacks with additional validation around pruning
+    public void callback(SafeCommandStore safeStore, Command nextCommand)
     {
         CommandsForKey prevCfk = current();
         update(safeStore, nextCommand, prevCfk, prevCfk.callback(nextCommand));

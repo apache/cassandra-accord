@@ -30,7 +30,6 @@ import java.util.AbstractList;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.Predicate;
 import javax.annotation.Nullable;
 
 /**
@@ -205,9 +204,9 @@ public class Deps
         return new Deps(this.keyDeps.with(that.keyDeps), this.rangeDeps.with(that.rangeDeps), this.directKeyDeps.with(that.directKeyDeps));
     }
 
-    public Deps without(Predicate<TxnId> remove)
+    public Deps without(Deps that)
     {
-        return new Deps(keyDeps.without(remove), rangeDeps.without(remove), directKeyDeps.without(remove));
+        return new Deps(this.keyDeps.without(that.keyDeps), this.rangeDeps.without(that.rangeDeps), this.directKeyDeps.without(that.directKeyDeps));
     }
 
     public PartialDeps intersecting(Participants<?> participants)

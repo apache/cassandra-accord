@@ -18,11 +18,10 @@
 
 package accord.local;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Set;
 import java.util.function.BiConsumer;
-import javax.annotation.Nullable;
+
+import javax.annotation.Nonnull;
 
 import accord.api.Agent;
 import accord.api.DataStore;
@@ -30,13 +29,13 @@ import accord.api.DataStore.FetchRanges;
 import accord.api.DataStore.FetchResult;
 import accord.api.DataStore.StartingRangeFetch;
 import accord.coordinate.CoordinateSyncPoint;
-import accord.coordinate.FetchMaxConflict;
 import accord.primitives.Ranges;
 import accord.primitives.Routable;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.utils.DeterministicIdentitySet;
 import accord.utils.Invariants;
+import accord.utils.ReducingRangeMap;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
@@ -78,15 +77,11 @@ import static accord.utils.Invariants.illegalState;
  */
 class Bootstrap
 {
-    static class SafeToRead
+    static class UnsafeToRead
     {
         final Ranges ranges;
-        // we default to MAX_VALUE because *starting* commands that haven't *started* _will_ start after those that have already
-        int startedAt = Integer.MAX_VALUE;
-        Timestamp safeToReadAt;
-        List<SafeToRead> overlaps = new ArrayList<>();
 
-        SafeToRead(Ranges ranges)
+        UnsafeToRead(Ranges ranges)
         {
             this.ranges = ranges;
         }
@@ -95,11 +90,12 @@ class Bootstrap
     // an attempt to fetch some portion of the range we are bootstrapping
     class Attempt implements FetchRanges, BiConsumer<Object, Throwable>
     {
-        final List<SafeToRead> states = new ArrayList<>();
+        final DeterministicIdentitySet<UnsafeToRead> unsafeToReads = new DeterministicIdentitySet<>();
+        ReducingRangeMap<Timestamp> safeToReadAts = new ReducingRangeMap<>();
+
         Runnable cancel;
         FetchResult fetch;
 
-        int logicalClock;
         /**
          * valid: the ranges we are still meant to fetch - i.e. excluding those that have been invalidated or marked failed
          */
@@ -196,16 +192,8 @@ class Bootstrap
             store.markUnsafeToRead(ranges);
 
             // find any pre-existing states we may overlap with, mark both as overlaps, and add ourselves to the collection
-            SafeToRead newState = new SafeToRead(ranges);
-            for (SafeToRead maybeOverlaps : states)
-            {
-                if (maybeOverlaps.ranges.intersects(newState.ranges))
-                {
-                    maybeOverlaps.overlaps.add(newState);
-                    newState.overlaps.add(maybeOverlaps);
-                }
-            }
-            states.add(newState);
+            UnsafeToRead newState = new UnsafeToRead(ranges);
+            unsafeToReads.add(newState);
 
             return new StartingRangeFetch()
             {
@@ -224,79 +212,34 @@ class Bootstrap
             };
         }
 
-        private void started(SafeToRead state, @Nullable Timestamp maxApplied)
+        private void started(UnsafeToRead state, @Nonnull Timestamp maxAppliedLessOrEqualTo)
         {
-            if (maxApplied == null)
+            Invariants.checkState(maxAppliedLessOrEqualTo != null);
+            synchronized (this)
             {
-                synchronized (this)
-                {
-                    if (state.startedAt == Integer.MAX_VALUE)
-                        state.startedAt = logicalClock++;
-                }
-                // TODO (expected): associate callbacks with this CommandStore, to remove synchronization
-                FetchMaxConflict.fetchMaxConflict(node, state.ranges)
-                                .begin((executeAt, failure) -> {
-                                    store.maybeExecuteImmediately(() -> safeToReadCallback(state, executeAt, failure));
-                                });
-            }
-            else
-            {
-                synchronized (this)
-                {
-                    Timestamp safeToReadAt = maxApplied.compareTo(globalSyncId) < 0 ? globalSyncId : maxApplied.next();
-                    if (state.startedAt == Integer.MAX_VALUE)
-                        state.startedAt = logicalClock++;
-                    state.safeToReadAt = safeToReadAt;
-                    maybeComplete(state);
-                }
-            }
-        }
+                if (!unsafeToReads.remove(state))
+                    return;
 
-
-        private void safeToReadCallback(SafeToRead state, Timestamp executeAt, Throwable failure)
-        {
-            if (failure == null)
-            {
-                synchronized (this)
-                {
-                    state.safeToReadAt = executeAt;
-                    maybeComplete(state);
-                }
-            }
-            else
-            {
-                // TODO (expected): first check to see if we are still relevant
-                CommandStore store = CommandStore.current();
-                node.agent().onFailedBootstrap("SafeToRead", state.ranges, () -> {
-                    store.maybeExecuteImmediately(() -> started(state, null));
-                }, failure);
+                Timestamp safeToReadAt = maxAppliedLessOrEqualTo.compareTo(globalSyncId) <= 0 ? globalSyncId : maxAppliedLessOrEqualTo.next();
+                safeToReadAts = ReducingRangeMap.add(safeToReadAts, state.ranges, safeToReadAt);
+                maybeComplete(state.ranges);
             }
         }
 
         // starting cancelled, can just unlink and make sure we invoke onDone on any we may have interfered with
-        private synchronized void cancel(SafeToRead state)
+        private synchronized void cancel(UnsafeToRead state)
         {
-            if (state.startedAt != Integer.MAX_VALUE)
+            if (!unsafeToReads.remove(state))
                 throw illegalState("Tried to cancel starting a fetch that had already started");
-            state.startedAt = Integer.MIN_VALUE;
 
-            // unlink from other overlaps, and remove ourselves from states collection
-            for (SafeToRead overlap : state.overlaps)
-                overlap.overlaps.remove(state);
-            states.remove(state);
-
-            // then process those overlaps in case to mark safeToRead
-            for (SafeToRead overlap : states)
-            {
-                if (fetched.intersects(overlap.ranges))
-                    maybeComplete(overlap);
-            }
+            maybeComplete(state.ranges);
         }
 
         // incomplete fetch cancelled, do we need to do anything?
         // it's fine to leave our no-op to complete, but there might be issues with failure states
-        private synchronized void abort(SafeToRead state)
+        private synchronized void abort(UnsafeToRead state)
         {
+            unsafeToReads.remove(state);
             // TODO (expected, consider): are there any edge cases here?
         }
 
@@ -307,14 +250,7 @@ class Bootstrap
                 return;
 
             fetched = fetched.with(ranges);
-            for (SafeToRead state : states)
-            {
-                if (ranges.intersects(state.ranges))
-                {
-                    // TODO (desired): try to uncontact if not finished
-                    maybeComplete(state);
-                }
-            }
+            maybeComplete(ranges);
         }
 
         @Override
@@ -346,28 +282,23 @@ class Bootstrap
          * with this safe-to-read boundary operation, and look to see if there remain newer operations in flight
          * for those ranges; if not, they're done.
          */
-        private synchronized void maybeComplete(SafeToRead state)
+        private synchronized void maybeComplete(Ranges ranges)
         {
-            if (state.safeToReadAt == null)
-                return;
-
-            Ranges newDone = fetched.slice(state.ranges.without(fetchedAndSafeToRead), Minimal);
+            Ranges newDone = fetched.slice(ranges.without(fetchedAndSafeToRead), Minimal);
             if (newDone.isEmpty())
                 return;
 
-            for (SafeToRead overlap : state.overlaps)
-            {
-                // if the overlapping operation took its snapshot after us OR hasn't yet got its snapshot
-                // then we are not a definitive bound for safely starting reads, so remove the range
-                if (overlap.startedAt > state.startedAt)
-                {
-                    newDone = newDone.without(overlap.ranges);
-                    if (newDone.isEmpty())
-                        return;
-                }
-            }
+            for (UnsafeToRead unsafeToRead : unsafeToReads)
+                newDone = newDone.without(unsafeToRead.ranges);
 
-            store.markSafeToRead(globalSyncId, state.safeToReadAt, newDone);
+            if (newDone.isEmpty())
+                return;
+
+            safeToReadAts.foldlWithInputAndBounds(newDone, (safeToReadAt, s, start, end, i, j) -> {
+                Ranges mark = s.slice(Ranges.of(start.rangeFactory().newRange(start, end)), Minimal);
+                store.markSafeToRead(globalSyncId, safeToReadAt, mark);
+                return s;
+            }, newDone, i -> false);
             fetchedAndSafeToRead = fetchedAndSafeToRead.with(newDone);
             maybeComplete();
         }

@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import accord.local.Command;
 import accord.local.SafeCommandStore;
 import accord.messages.ReadData;
 import accord.utils.async.AsyncChain;
@@ -50,8 +51,11 @@ import accord.utils.Invariants;
 import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
+
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import static accord.messages.ReadEphemeralTxnData.retryInLaterEpoch;
 import static accord.primitives.SaveStatus.Applied;
 import static accord.primitives.SaveStatus.TruncatedApply;
 import static accord.messages.ReadData.CommitOrReadNack.Insufficient;
@@ -123,13 +127,8 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
     }
 
     protected abstract PartialTxn rangeReadTxn(Ranges ranges);
-
     protected abstract void onReadOk(Node.Id from, CommandStore commandStore, Data data, Ranges ranges);
-
-    protected FetchRequest newFetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn)
-    {
-        return new FetchRequest(sourceEpoch, syncId, ranges, partialDeps, rangeReadTxn(ranges));
-    }
+    protected abstract FetchRequest newFetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn);
 
     @Override
     public void contact(Node.Id to, Ranges ranges)
@@ -187,7 +186,7 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
                 }
 
                 // TODO (now): make sure it works if invoked in either order
-                inflight.remove(key).started(ok.maxApplied);
+                inflight.remove(key).started(ok.safeToReadAfter);
                 onReadOk(to, commandStore, ok.data, received);
                 // received must be invoked after submitting the persistence future, as it triggers onDone
                 // which creates a ReducingFuture over {@code persisting}
@@ -237,11 +236,16 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
         // TODO (expected): implement abort
     }
 
-    public static class FetchRequest extends ReadData
+    public static abstract class FetchRequest extends ReadData
     {
+        // Note for future: we cannot safely execute on an Erased sync point without more work.
+        // Specifically, if the range has partially lost ownership on the recipient, the SyncPoint
+        // will not represent a safe point to snapshot from, and we won't have enough information to
+        // report the range as unavailable.
         private static final ExecuteOn EXECUTE_ON = new ExecuteOn(Applied, TruncatedApply);
         public final PartialTxn read;
         public final PartialDeps partialDeps;
+        private transient Timestamp safeToReadAfter;
 
         public FetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn)
         {
@@ -268,22 +272,45 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
             return read.read(safeStore, executeAt, unavailable);
         }
 
+        // must be invoked by implementations some time after the read has started OR must override safeToReadAt()
+        protected void readStarted(SafeCommandStore safeStore, Ranges unavailable)
+        {
+            safeToReadAfter = Timestamp.nonNullOrMax(Timestamp.NONE, Timestamp.nonNullOrMax(safeToReadAfter, safeStore.commandStore().unsafeGetMaxConflicts().foldl(Timestamp::nonNullOrMax)));
+        }
+
+        protected Timestamp safeToReadAfter()
+        {
+            return safeToReadAfter;
+        }
+
         @Override
         protected void readComplete(CommandStore commandStore, Data result, Ranges unavailable)
         {
-            Ranges reportUnavailable = unavailable.slice((Ranges)this.readScope, Minimal);
+            Ranges reportUnavailable = unavailable == null ? null : unavailable.slice((Ranges)this.readScope, Minimal);
             super.readComplete(commandStore, result, reportUnavailable);
         }
 
         @Override
         protected ReadOk constructReadOk(Ranges unavailable, Data data)
         {
-            return new FetchResponse(unavailable, data, maxApplied());
+            Timestamp safeToReadAfter = safeToReadAfter();
+            Invariants.checkState(data == null || safeToReadAfter != null);
+            return new FetchResponse(unavailable, data, safeToReadAfter);
         }
 
-        protected Timestamp maxApplied()
+        @Override
+        protected void read(SafeCommandStore safeStore, Command command)
         {
-            return null;
+            long retryInLaterEpoch = retryInLaterEpoch(executeAtEpoch, safeStore, command);
+            if (retryInLaterEpoch > 0)
+            {
+                Ranges unavailable = ((Ranges)readScope).slice(safeStore.ranges().allAt(executeAtEpoch), Minimal);
+                readComplete(safeStore.commandStore(), null, unavailable);
+            }
+            else
+            {
+                super.read(safeStore, command);
+            }
         }
 
         @Override
@@ -295,11 +322,13 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
 
     public static class FetchResponse extends ReadOk
     {
-        public final @Nullable Timestamp maxApplied;
-        public FetchResponse(@Nullable Ranges unavailable, @Nullable Data data, @Nullable Timestamp maxApplied)
+        // only null if retryInFutureEpoch is set
+        public final @Nullable Timestamp safeToReadAfter;
+
+        public FetchResponse(@Nullable Ranges unavailable, @Nullable Data data, @Nonnull Timestamp safeToReadAfter)
         {
             super(unavailable, data);
-            this.maxApplied = maxApplied;
+            this.safeToReadAfter = safeToReadAfter;
         }
 
         @Override

@@ -42,25 +42,22 @@ import accord.utils.Invariants;
 
 import static accord.api.Journal.Load;
 import static accord.api.Journal.Load.ALL;
-import static accord.impl.CommandChange.Fields.ACCEPTED;
-import static accord.impl.CommandChange.Fields.CLEANUP;
-import static accord.impl.CommandChange.Fields.DURABILITY;
-import static accord.impl.CommandChange.Fields.EXECUTES_AT_LEAST;
-import static accord.impl.CommandChange.Fields.EXECUTE_AT;
-import static accord.impl.CommandChange.Fields.FIELDS;
-import static accord.impl.CommandChange.Fields.PARTIAL_DEPS;
-import static accord.impl.CommandChange.Fields.PARTIAL_TXN;
-import static accord.impl.CommandChange.Fields.PARTICIPANTS;
-import static accord.impl.CommandChange.Fields.PROMISED;
-import static accord.impl.CommandChange.Fields.RESULT;
-import static accord.impl.CommandChange.Fields.SAVE_STATUS;
-import static accord.impl.CommandChange.Fields.WAITING_ON;
-import static accord.impl.CommandChange.Fields.WRITES;
+import static accord.impl.CommandChange.Field.ACCEPTED;
+import static accord.impl.CommandChange.Field.CLEANUP;
+import static accord.impl.CommandChange.Field.DURABILITY;
+import static accord.impl.CommandChange.Field.EXECUTES_AT_LEAST;
+import static accord.impl.CommandChange.Field.EXECUTE_AT;
+import static accord.impl.CommandChange.Field.FIELDS;
+import static accord.impl.CommandChange.Field.PARTIAL_DEPS;
+import static accord.impl.CommandChange.Field.PARTIAL_TXN;
+import static accord.impl.CommandChange.Field.PARTICIPANTS;
+import static accord.impl.CommandChange.Field.PROMISED;
+import static accord.impl.CommandChange.Field.RESULT;
+import static accord.impl.CommandChange.Field.SAVE_STATUS;
+import static accord.impl.CommandChange.Field.WAITING_ON;
+import static accord.impl.CommandChange.Field.WRITES;
 import static accord.local.Cleanup.NO;
 import static accord.local.Cleanup.TRUNCATE_WITH_OUTCOME;
-import static accord.primitives.Known.KnownDeps.DepsErased;
-import static accord.primitives.Known.KnownDeps.DepsUnknown;
-import static accord.primitives.Known.KnownDeps.NoDeps;
 import static accord.primitives.SaveStatus.TruncatedApplyWithOutcome;
 import static accord.primitives.Status.Durability.NotDurable;
 import static accord.utils.Invariants.illegalState;
@@ -68,7 +65,7 @@ import static accord.utils.Invariants.illegalState;
 public class CommandChange
 {
     // This enum is order-dependent
-    public enum Fields
+    public enum Field
     {
         PARTICIPANTS, // stored first so we can index it
         SAVE_STATUS,
@@ -85,7 +82,7 @@ public class CommandChange
         RESULT,
         ;
 
-        public static final Fields[] FIELDS = values();
+        public static final Field[] FIELDS = values();
     }
 
     public static class Builder
@@ -376,10 +373,7 @@ public class CommandChange
                 attrs.setParticipants(participants.filter(StoreParticipants.Filter.LOAD, redundantBefore, txnId, saveStatus.known.executeAt.isDecidedAndKnownToExecute() ? executeAt : null));
             if (participants != null)
                 attrs.setParticipants(participants);
-            if (partialDeps != null &&
-                (saveStatus.known.deps != NoDeps &&
-                 saveStatus.known.deps != DepsErased &&
-                 saveStatus.known.deps != DepsUnknown))
+            if (partialDeps != null && saveStatus.known.deps.hasProposedOrDecidedDeps())
                 attrs.partialDeps(partialDeps);
 
             switch (saveStatus.known.outcome)
@@ -403,12 +397,12 @@ public class CommandChange
                 case PreAccepted:
                     return Command.PreAccepted.preAccepted(attrs, executeAt, promised);
                 case AcceptedInvalidate:
+                    if (!saveStatus.known.isDefinitionKnown())
+                        return Command.AcceptedInvalidateWithoutDefinition.acceptedInvalidate(attrs, promised, acceptedOrCommitted);
                 case Accepted:
                 case PreCommitted:
-                    if (saveStatus == SaveStatus.AcceptedInvalidate)
-                        return Command.AcceptedInvalidateWithoutDefinition.acceptedInvalidate(attrs, promised, acceptedOrCommitted);
-                    else
-                        return Command.Accepted.accepted(attrs, saveStatus, executeAt, promised, acceptedOrCommitted);
+                    return Command.Accepted.accepted(attrs, saveStatus, executeAt, promised, acceptedOrCommitted);
+
                 case Committed:
                 case Stable:
                     return Command.Committed.committed(attrs, saveStatus, executeAt, promised, acceptedOrCommitted, waitingOn);
@@ -443,7 +437,7 @@ public class CommandChange
                     // TODO (expected): why are we saving Durability here for erased commands?
                     return Command.Truncated.erased(attrs.txnId(), attrs.durability(), attrs.participants());
                 case Invalidated:
-                    return Command.Truncated.invalidated(attrs.txnId());
+                    return Command.Truncated.invalidated(attrs.txnId(), attrs.participants());
             }
         }
 
@@ -486,10 +480,10 @@ public class CommandChange
      * Managing masks
      */
 
-    public static int mask(Fields... fields)
+    public static int mask(Field... fields)
     {
         int mask = -1;
-        for (Fields field : fields)
+        for (Field field : fields)
             mask &= ~(1 << field.ordinal());
         return mask;
     }
@@ -541,7 +535,7 @@ public class CommandChange
         return flags;
     }
 
-    private static <OBJ, VAL> int collectFlags(OBJ lo, OBJ ro, Function<OBJ, VAL> convert, boolean allowClassMismatch, Fields field, int flags)
+    private static <OBJ, VAL> int collectFlags(OBJ lo, OBJ ro, Function<OBJ, VAL> convert, boolean allowClassMismatch, Field field, int flags)
     {
         VAL l = null;
         VAL r = null;
@@ -577,13 +571,13 @@ public class CommandChange
         return flags;
     }
 
-    public static int setFieldChanged(Fields field, int oldFlags)
+    public static int setFieldChanged(Field field, int oldFlags)
     {
         return oldFlags | (0x10000 << field.ordinal());
     }
 
     @VisibleForTesting
-    public static boolean getFieldChanged(Fields field, int oldFlags)
+    public static boolean getFieldChanged(Field field, int oldFlags)
     {
         return (oldFlags & (0x10000 << field.ordinal())) != 0;
     }
@@ -593,29 +587,29 @@ public class CommandChange
         return flags >>> 16;
     }
 
-    public static Fields nextSetField(int iterable)
+    public static Field nextSetField(int iterable)
     {
         int i = Integer.numberOfTrailingZeros(Integer.lowestOneBit(iterable));
         return i == 32 ? null : FIELDS[i];
     }
 
-    public static int unsetIterableFields(Fields field, int iterable)
+    public static int unsetIterableFields(Field field, int iterable)
     {
         return iterable & ~(1 << field.ordinal());
     }
 
     @VisibleForTesting
-    public static boolean getFieldIsNull(Fields field, int oldFlags)
+    public static boolean getFieldIsNull(Field field, int oldFlags)
     {
         return (oldFlags & (1 << field.ordinal())) != 0;
     }
 
-    public static int unsetFieldIsNull(Fields field, int oldFlags)
+    public static int unsetFieldIsNull(Field field, int oldFlags)
     {
         return oldFlags & ~(1 << field.ordinal());
     }
 
-    public static int setFieldIsNull(Fields field, int oldFlags)
+    public static int setFieldIsNull(Field field, int oldFlags)
     {
         return oldFlags | (1 << field.ordinal());
     }

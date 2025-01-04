@@ -123,9 +123,9 @@ public abstract class Command implements CommonAttributes
             return Executed.executed(common, status, executeAt, promised, accepted, waitingOn, writes, result);
         }
 
-        public static Truncated invalidated(TxnId txnId)
+        public static Truncated invalidated(TxnId txnId, StoreParticipants participants)
         {
-            return Truncated.invalidated(txnId);
+            return Truncated.invalidated(txnId, participants);
         }
 
         public static Truncated truncatedApply(CommonAttributes common, SaveStatus saveStatus, Timestamp executeAt, Writes writes, Result result)
@@ -768,14 +768,14 @@ public abstract class Command implements CommonAttributes
         public static Truncated invalidated(Command command)
         {
             Invariants.checkState(!command.hasBeen(Status.PreCommitted));
-            return invalidated(command.txnId());
+            return invalidated(command.txnId(), command.participants());
         }
 
-        public static Truncated invalidated(TxnId txnId)
+        public static Truncated invalidated(TxnId txnId, StoreParticipants participants)
         {
             // TODO (expected): migrate to using null for executeAt when invalidated
             // TODO (expected): is UniversalOrInvalidated correct here? Should we have a lower implication pure Invalidated?
-            return validate(new Truncated(txnId, SaveStatus.Invalidated, UniversalOrInvalidated, StoreParticipants.empty(txnId), Timestamp.NONE, null, null));
+            return validate(new Truncated(txnId, SaveStatus.Invalidated, UniversalOrInvalidated, participants, Timestamp.NONE, null, null));
         }
 
         @Override
@@ -1488,6 +1488,7 @@ public abstract class Command implements CommonAttributes
             private SimpleBitSet waitingOn;
             private @Nullable SimpleBitSet appliedOrInvalidated;
             private Timestamp executeAtLeast;
+            private boolean executeAtLeastUpdated;
 
             public Update(WaitingOn waitingOn)
             {
@@ -1579,7 +1580,8 @@ public abstract class Command implements CommonAttributes
             public boolean hasChanges()
             {
                 return !(waitingOn instanceof ImmutableBitSet)
-                       || (appliedOrInvalidated != null && !(appliedOrInvalidated instanceof ImmutableBitSet));
+                       || (appliedOrInvalidated != null && !(appliedOrInvalidated instanceof ImmutableBitSet))
+                       || executeAtLeastUpdated;
             }
 
             public TxnId txnId(int i)
@@ -1692,9 +1694,14 @@ public abstract class Command implements CommonAttributes
                 return waitingOn.get(idx + directRangeDeps.txnIdCount());
             }
 
-            public void updateExecuteAtLeast(Timestamp executeAtLeast)
+            public void updateExecuteAtLeast(TxnId txnId, Timestamp executeAtLeast)
             {
-                this.executeAtLeast = Timestamp.nonNullOrMax(executeAtLeast, this.executeAtLeast);
+                Invariants.checkState(executeAtLeast.compareTo(txnId) > 0);
+                if (this.executeAtLeast == null || this.executeAtLeast.compareTo(executeAtLeast) < 0)
+                {
+                    this.executeAtLeast = executeAtLeast;
+                    this.executeAtLeastUpdated = true;
+                }
             }
 
             boolean removeWaitingOnDirectRangeTxnId(int i)

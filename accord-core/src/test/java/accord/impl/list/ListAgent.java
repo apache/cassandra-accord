@@ -28,6 +28,7 @@ import accord.api.Agent;
 import accord.api.ProgressLog;
 import accord.api.Result;
 import accord.coordinate.ExecuteSyncPoint;
+import accord.coordinate.Preempted;
 import accord.coordinate.Timeout;
 import accord.impl.basic.Packet;
 import accord.impl.mock.Network;
@@ -114,7 +115,7 @@ public class ListAgent implements Agent
     @Override
     public void onUncaughtException(Throwable t)
     {
-        if (!(t instanceof Timeout) && !(t instanceof ExecuteSyncPoint.SyncPointErased))
+        if (!(t instanceof Timeout) && !(t instanceof ExecuteSyncPoint.SyncPointErased) && !(t instanceof Preempted))
             onFailure.accept(t);
     }
 

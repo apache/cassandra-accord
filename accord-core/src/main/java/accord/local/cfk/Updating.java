@@ -21,6 +21,7 @@ package accord.local.cfk;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -66,6 +67,7 @@ import static accord.local.cfk.Utils.mergeAndFilterMissing;
 import static accord.local.cfk.Utils.missingTo;
 import static accord.local.cfk.Utils.removeOneMissing;
 import static accord.local.cfk.Utils.removePrunedAdditions;
+import static accord.local.cfk.Utils.removeUnmanaged;
 import static accord.local.cfk.Utils.validateMissing;
 import static accord.primitives.Routable.Domain.Range;
 import static accord.primitives.Txn.Kind.EphemeralRead;
@@ -73,6 +75,8 @@ import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static accord.primitives.Txn.Kind.Write;
 import static accord.primitives.TxnId.NO_TXNIDS;
 import static accord.utils.ArrayBuffers.cachedTxnIds;
+import static accord.utils.Invariants.Paranoia.CONSTANT;
+import static accord.utils.Invariants.Paranoia.LINEAR;
 import static accord.utils.Invariants.Paranoia.NONE;
 import static accord.utils.Invariants.Paranoia.SUPERLINEAR;
 import static accord.utils.Invariants.ParanoiaCostFactor.LOW;
@@ -121,9 +125,13 @@ class Updating
         if (prunedIds != NO_TXNIDS)
         {
             additionCount -= prunedIds.length;
-            List<TxnId> insertLoadPruned = new ArrayList<>();
-            newLoadingPruned = Pruning.loadPruned(cfk.loadingPruned, prunedIds, plainTxnId, insertLoadPruned);
-            prunedIds = insertLoadPruned.isEmpty() ? NO_TXNIDS : insertLoadPruned.toArray(TxnId[]::new);
+            prunedIds = removeUnmanaged(prunedIds);
+            if (prunedIds != NO_TXNIDS)
+            {
+                List<TxnId> insertLoadPruned = new ArrayList<>();
+                newLoadingPruned = Pruning.loadPruned(cfk.loadingPruned, prunedIds, plainTxnId, insertLoadPruned);
+                prunedIds = insertLoadPruned.isEmpty() ? NO_TXNIDS : insertLoadPruned.toArray(TxnId[]::new);
+            }
         }
 
         int committedByExecuteAtUpdatePos = committedByExecuteAtUpdatePos(cfk.committedByExecuteAt, curInfo, newInfo);
@@ -924,6 +932,7 @@ class Updating
                 }
             }
 
+            waitingToExecuteAt = updateExecuteAtLeast(waitingToExecuteAt, effectiveExecutesAt, safeCommand);
             if (!readyToApply || missingCount > 0)
             {
                 TxnInfo[] newById = byId, newCommittedByExecuteAt = cfk.committedByExecuteAt;
@@ -965,24 +974,7 @@ class Updating
                 if (!readyToApply && mode != REGISTER_DEPS_ONLY)
                 {
                     CommandsForKey.Unmanaged newPendingRecord;
-                    if (waitingToApply)
-                    {
-                        if (waitingToExecuteAt instanceof TxnInfo)
-                            waitingToExecuteAt = ((TxnInfo) waitingToExecuteAt).plainExecuteAt();
-
-                        if (waitingTxnId.awaitsOnlyDeps())
-                        {
-                            effectiveExecutesAt = Timestamp.nonNullOrMax(effectiveExecutesAt, waitingToExecuteAt);
-                            if (effectiveExecutesAt != null && effectiveExecutesAt.compareTo(command.waitingOn.executeAtLeast(Timestamp.NONE)) > 0)
-                            {
-                                Command.WaitingOn.Update waitingOn = new Command.WaitingOn.Update(command.waitingOn);
-                                waitingOn.updateExecuteAtLeast(effectiveExecutesAt);
-                                safeCommand.updateWaitingOn(waitingOn);
-                            }
-                        }
-
-                        newPendingRecord = new CommandsForKey.Unmanaged(APPLY, command.txnId(), waitingToExecuteAt);
-                    }
+                    if (waitingToApply) newPendingRecord = new CommandsForKey.Unmanaged(APPLY, command.txnId(), waitingToExecuteAt);
                     else newPendingRecord = new CommandsForKey.Unmanaged(COMMIT, command.txnId(), txnIds.get(toIndex - 1));
 
                     if (update != null)
@@ -1008,12 +1000,53 @@ class Updating
                     result = new CommandsForKeyUpdate.CommandsForKeyUpdateWithPostProcess(newCfk, new LoadPruned(result.postProcess(), prunedIds));
 
                 if (readyToApply)
+                {
+                    paranoidCheckExecutesAtLeast(newCfk, waitingTxnId, effectiveExecutesAt, waitingToExecuteAt);
                     result = new CommandsForKeyUpdate.CommandsForKeyUpdateWithPostProcess(newCfk, new PostProcess.NotifyNotWaiting(result.postProcess(), new TxnId[] { safeCommand.txnId() }));
+                }
 
                 return result;
             }
         }
 
         return new CommandsForKeyUpdate.CommandsForKeyUpdateWithPostProcess(cfk, new PostProcess.NotifyNotWaiting(null, new TxnId[] { safeCommand.txnId() }));
+    }
+
+    private static Timestamp updateExecuteAtLeast(Timestamp waitingToExecuteAt, Timestamp effectiveExecutesAt, SafeCommand safeCommand)
+    {
+        if (waitingToExecuteAt instanceof TxnInfo)
+            waitingToExecuteAt = ((TxnInfo) waitingToExecuteAt).plainExecuteAt();
+
+        TxnId txnId = safeCommand.txnId();
+        if (txnId.awaitsOnlyDeps())
+        {
+            Command.Committed command = safeCommand.current().asCommitted();
+            if (effectiveExecutesAt != null && effectiveExecutesAt.compareTo(command.waitingOn.executeAtLeast(txnId)) > 0)
+            {
+                Command.WaitingOn.Update waitingOn = new Command.WaitingOn.Update(command.waitingOn);
+                waitingOn.updateExecuteAtLeast(txnId, effectiveExecutesAt);
+                safeCommand.updateWaitingOn(waitingOn);
+            }
+        }
+
+        return waitingToExecuteAt;
+    }
+
+    private static void paranoidCheckExecutesAtLeast(CommandsForKey cfk, TxnId waitingId, Timestamp effectiveExecutesAt, Timestamp waitingToExecuteAt)
+    {
+        if (!Invariants.isParanoid() || !Invariants.testParanoia(LINEAR, CONSTANT, LOW))
+            return;
+
+        Timestamp maxExecutesAt = null;
+        int maxi = cfk.indexOf(waitingId);
+        if (maxi < 0) maxi = -1 - maxi;
+        for (int i = 0 ; i < maxi ; ++i)
+            maxExecutesAt = Timestamp.nonNullOrMax(maxExecutesAt, cfk.byId[i].executeAt);
+
+        if (maxExecutesAt == null || maxExecutesAt.compareTo(waitingId) < 0)
+            return;
+
+        effectiveExecutesAt = Timestamp.nonNullOrMax(effectiveExecutesAt, waitingToExecuteAt);
+        Invariants.checkState(Objects.equals(effectiveExecutesAt, maxExecutesAt));
     }
 }

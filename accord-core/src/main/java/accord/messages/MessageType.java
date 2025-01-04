@@ -46,8 +46,6 @@ public class MessageType
     public static final MessageType GET_LATEST_DEPS_RSP               = remote("GET_LATEST_DEPS_RSP",               false);
     public static final MessageType GET_EPHEMERAL_READ_DEPS_REQ       = remote("GET_EPHEMERAL_READ_DEPS_REQ",       false);
     public static final MessageType GET_EPHEMERAL_READ_DEPS_RSP       = remote("GET_EPHEMERAL_READ_DEPS_RSP",       false);
-    public static final MessageType GET_MAX_CONFLICT_REQ              = remote("GET_MAX_CONFLICT_REQ",              false);
-    public static final MessageType GET_MAX_CONFLICT_RSP              = remote("GET_MAX_CONFLICT_RSP",              false);
     public static final MessageType COMMIT_SLOW_PATH_REQ              = remote("COMMIT_SLOW_PATH_REQ",              true);
     public static final MessageType COMMIT_MAXIMAL_REQ                = remote("COMMIT_MAXIMAL_REQ",                true );
     public static final MessageType STABLE_FAST_PATH_REQ              = remote("STABLE_FAST_PATH_REQ",              true);

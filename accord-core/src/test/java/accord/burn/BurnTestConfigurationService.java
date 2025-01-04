@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -153,6 +154,15 @@ public class BurnTestConfigurationService extends AbstractConfigurationService.M
         {
             tryFailure(failure);
         }
+    }
+
+    @Override
+    public void reportTopology(Topology topology, boolean isLoad, boolean startSync)
+    {
+        // we process via scheduler.selfRecurring only to logically detach from any client task so we can terminate
+        Node node = lookup.apply(localId);
+        if (node == null) super.reportTopology(topology, isLoad, startSync);
+        else node.scheduler().selfRecurring(() -> super.reportTopology(topology, isLoad, startSync), 0, TimeUnit.MILLISECONDS);
     }
 
     @Override

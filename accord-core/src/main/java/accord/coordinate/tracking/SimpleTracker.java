@@ -34,11 +34,6 @@ public abstract class SimpleTracker<ST extends ShardTracker> extends PreAcceptTr
         super(topologies, arrayFactory, trackerFactory);
     }
 
-    public SimpleTracker(Topologies topologies, IntFunction<ST[]> arrayFactory, ShardFactory<ST> trackerFactory)
-    {
-        super(topologies, arrayFactory, trackerFactory);
-    }
-
     public RequestStatus recordSuccess(Id from, boolean withFastPathTimestamp) { return recordSuccess(from); }
     public RequestStatus recordDelayed(Id from) { return NoChange; }
     public boolean hasFastPathAccepted() { return false; }

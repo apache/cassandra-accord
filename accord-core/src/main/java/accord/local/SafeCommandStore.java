@@ -332,7 +332,7 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
             return;
 
         // TODO (expected): we don't want to insert any dependencies for those we only touch; we just need to record them as decided/applied for execution
-        PreLoadContext context = PreLoadContext.contextFor(update, INCR);
+        PreLoadContext context = PreLoadContext.contextFor(next.txnId(), update, INCR);
         PreLoadContext execute = safeStore.canExecute(context);
         if (execute != null)
         {
@@ -341,12 +341,16 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
         if (execute != context)
         {
             if (execute != null)
-                context = PreLoadContext.contextFor(update.without(execute.keys()), INCR);
+                context = PreLoadContext.contextFor(next.txnId(), update.without(execute.keys()), INCR);
 
             Invariants.checkState(!context.keys().isEmpty());
             safeStore = safeStore; // prevent accidental usage inside lambda
-            safeStore.commandStore().execute(context, safeStore0 -> updateManagedCommandsForKey(safeStore0, safeStore0.context().keys(), participants, next))
-                     .begin(safeStore.commandStore().agent);
+            safeStore.commandStore().execute(context, safeStore0 -> {
+                PreLoadContext ctx = safeStore0.context();
+                TxnId txnId = ctx.primaryTxnId();
+                Unseekables<?> keys = ctx.keys();
+                updateManagedCommandsForKey(safeStore0, keys, participants, safeStore0.get(txnId).current());
+            }).begin(safeStore.commandStore().agent);
         }
     }
 
@@ -354,7 +358,7 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
     {
         for (RoutingKey key : (AbstractUnseekableKeys)update)
         {
-            safeStore.get(key).update(safeStore, next, update != participants.stillTouches() && !participants.stillTouches(key));
+            safeStore.get(key).callback(safeStore, next);
         }
     }
 

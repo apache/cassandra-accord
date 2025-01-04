@@ -29,6 +29,8 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
+import com.google.common.collect.ImmutableSortedMap;
+
 import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.Journal;
@@ -180,26 +182,40 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
 
         protected void loadRedundantBefore(RedundantBefore redundantBefore)
         {
-            if (redundantBefore != null)
-                unsafeSetRedundantBefore(redundantBefore);
+            if (redundantBefore == null)
+            {
+                Invariants.checkState(unsafeGetRedundantBefore().size() == 0);
+            }
+            else
+            {
+                unsafeClearRedundantBefore();
+                super.loadRedundantBefore(redundantBefore);
+            }
         }
 
         protected void loadBootstrapBeganAt(NavigableMap<TxnId, Ranges> bootstrapBeganAt)
         {
-            if (bootstrapBeganAt != null)
-                unsafeSetBootstrapBeganAt(bootstrapBeganAt);
+            unsafeClearBootstrapBeganAt();
+            if (bootstrapBeganAt == null) bootstrapBeganAt = ImmutableSortedMap.of(TxnId.NONE, Ranges.EMPTY);
+            super.loadBootstrapBeganAt(bootstrapBeganAt);
         }
 
         protected void loadSafeToRead(NavigableMap<Timestamp, Ranges> safeToRead)
         {
-            if (safeToRead != null)
-                unsafeSetSafeToRead(safeToRead);
+            unsafeClearSafeToRead();
+            if (safeToRead == null) safeToRead = ImmutableSortedMap.of(Timestamp.NONE, Ranges.EMPTY);
+            super.loadSafeToRead(safeToRead);
         }
 
-        protected void loadRangesForEpoch(CommandStores.RangesForEpoch rangesForEpoch)
+        @Override
+        protected void loadRangesForEpoch(RangesForEpoch newRangesForEpoch)
         {
-            if (rangesForEpoch != null)
-                unsafeSetRangesForEpoch(rangesForEpoch);
+            if (newRangesForEpoch == null) Invariants.checkState(super.rangesForEpoch == null);
+            else
+            {
+                unsafeClearRangesForEpoch();
+                super.loadRangesForEpoch(newRangesForEpoch);
+            }
         }
 
         public void restore()

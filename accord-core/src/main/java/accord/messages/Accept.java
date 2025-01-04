@@ -104,7 +104,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
                     return AcceptReply.redundant(ballot, participants, safeCommand.current());
 
                 Invariants.checkState(deps.maxTxnId(txnId).epoch() <= executeAt.epoch());
-                return new AcceptReply(calculateDeps(safeStore, participants));
+                return new AcceptReply(deps);
         }
     }
 

@@ -33,7 +33,6 @@ import java.util.*;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import javax.annotation.Nullable;
@@ -79,7 +78,7 @@ public class KeyDeps implements Iterable<Map.Entry<RoutingKey, TxnId>>
     {
         int[] keysToTxnId = new int[keys.size()];
         Arrays.fill(keysToTxnId, keys.size());
-        return new KeyDeps(keys, NO_TXNIDS, keysToTxnId);
+        return new KeyDeps(keys, NO_TXNIDS, keysToTxnId, null);
     }
 
     /**
@@ -183,9 +182,15 @@ public class KeyDeps implements Iterable<Map.Entry<RoutingKey, TxnId>>
 
     KeyDeps(RoutingKeys keys, TxnId[] txnIds, int[] keysToTxnIds)
     {
+        this(keys, txnIds, keysToTxnIds, null);
+    }
+
+    KeyDeps(RoutingKeys keys, TxnId[] txnIds, int[] keysToTxnIds, @Nullable int[] txnIdsToKeys)
+    {
         this.keys = keys;
         this.txnIds = txnIds;
         this.keysToTxnIds = keysToTxnIds;
+        this.txnIdsToKeys = txnIdsToKeys;
         if (!(keys.isEmpty() || keysToTxnIds[keys.size() - 1] == keysToTxnIds.length))
             throw illegalArgument(String.format("Last key (%s) in keyToTxnId does not point (%d) to the end of the array (%d);\nkeyToTxnId=%s", keys.get(keys.size() - 1), keysToTxnIds[keys.size() - 1], keysToTxnIds.length, Arrays.toString(keysToTxnIds)));
         checkValid(keys.keys, txnIds, keysToTxnIds);
@@ -193,18 +198,11 @@ public class KeyDeps implements Iterable<Map.Entry<RoutingKey, TxnId>>
 
     public KeyDeps slice(Ranges ranges)
     {
-        if (isEmpty())
-            return new KeyDeps(keys, txnIds, keysToTxnIds);
-
         return select(keys.slice(ranges));
-
     }
 
     public KeyDeps intersecting(Unseekables<?> participants)
     {
-        if (isEmpty())
-            return new KeyDeps(keys, txnIds, keysToTxnIds);
-
         AbstractUnseekableKeys select = keys.intersecting(participants);
         return select(toRoutingKeys(select));
     }
@@ -224,7 +222,7 @@ public class KeyDeps implements Iterable<Map.Entry<RoutingKey, TxnId>>
     {
         // TODO (low priority, efficiency): can slice in parallel with selecting keyToTxnId contents to avoid duplicate merging
         if (select.isEmpty())
-            return new KeyDeps(RoutingKeys.EMPTY, NO_TXNIDS, NO_INTS);
+            return KeyDeps.NONE;
 
         if (select.size() == keys.size())
             return this;
@@ -272,7 +270,7 @@ public class KeyDeps implements Iterable<Map.Entry<RoutingKey, TxnId>>
         return linearUnion(
                 this.keys.keys, this.keys.keys.length, this.txnIds, this.txnIds.length, this.keysToTxnIds, this.keysToTxnIds.length,
                 that.keys.keys, that.keys.keys.length, that.txnIds, that.txnIds.length, that.keysToTxnIds, that.keysToTxnIds.length,
-                RoutingKey::compareTo, TxnId::compareTo,
+                RoutingKey::compareTo, TxnId::compareTo, null, null,
                 cachedRoutingKeys(), cachedTxnIds(), cachedInts(),
                 (keys, keysLength, txnIds, txnIdsLength, out, outLength) ->
                         new KeyDeps(RoutingKeys.ofSortedUnique(cachedRoutingKeys().complete(keys, keysLength)),
@@ -281,10 +279,19 @@ public class KeyDeps implements Iterable<Map.Entry<RoutingKey, TxnId>>
                 );
     }
 
-    public KeyDeps without(Predicate<TxnId> remove)
+    public KeyDeps without(KeyDeps remove)
     {
-        return remove(this, keys.keys, txnIds, keysToTxnIds, remove,
-                NONE, TxnId[]::new, keys, KeyDeps::new);
+        if (isEmpty() || remove.isEmpty()) return this;
+        try (Builder builder = new Builder())
+        {
+            if (!RelationMultiMap.remove(keys.keys, txnIds, keysToTxnIds,
+                                         remove.keys.keys, remove.txnIds, remove.keysToTxnIds,
+                                         RoutingKey::compareTo, TxnId::compareTo, builder::add))
+            {
+                return this;
+            }
+            return builder.build();
+        }
     }
 
     public boolean contains(TxnId txnId)
@@ -671,30 +678,13 @@ public class KeyDeps implements Iterable<Map.Entry<RoutingKey, TxnId>>
     }
 
     private static final KeyDepsAdapter ADAPTER = new KeyDepsAdapter();
-    static class KeyDepsAdapter implements Adapter<RoutingKey, TxnId>
+    static final class KeyDepsAdapter implements MergeAdapter<RoutingKey, TxnId>
     {
-        @Override
-        public final SymmetricComparator<? super RoutingKey> keyComparator()
-        {
-            return RoutingKey::compareTo;
-        }
-
-        @Override
-        public final SymmetricComparator<? super TxnId> valueComparator()
-        {
-            return TxnId::compareTo;
-        }
-
-        @Override
-        public final ObjectBuffers<RoutingKey> cachedKeys()
-        {
-            return ArrayBuffers.cachedRoutingKeys();
-        }
-
-        @Override
-        public final ObjectBuffers<TxnId> cachedValues()
-        {
-            return ArrayBuffers.cachedTxnIds();
-        }
+        @Override public SymmetricComparator<? super RoutingKey> keyComparator() { return RoutingKey::compareTo; }
+        @Override public SymmetricComparator<? super TxnId> valueComparator() { return TxnId::compareTo; }
+        @Override public int compareKeys(RoutingKey a, RoutingKey b) { return a.compareTo(b); }
+        @Override public int compareValues(TxnId a, TxnId b) { return a.compareTo(b); }
+        @Override public ObjectBuffers<RoutingKey> cachedKeys() { return ArrayBuffers.cachedRoutingKeys(); }
+        @Override public ObjectBuffers<TxnId> cachedValues() { return ArrayBuffers.cachedTxnIds(); }
     }
 }

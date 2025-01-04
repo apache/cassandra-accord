@@ -46,9 +46,8 @@ import accord.utils.Invariants;
 import accord.utils.async.Cancellable;
 
 import static accord.local.CommandSummaries.IsDep.IS_NOT_DEP;
-import static accord.local.CommandSummaries.SummaryStatus.ACCEPTED;
-import static accord.local.CommandSummaries.SummaryStatus.INVALIDATED;
 import static accord.local.CommandSummaries.ComputeIsDep.EITHER;
+import static accord.local.CommandSummaries.SummaryStatus.NOT_DIRECTLY_WITNESSED;
 import static accord.local.CommandSummaries.TestStartedAt.ANY;
 import static accord.messages.BeginRecovery.RecoverReply.Kind.Ok;
 import static accord.messages.BeginRecovery.RecoverReply.Kind.Reject;
@@ -148,108 +147,113 @@ public class BeginRecovery extends TxnRequest.WithUnsynced<BeginRecovery.Recover
         }
 
         boolean supersedingRejects;
-        Deps earlierCommittedWitness, earlierAcceptedNoWitness;
+        Deps earlierNoWait, earlierWait;
         if (command.hasBeen(Accepted))
         {
             supersedingRejects = false;
-            earlierCommittedWitness = earlierAcceptedNoWitness = Deps.NONE;
+            earlierNoWait = earlierWait = Deps.NONE;
         }
         else
         {
             // TODO (expected): modify the mapReduce API to perform this check in a single pass
             class Visitor implements CommandSummaries.AllCommandVisitor, AutoCloseable
             {
-                Deps.Builder nowait;
-                Deps.Builder wait;
+                Deps.Builder earlierNoWait, earlierWait;
                 boolean supersedingRejects;
 
                 @Override
-                public boolean visit(Unseekable keyOrRange, TxnId testTxnId, Timestamp testExecuteAt, SummaryStatus status, @Nullable IsDep dep)
+                public boolean visit(Unseekable keyOrRange, TxnId testTxnId, Timestamp testExecuteAt, SummaryStatus status, IsDep dep)
                 {
-                    if (testTxnId.compareTo(txnId) < 0)
+                    if (status == NOT_DIRECTLY_WITNESSED || !txnId.is(testTxnId.witnesses()))
+                        return true;
+
+                    int c = testTxnId.compareTo(txnId);
+                    if (c == 0)
+                        return true;
+
+                    if (c < 0)
                     {
-                        if (status == INVALIDATED)
+                        switch (dep)
                         {
-                            ensureNoWait().add(keyOrRange, testTxnId);
-                        }
-                        else if (testExecuteAt.compareTo(txnId) > 0)
-                        {
-                            switch (dep)
-                            {
-                                default: throw new AssertionError("Unhandled SummaryDep: " + dep);
-                                case IS_DEP:
-                                    ensureNoWait().add(keyOrRange, testTxnId);
-                                    break;
+                            default: throw new AssertionError("Unhandled IsDep: " + dep);
+                            case IS_DEP:
+                                ensureEarlierNoWait().add(keyOrRange, testTxnId);
+                                break;
 
-                                case IS_NOT_DEP:
-                                    /*
-                                     * The idea here is to discover those transactions that have been decided to execute after us
-                                     * and did not witness us as part of their pre-accept or accept round, as this means that we CANNOT have
-                                     * taken the fast path. This is central to safe recovery, as if every transaction that executes later has
-                                     * witnessed us we are safe to propose the pre-accept timestamp regardless, whereas if any transaction
-                                     * has not witnessed us we can safely invalidate it.
-                                     */
-                                    supersedingRejects = true;
-                                    break;
+                            case IS_NOT_DEP:
+                                /*
+                                 * The idea here is to discover those transactions that have been decided to execute after us
+                                 * and did not witness us as part of their pre-accept or accept round, as this means that we CANNOT have
+                                 * taken the fast path. This is central to safe recovery, as if every transaction that executes later has
+                                 * witnessed us we are safe to propose the pre-accept timestamp regardless, whereas if any transaction
+                                 * has not witnessed us we can safely invalidate.
+                                 */
+                                supersedingRejects = true;
+                                return false;
 
-                                case NOT_ELIGIBLE:
-                                    Invariants.checkState(status.compareTo(ACCEPTED) <= 0);
-                                    if (status == ACCEPTED)
-                                        ensureWait().add(keyOrRange, testTxnId);
-                            }
+                            case NOT_ELIGIBLE:
+                                switch (status)
+                                {
+                                    case INVALIDATED:
+                                        ensureEarlierNoWait().add(keyOrRange, testTxnId);
+                                        break;
+
+                                    case ACCEPTED:
+                                        if (testExecuteAt.compareTo(txnId) > 0)
+                                            ensureEarlierWait().add(keyOrRange, testTxnId);
+                                        break;
+                                }
                         }
                     }
-                    else if (dep == IS_NOT_DEP)
+                    else
                     {
-                        /*
-                         * The idea here is to discover those transactions that were started after us and have been Accepted
-                         * and did not witness us as part of their pre-accept round, as this means that we CANNOT have taken
-                         * the fast path. This is central to safe recovery, as if every transaction that executes later has
-                         * witnessed us we are safe to propose the pre-accept timestamp regardless, whereas if any transaction
-                         * has not witnessed us we can safely invalidate (us).
-                         */
-                        supersedingRejects = true;
+                        if (dep == IS_NOT_DEP)
+                        {
+                            supersedingRejects = true;
+                            return false;
+                        }
                     }
 
-                    return !supersedingRejects;
+                    return true;
                 }
 
-                private Deps.Builder ensureNoWait()
+                private Deps.Builder ensureEarlierNoWait()
                 {
-                    if (nowait == null)
-                        nowait = new Deps.Builder(true);
-                    return nowait;
+                    if (earlierNoWait == null)
+                        earlierNoWait = new Deps.Builder(true);
+                    return earlierNoWait;
                 }
 
-                private Deps.Builder ensureWait()
+                private Deps.Builder ensureEarlierWait()
                 {
-                    if (wait == null)
-                        wait = new Deps.Builder(true);
-                    return wait;
+                    if (earlierWait == null)
+                        earlierWait = new Deps.Builder(true);
+                    return earlierWait;
                 }
 
                 @Override
                 public void close()
                 {
-                    if (nowait != null)
+                    if (earlierNoWait != null)
                     {
-                        nowait.close();
-                        nowait = null;
+                        earlierNoWait.close();
+                        earlierNoWait = null;
                     }
-                    if (wait != null)
+                    if (earlierWait != null)
                     {
-                        wait.close();
-                        wait = null;
+                        earlierWait.close();
+                        earlierWait = null;
                     }
                 }
             }
+
 
             try (Visitor visitor = new Visitor())
             {
                 safeStore.visit(participants.owns(), txnId, txnId.witnessedBy(), ANY, txnId, EITHER, visitor);
                 supersedingRejects = visitor.supersedingRejects;
-                earlierCommittedWitness = visitor.nowait == null ? Deps.NONE : visitor.nowait.build();
-                earlierAcceptedNoWitness = visitor.wait == null ? Deps.NONE : visitor.wait.build();
+                earlierNoWait = visitor.earlierNoWait == null ? Deps.NONE : visitor.earlierNoWait.build();
+                earlierWait = visitor.earlierWait == null ? Deps.NONE : visitor.earlierWait.build();
             }
         }
 
@@ -259,7 +263,7 @@ public class BeginRecovery extends TxnRequest.WithUnsynced<BeginRecovery.Recover
         Writes writes = command.writes();
         Result result = command.result();
         boolean acceptsFastPath = executeAt.equals(txnId) || participants.owns().isEmpty();
-        return new RecoverOk(txnId, status, accepted, executeAt, deps, earlierCommittedWitness, earlierAcceptedNoWitness, acceptsFastPath, supersedingRejects, writes, result);
+        return new RecoverOk(txnId, status, accepted, executeAt, deps, earlierWait, earlierNoWait, acceptsFastPath, supersedingRejects, writes, result);
     }
 
     @Override
@@ -288,14 +292,14 @@ public class BeginRecovery extends TxnRequest.WithUnsynced<BeginRecovery.Recover
         if (!ok1.status.hasBeen(PreAccepted)) throw new IllegalStateException();
 
         LatestDeps deps = LatestDeps.merge(ok1.deps, ok2.deps);
-        Deps earlierCommittedWitness = ok1.earlierCommittedWitness.with(ok2.earlierCommittedWitness);
-        Deps earlierAcceptedNoWitness = ok1.earlierAcceptedNoWitness.with(ok2.earlierAcceptedNoWitness)
-                .without(earlierCommittedWitness::contains);
+        Deps earlierNoWait = ok1.earlierNoWait.with(ok2.earlierNoWait);
+        Deps earlierWait = ok1.earlierWait.with(ok2.earlierWait)
+                                                       .without(earlierNoWait);
         Timestamp timestamp = ok1.status == PreAccepted ? Timestamp.max(ok1.executeAt, ok2.executeAt) : ok1.executeAt;
 
         return new RecoverOk(
             txnId, ok1.status, ok1.accepted, timestamp,
-            deps, earlierCommittedWitness, earlierAcceptedNoWitness,
+            deps, earlierWait, earlierNoWait,
             ok1.selfAcceptsFastPath & ok2.selfAcceptsFastPath,
             ok1.supersedingRejects | ok2.supersedingRejects,
             ok1.writes, ok1.result
@@ -358,22 +362,22 @@ public class BeginRecovery extends TxnRequest.WithUnsynced<BeginRecovery.Recover
         public final Ballot accepted;
         public final Timestamp executeAt;
         public final LatestDeps deps;
-        public final Deps earlierCommittedWitness;  // counter-point to earlierAcceptedNoWitness
-        public final Deps earlierAcceptedNoWitness; // wait for these to commit
+        public final Deps earlierWait; // wait for these to commit
+        public final Deps earlierNoWait;  // counter-point to earlierWait, can remove these from any set we wait on
         public final boolean selfAcceptsFastPath;
         public final boolean supersedingRejects;
         public final Writes writes;
         public final Result result;
 
-        public RecoverOk(TxnId txnId, Status status, Ballot accepted, Timestamp executeAt, LatestDeps deps, Deps earlierCommittedWitness, Deps earlierAcceptedNoWitness, boolean selfAcceptsFastPath, boolean supersedingRejects, Writes writes, Result result)
+        public RecoverOk(TxnId txnId, Status status, Ballot accepted, Timestamp executeAt, LatestDeps deps, Deps earlierWait, Deps earlierNoWait, boolean selfAcceptsFastPath, boolean supersedingRejects, Writes writes, Result result)
         {
             this.txnId = txnId;
             this.accepted = accepted;
             this.executeAt = executeAt;
             this.status = status;
             this.deps = deps;
-            this.earlierCommittedWitness = earlierCommittedWitness;
-            this.earlierAcceptedNoWitness = earlierAcceptedNoWitness;
+            this.earlierWait = earlierWait;
+            this.earlierNoWait = earlierNoWait;
             this.selfAcceptsFastPath = selfAcceptsFastPath;
             this.supersedingRejects = supersedingRejects;
             this.writes = writes;
@@ -400,8 +404,8 @@ public class BeginRecovery extends TxnRequest.WithUnsynced<BeginRecovery.Recover
                    ", accepted:" + accepted +
                    ", executeAt:" + executeAt +
                    ", deps:" + deps +
-                   ", earlierCommittedWitness:" + earlierCommittedWitness +
-                   ", earlierAcceptedNoWitness:" + earlierAcceptedNoWitness +
+                   ", earlierCommittedWitness:" + earlierNoWait +
+                   ", earlierAcceptedNoWitness:" + earlierWait +
                    ", selfAcceptsFastPath:" + selfAcceptsFastPath +
                    ", supersedingRejects:" + supersedingRejects +
                    ", writes:" + writes +

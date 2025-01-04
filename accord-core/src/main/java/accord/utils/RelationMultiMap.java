@@ -22,11 +22,15 @@ import accord.primitives.*;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
 import java.util.*;
+import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 import java.util.function.IntFunction;
-import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import javax.annotation.Nullable;
+
 import static accord.utils.ArrayBuffers.*;
+import static accord.utils.Invariants.illegalArgument;
 import static accord.utils.Invariants.illegalState;
 import static accord.utils.SortedArrays.remap;
 import static accord.utils.SortedArrays.remapToSuperset;
@@ -78,10 +82,17 @@ public class RelationMultiMap
     {
         SymmetricComparator<? super K> keyComparator();
         SymmetricComparator<? super V> valueComparator();
+        int compareKeys(K a, K b);
+        int compareValues(V a, V b);
         ObjectBuffers<K> cachedKeys();
         ObjectBuffers<V> cachedValues();
     }
 
+    public interface MergeAdapter<K, V> extends Adapter<K, V>
+    {
+        default BiFunction<K, K, K> keyMerger() { return null; }
+        default BiFunction<V, V, V> valueMerger() { return null; }
+    }
 
     // TODO (expected, efficiency): cache this object per thread
     public static abstract class AbstractBuilder<K, V, T> implements AutoCloseable
@@ -123,7 +134,7 @@ public class RelationMultiMap
 
         public void nextKey(K key)
         {
-            if (keyCount > 0 && adapter.keyComparator().compare(keys[keyCount - 1], key) >= 0)
+            if (keyCount > 0 && adapter.compareKeys(keys[keyCount - 1], key) >= 0)
                 hasOrderedKeys = false;
 
             finishKey();
@@ -164,11 +175,11 @@ public class RelationMultiMap
             if (!hasOrderedValues)
             {
                 // TODO (low priority, efficiency): this allocates a significant amount of memory: would be preferable to be able to sort using a pre-defined scratch buffer
-                Arrays.sort(keysToValues, keyOffset, totalCount);
+                Arrays.sort(keysToValues, keyOffset, totalCount, adapter.valueComparator());
                 int removed = 0;
                 for (int i = keyOffset + 1 ; i < totalCount ; ++i)
                 {
-                    if (keysToValues[i - 1].equals(keysToValues[i])) ++removed;
+                    if (adapter.compareValues(keysToValues[i - 1], keysToValues[i]) == 0) ++removed;
                     else if (removed > 0) keysToValues[i - removed] = keysToValues[i];
                 }
                 totalCount -= removed;
@@ -180,9 +191,24 @@ public class RelationMultiMap
 
         public void add(K key, V value)
         {
-            if (keyCount == 0 || !keys[keyCount - 1].equals(key))
+            if (keyCount == 0 || adapter.compareKeys(keys[keyCount - 1], key) != 0)
                 nextKey(key);
             add(value);
+        }
+
+        protected K lastKey()
+        {
+            return keyCount == 0 ? null : keys[keyCount - 1];
+        }
+
+        protected V lastValue()
+        {
+            return totalCount == 0 ? null : keysToValues[totalCount - 1];
+        }
+
+        protected void updateLast(V value)
+        {
+            keysToValues[totalCount - 1] = value;
         }
 
         /**
@@ -217,7 +243,7 @@ public class RelationMultiMap
             int valueCount = 1;
             for (int i = 1 ; i < totalCount ; ++i)
             {
-                if (!uniqueValues[valueCount - 1].equals(uniqueValues[i]))
+                if (0 != adapter.compareValues(uniqueValues[valueCount - 1], uniqueValues[i]))
                     uniqueValues[valueCount++] = uniqueValues[i];
             }
 
@@ -239,8 +265,8 @@ public class RelationMultiMap
 
                 for (int i = 1 ; i < keyCount ; ++i)
                 {
-                    if (sortedKeys[i-1].equals(sortedKeys[i]))
-                        throw new IllegalArgumentException("Key " + sortedKeys[i] + " has been visited more than once ("
+                    if (adapter.compareKeys(sortedKeys[i-1], sortedKeys[i]) == 0)
+                        throw illegalArgument("Key " + sortedKeys[i] + " has been visited more than once ("
                                 + Arrays.toString(Arrays.copyOf(keys, keyCount)) + ")");
                 }
                 for (int i = 0 ; i < keyCount ; ++i)
@@ -297,7 +323,7 @@ public class RelationMultiMap
      */
     public static class LinearMerger<K, V, T> extends PassThroughObjectAndIntBuffers<V> implements Constructor<K, V, Object>, AutoCloseable
     {
-        final Adapter<K, V> adapter;
+        final MergeAdapter<K, V> adapter;
         final PassThroughObjectBuffers<K> keyBuffers;
         K[] bufKeys;
         V[] bufValues;
@@ -305,10 +331,10 @@ public class RelationMultiMap
         int bufKeysLength, bufValuesLength = 0, bufLength = 0;
         T from = null;
 
-        public LinearMerger(Adapter<K, V> adapter)
+        public LinearMerger(MergeAdapter<K, V> adapter)
         {
             super(adapter.cachedValues(), cachedInts());
-            keyBuffers = new PassThroughObjectBuffers<>(adapter.cachedKeys());
+            this.keyBuffers = new PassThroughObjectBuffers<>(adapter.cachedKeys());
             this.adapter = adapter;
         }
 
@@ -362,6 +388,7 @@ public class RelationMultiMap
                     bufKeys, bufKeysLength, bufValues, bufValuesLength, buf, bufLength,
                     keys, keys.length, values, values.length, keysToValues, keysToValues.length,
                     adapter.keyComparator(), adapter.valueComparator(),
+                    adapter.keyMerger(), adapter.valueMerger(),
                     keyBuffers, this, this, this
             );
             if (buf == keysToValues)
@@ -593,6 +620,7 @@ public class RelationMultiMap
     T linearUnion(K[] leftKeys, int leftKeysLength, V[] leftValues, int leftValuesLength, int[] left, int leftLength,
                   K[] rightKeys, int rightKeysLength, V[] rightValues, int rightValuesLength, int[] right, int rightLength,
                   SymmetricComparator<? super K> keyComparator, SymmetricComparator<? super V> valueComparator,
+                  @Nullable BiFunction<? super K, ? super K, ? extends K> keyMerger, @Nullable BiFunction<? super V, ? super V, ? extends V> valueMerger,
                   ObjectBuffers<K> keyBuffers, ObjectBuffers<V> valueBuffers, IntBuffers intBuffers, Constructor<K, V, T> constructor)
     {
         K[] outKeys = null;
@@ -602,9 +630,10 @@ public class RelationMultiMap
 
         try
         {
-            outKeys = SortedArrays.linearUnion(leftKeys, leftKeysLength, rightKeys, rightKeysLength, keyComparator, keyBuffers);
+            outKeys = SortedArrays.linearUnion(leftKeys, 0, leftKeysLength, rightKeys, 0, rightKeysLength, keyComparator, keyMerger, keyBuffers);
             outKeysLength = keyBuffers.sizeOfLast(outKeys);
-            outValues = SortedArrays.linearUnion(leftValues, leftValuesLength, rightValues, rightValuesLength, valueComparator, valueBuffers);
+
+            outValues = SortedArrays.linearUnion(leftValues, 0, leftValuesLength, rightValues, 0, rightValuesLength, valueComparator, valueMerger, valueBuffers);
             outValuesLength = valueBuffers.sizeOfLast(outValues);
 
             remapLeft = remapToSuperset(leftValues, leftValuesLength, outValues, outValuesLength, valueComparator, intBuffers);
@@ -870,68 +899,133 @@ public class RelationMultiMap
         return result;
     }
 
-    public static <K, K2, V, T> T remove(T from, K[] keys, V[] oldValues, int[] oldKeysToValues, Predicate<V> remove, T none, IntFunction<V[]> newValueArray,
-                                     K2 passthroughKeys, SimpleConstructor<K2, V[], T> constructor)
+    public static <K, V> boolean remove(K[] oldKeys, V[] oldValues, int[] oldKeysToValues,
+                                        K[] removeKeys, V[] removeValues, int[] removeKeysToValues,
+                                        Comparator<K> keyComparator, Comparator<V> valueComparator,
+                                        BiConsumer<K, V> keep)
     {
-        if (isEmpty(keys, oldKeysToValues))
-            return from;
+        return removeInternal(oldKeys, oldValues, oldKeysToValues,
+                              removeKeys, removeValues, removeKeysToValues,
+                              keyComparator, valueComparator, keep,
+                              (c, k, v, r) -> {
+                                  if (r == null)
+                                      c.accept(k, v);
+                                  return null;
+                              }, false);
+    }
 
-        IntBuffers cache = ArrayBuffers.cachedInts();
-        int[] remapValue = cache.getInts(oldValues.length);
-        int[] newKeyToValue = null;
-        V[] newValues;
-        int o;
-        try
+    public static <P, K, V> boolean removeWithPartialMatches(K[] oldKeys, V[] oldValues, int[] oldKeysToValues,
+                                                             K[] removeKeys, V[] removeValues, int[] removeKeysToValues,
+                                                             Comparator<K> keyComparator, Comparator<V> valueComparator,
+                                                             P param, QuadFunction<P, K, V, V, V> removeAndSplitValues)
+    {
+        return removeInternal(oldKeys, oldValues, oldKeysToValues,
+                              removeKeys, removeValues, removeKeysToValues,
+                              keyComparator, valueComparator,
+                              param, removeAndSplitValues, true);
+    }
+
+    // TODO (required): add dedicated tests for partial overlap removals
+    private static <P, K, V> boolean removeInternal(K[] oldKeys, V[] oldValues, int[] oldKeysToValues,
+                                                    K[] removeKeys, V[] removeValues, int[] removeKeysToValues,
+                                                    Comparator<K> keyComparator, Comparator<V> valueComparator,
+                                                    P param, QuadFunction<P, K, V, V, V> removeAndSplitValues,
+                                                    boolean withPartialMatches)
+    {
+        if (oldKeys.length == 0 || removeKeys.length == 0)
+            return false;
+
+        boolean removed = false;
+        int ok = 0, rk = 0;
+        while (ok < oldKeys.length && rk < removeKeys.length)
         {
-            int count = 0;
-            for (int i = 0 ; i < oldValues.length ; ++i)
+            K okey = oldKeys[ok], rkey = removeKeys[rk];
+            int c = keyComparator.compare(okey, rkey);
+            if (c > 0)
             {
-                if (remove.test(oldValues[i])) remapValue[i] = -1;
-                else remapValue[i] = count++;
+                ++rk;
             }
-
-            if (count == oldValues.length)
-                return from;
-
-            if (count == 0)
-                return none;
-
-            newValues = newValueArray.apply(count);
-            for (int i = 0 ; i < oldValues.length ; ++i)
+            else if (c < 0)
             {
-                if (remapValue[i] >= 0)
-                    newValues[remapValue[i]] = oldValues[i];
+                if (removed)
+                {
+                    for (int oi = startOffset(oldKeys, oldKeysToValues, ok), maxoi = endOffset(oldKeysToValues, ok) ; oi < maxoi ; ++oi)
+                        removeAndSplitValues.apply(param, okey, oldValues[oldKeysToValues[oi]], null);
+                }
+                ++ok;
             }
-
-            newKeyToValue = cache.getInts(oldKeysToValues.length);
-            int k = 0, i = keys.length;
-            o = i;
-            while (i < oldKeysToValues.length)
+            else
             {
-                while (oldKeysToValues[k] == i)
-                    newKeyToValue[k++] = o;
+                int oi = startOffset(oldKeys, oldKeysToValues, ok), maxoi = endOffset(oldKeysToValues, ok);
+                int ri = startOffset(removeKeys, removeKeysToValues, rk), maxri = endOffset(removeKeysToValues, rk);
+                V oval = oldValues[oldKeysToValues[oi]];
+                V rval = removeValues[removeKeysToValues[ri]];
+                while (true)
+                {
+                    c = valueComparator.compare(oval, rval);
+                    if (c < 0)
+                    {
+                        if (removed)
+                            removeAndSplitValues.apply(param, okey, oval, null);
+                        if (++oi == maxoi) break;
+                        oval = oldValues[oldKeysToValues[oi]];
+                    }
+                    else if (c > 0)
+                    {
+                        if (++ri == maxri) break;
+                        rval = removeValues[removeKeysToValues[ri]];
+                    }
+                    else
+                    {
+                        if (!removed)
+                        {
+                            removed = true;
+                            for (int tk = 0 ; tk < ok ; tk++)
+                            {
+                                K key = oldKeys[tk];
+                                for (int ti = startOffset(oldKeys, oldKeysToValues, tk), maxti = endOffset(oldKeysToValues, tk) ; ti < maxti ; ++ti)
+                                    removeAndSplitValues.apply(param, key, oldValues[oldKeysToValues[ti]], null);
+                            }
+                            for (int ti = startOffset(oldKeys, oldKeysToValues, ok) ; ti < oi ; ++ti)
+                                removeAndSplitValues.apply(param, okey, oldValues[oldKeysToValues[ti]], null);
+                        }
 
-                int remapped = remapValue[oldKeysToValues[i]];
-                if (remapped >= 0)
-                    newKeyToValue[o++] = remapped;
-                ++i;
+                        oval = removeAndSplitValues.apply(param, okey, oval, rval);
+                        if (oval == null)
+                        {
+                            if (++oi == maxoi) break;
+                            oval = oldValues[oldKeysToValues[oi]];
+                        }
+                        if (!withPartialMatches)
+                        {
+                            if (++ri == maxri) break;
+                            rval = removeValues[removeKeysToValues[ri]];
+                        }
+                    }
+                }
+                if (removed && oi < maxoi)
+                {
+                    removeAndSplitValues.apply(param, okey, oval, null);
+                    while (++oi < maxoi)
+                        removeAndSplitValues.apply(param, okey, oldValues[oldKeysToValues[oi]], null);
+                }
+                ++ok;
+                ++rk;
             }
-
-            while (k < keys.length)
-                newKeyToValue[k++] = o;
         }
-        catch (Throwable t)
+
+        if (!removed)
+            return false;
+
+        while (ok < oldKeys.length)
         {
-            cache.forceDiscard(newKeyToValue);
-            throw t;
-        }
-        finally
-        {
-            cache.forceDiscard(remapValue);
+            K key = oldKeys[ok];
+            for (int oi = startOffset(oldKeys, oldKeysToValues, ok), maxoi = endOffset(oldKeysToValues, ok) ; oi < maxoi ; ++oi)
+                removeAndSplitValues.apply(param, key, oldValues[oldKeysToValues[oi]], null);
+            ++ok;
         }
 
-        newKeyToValue = cache.completeAndDiscard(newKeyToValue, o);
-        return constructor.construct(passthroughKeys, newValues, newKeyToValue);
+        return true;
     }
 
     @Inline

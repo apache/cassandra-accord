@@ -135,7 +135,7 @@ public class ReadEphemeralTxnData extends ReadData
     }
 
     @Override
-    void read(SafeCommandStore safeStore, Command command)
+    protected void read(SafeCommandStore safeStore, Command command)
     {
         long retryInLaterEpoch = retryInLaterEpoch(executeAtEpoch, safeStore, command);
         if (retryInLaterEpoch > 0)
@@ -147,7 +147,7 @@ public class ReadEphemeralTxnData extends ReadData
         super.read(safeStore, command);
     }
 
-    static long retryInLaterEpoch(long executeAtEpoch, SafeCommandStore safeStore, Command command)
+    public static long retryInLaterEpoch(long executeAtEpoch, SafeCommandStore safeStore, Command command)
     {
         TxnId txnId = command.txnId();
         if (!txnId.awaitsOnlyDeps())

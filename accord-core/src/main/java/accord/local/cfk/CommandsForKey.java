@@ -64,7 +64,6 @@ import static accord.local.CommandSummaries.IsDep.NOT_ELIGIBLE;
 import static accord.local.CommandSummaries.SummaryStatus.APPLIED;
 import static accord.local.CommandSummaries.SummaryStatus.COMMITTED;
 import static accord.local.CommandSummaries.SummaryStatus.NOT_ACCEPTED;
-import static accord.local.cfk.CommandsForKey.InternalStatus.ACCEPTED;
 import static accord.local.cfk.CommandsForKey.InternalStatus.APPLIED_DURABLE;
 import static accord.local.cfk.CommandsForKey.InternalStatus.APPLIED_NOT_DURABLE;
 import static accord.local.cfk.CommandsForKey.InternalStatus.INVALIDATED;
@@ -73,8 +72,8 @@ import static accord.local.cfk.CommandsForKey.InternalStatus.STABLE;
 import static accord.local.cfk.CommandsForKey.InternalStatus.TO_SUMMARY_STATUS;
 import static accord.local.cfk.CommandsForKey.InternalStatus.TRANSITIVE;
 import static accord.local.cfk.CommandsForKey.InternalStatus.PRUNED;
-import static accord.local.cfk.CommandsForKey.InternalStatus.TRANSITIVE_VISIBLE;
 import static accord.local.cfk.CommandsForKey.InternalStatus.from;
+import static accord.local.cfk.CommandsForKey.InternalStatus.prunedFrom;
 import static accord.local.cfk.PostProcess.notifyManagedPreBootstrap;
 import static accord.local.cfk.Pruning.isAnyPredecessorWaitingOnPruned;
 import static accord.local.cfk.Pruning.isWaitingOnPruned;
@@ -808,7 +807,8 @@ public class CommandsForKey extends CommandsForKeyUpdate
         TRANSITIVE                             (SummaryStatus.NOT_DIRECTLY_WITNESSED,                false, false, false, false),
         TRANSITIVE_VISIBLE                     (SummaryStatus.NOT_DIRECTLY_WITNESSED,                false, false, false, false),
         PREACCEPTED_OR_ACCEPTED_INVALIDATE     (NOT_ACCEPTED, false, false, true, false),
-        ACCEPTED                               (SummaryStatus.ACCEPTED,                              false, true,  true,  false),
+        // even though we don't need the executeAt for deps calculation, we do need it for recovery to decide membership of the earlierWait collection
+        ACCEPTED                               (SummaryStatus.ACCEPTED,                              true, true,  true,  false),
         COMMITTED                              (SummaryStatus.COMMITTED, true, true, true, true),
         STABLE                                 (SummaryStatus.STABLE,                                true,  true,  false, true),
         // TODO (expected): do not encode missing collection for APPLIED transactions,
@@ -915,6 +915,23 @@ public class CommandsForKey extends CommandsForKeyUpdate
         public static InternalStatus from(SaveStatus status)
         {
             return FROM_SAVE_STATUS.get(status);
+        }
+
+        @VisibleForTesting
+        public static InternalStatus prunedFrom(SaveStatus saveStatus)
+        {
+            InternalStatus result = from(saveStatus);
+            if (result == null)
+            {
+                if (saveStatus.compareTo(SaveStatus.PreAccepted) < 0)
+                    return TRANSITIVE_VISIBLE;
+                return PRUNED;
+            }
+
+            if (result.compareTo(APPLIED) == 0)
+                return PRUNED;
+
+            return result;
         }
 
         public static InternalStatus from(Command command)
@@ -1307,6 +1324,7 @@ public class CommandsForKey extends CommandsForKeyUpdate
 
             switch (txn.status())
             {
+                case TRANSITIVE:
                 case INVALIDATED:
                 case PRUNED:
                     continue;
@@ -1354,7 +1372,8 @@ public class CommandsForKey extends CommandsForKeyUpdate
                                     TxnInfo t = byId[j];
                                     if (t.epoch() != epoch)
                                         break;
-                                    if (!t.isWrite() || t.executeAt != t)
+
+                                    if (!t.isWrite() || t.executeAt != t || !t.isCommittedToExecute())
                                         continue;
 
                                     if (maxCommittedWriteForEpoch == null || t.compareExecuteAt(maxCommittedWriteForEpoch) > 0)
@@ -1398,31 +1417,21 @@ public class CommandsForKey extends CommandsForKeyUpdate
         }
     }
 
-    // NOTE: prev MAY NOT be the version that last updated us due to various possible race conditions
-    @VisibleForTesting
-    public CommandsForKeyUpdate update(Command next, boolean isOutOfRange)
+    public CommandsForKeyUpdate callback(Command update)
     {
-        return update(next, isOutOfRange, false);
+        if (wasPruned(update))
+            return prunedCallback(update);
+        return update(update);
     }
 
-    public CommandsForKeyUpdate update(Command next)
+    public CommandsForKeyUpdate update(Command update)
     {
-        return update(next, !next.participants().touches(key));
-    }
-
-    public CommandsForKeyUpdate callback(Command next)
-    {
-        return update(next, !next.participants().touches(key), next.txnId().compareTo(prunedBefore()) < 0);
-    }
-
-    private CommandsForKeyUpdate update(Command next, boolean isOutOfRange, boolean wasPruned)
-    {
-        Invariants.checkState(manages(next.txnId()));
-        InternalStatus newStatus = from(next);
+        Invariants.checkState(manages(update.txnId()));
+        InternalStatus newStatus = from(update);
         if (newStatus == null)
             return this;
 
-        return update(newStatus, next, isOutOfRange, wasPruned);
+        return update(newStatus, update);
     }
 
     public CommandsForKey setDurable(TxnId txnId)
@@ -1436,56 +1445,49 @@ public class CommandsForKey extends CommandsForKeyUpdate
         return new CommandsForKey(key, boundsInfo, byId, committedByExecuteAt, minUndecidedById, maxAppliedWriteByExecuteAt, maxHlc, loadingPruned, prunedBeforeById, unmanageds);
     }
 
-    CommandsForKeyUpdate updatePruned(Command next)
+    CommandsForKeyUpdate prunedCallback(Command update)
     {
-        boolean wasPruned;
-        InternalStatus newStatus = from(next.saveStatus());
-        // cannot use original status unless we also populate deps (which we don't for pruned items)
-        if (newStatus == null)
-            newStatus = TRANSITIVE_VISIBLE;
-        switch (newStatus)
+        TxnId txnId = update.txnId();
+        InternalStatus newStatus = prunedFrom(update.saveStatus());
+        boolean isLoadingPruned = loadingPrunedFor(loadingPruned, txnId, null) != null;
+        if (!isLoadingPruned)
         {
-            default: throw new AssertionError("Unhandled InternalStatus: " + newStatus);
-            case PRUNED: throw illegalState("Invalid InternalStatus: " + newStatus);
-            case APPLIED_NOT_DURABLE:
-            case APPLIED_DURABLE:
-            case APPLIED_NOT_EXECUTED:
-            case INVALIDATED:
+            if (!manages(txnId))
                 newStatus = PRUNED;
-            case TRANSITIVE:
-            case TRANSITIVE_VISIBLE:
-                wasPruned = true;
-                break;
-            case ACCEPTED:
-            case STABLE:
-            case COMMITTED:
-            case PREACCEPTED_OR_ACCEPTED_INVALIDATE:
-                // either we're loading a command we wouldn't have visited directly, or we've raced with the update on arrival
-                // TODO (expected): tighten semantics here, we shouldn't permit any race condition (and indeed already may not)
-                wasPruned = !manages(next.txnId());
-                if (wasPruned) newStatus = TRANSITIVE_VISIBLE;
+
+            TxnInfo cur = get(txnId);
+            if (newStatus == PRUNED && (cur == null || cur.is(PRUNED)))
+                return this;
         }
-        return update(newStatus, next, false, wasPruned);
+
+        return update(newStatus, update);
     }
 
-    private CommandsForKeyUpdate update(InternalStatus newStatus, Command next, boolean isOutOfRange, boolean wasPruned)
+    private boolean wasPruned(Command command)
     {
-        TxnId txnId = next.txnId();
-        Invariants.checkArgument(wasPruned || manages(txnId));
+        TxnId txnId = command.txnId();
+        TxnInfo prunedBefore = prunedBefore();
+        if (prunedBefore.compareTo(txnId) < 0)
+            return false;
+        if (!manages(txnId))
+            return true;
+        return command.hasBeen(Status.Truncated) || (command.hasBeen(Status.Committed) && prunedBefore.compareTo(command.executeAt()) > 0);
+    }
+
+    private CommandsForKeyUpdate update(InternalStatus newStatus, Command updated)
+    {
+        TxnId txnId = updated.txnId();
+        Invariants.checkArgument(updated.participants().hasTouched(key) || !manages(txnId));
 
         if (txnId.compareTo(redundantBefore()) < 0)
             return this;
 
-        boolean mayExecute = mayExecute(txnId, newStatus, next);
-        if (isOutOfRange && newStatus.compareTo(INVALIDATED) >= 0) isOutOfRange = false; // invalidated is safe to use anywhere, and erases deps
+        boolean mayExecute = mayExecute(txnId, newStatus, updated);
+        boolean isOutOfRange = !mayExecute && newStatus.compareTo(COMMITTED) >= 0 && newStatus.compareTo(APPLIED) <= 0
+                               && manages(txnId) && !updated.participants().stillTouches(key);
 
         TxnId[] loadingAsPrunedFor = loadingPrunedFor(loadingPruned, txnId, null); // we default to null to distinguish between no match, and a match with NO_TXNIDS
-        if (wasPruned && loadingAsPrunedFor == null)
-        {
-            //we may have received the command since we started loading pruned, in which case the pruned status will be faulty
-            return this;
-        }
-        wasPruned |= loadingAsPrunedFor != null;
+        boolean wasPruned = loadingAsPrunedFor != null;
 
         int pos = Arrays.binarySearch(byId, txnId);
         CommandsForKeyUpdate result;
@@ -1495,9 +1497,9 @@ public class CommandsForKey extends CommandsForKeyUpdate
                 return this; // if outOfRange we only need to maintain any existing records; if none, don't update
 
             pos = -1 - pos;
-            if (isOutOfRange) result = insertOrUpdateOutOfRange(pos, txnId, null, newStatus, mayExecute, wasPruned, loadingAsPrunedFor);
-            else if (newStatus.hasDeps() && !wasPruned) result = insert(pos, txnId, newStatus, mayExecute, next);
-            else result = insert(pos, txnId, TxnInfo.create(txnId, newStatus, mayExecute, next), wasPruned, loadingAsPrunedFor);
+            if (isOutOfRange) result = insertOrUpdateOutOfRange(pos, txnId, null, newStatus, mayExecute, updated, wasPruned, loadingAsPrunedFor);
+            else if (newStatus.hasDeps() && !wasPruned) result = insert(pos, txnId, newStatus, mayExecute, updated);
+            else result = insert(pos, txnId, TxnInfo.create(txnId, newStatus, mayExecute, updated), wasPruned, loadingAsPrunedFor);
         }
         else
         {
@@ -1513,27 +1515,27 @@ public class CommandsForKey extends CommandsForKeyUpdate
                         return this;
 
                     // and only when the new ballot is strictly greater
-                    if (next.acceptedOrCommitted().compareTo(cur.ballot()) <= 0)
+                    if (updated.acceptedOrCommitted().compareTo(cur.ballot()) <= 0)
                         return this;
                 }
                 else if (c == 0)
                 {
                     // we're updating to the same state; we only do this with a strictly greater ballot;
                     // even so, if we have no executeAt or deps there's nothing to record
-                    if (next.acceptedOrCommitted().compareTo(cur.ballot()) <= 0 && !newStatus.hasExecuteAtOrDeps())
+                    if (updated.acceptedOrCommitted().compareTo(cur.ballot()) <= 0 || !newStatus.hasExecuteAtOrDeps())
                         return this;
                 }
                 else
                 {
                     // we're advancing to a higher status, but this is only permitted either if the new state is stable or the ballot is higher
-                    if (cur.compareTo(STABLE) < 0 && next.acceptedOrCommitted().compareTo(cur.ballot()) < 0)
+                    if (cur.compareTo(STABLE) < 0 && updated.acceptedOrCommitted().compareTo(cur.ballot()) < 0)
                         return this;
                 }
             }
 
-            if (isOutOfRange) result = insertOrUpdateOutOfRange(pos, txnId, cur, newStatus, mayExecute, wasPruned, loadingAsPrunedFor);
-            else if (newStatus.hasDeps() && !wasPruned) result = update(pos, txnId, cur, newStatus, mayExecute, next);
-            else result = update(pos, txnId, cur, TxnInfo.create(txnId, newStatus, mayExecute, next), wasPruned, loadingAsPrunedFor);
+            if (isOutOfRange) result = insertOrUpdateOutOfRange(pos, txnId, cur, newStatus, mayExecute, updated, wasPruned, loadingAsPrunedFor);
+            else if (newStatus.hasDeps() && !wasPruned) result = update(pos, txnId, cur, newStatus, mayExecute, updated);
+            else result = update(pos, txnId, cur, TxnInfo.create(txnId, newStatus, mayExecute, updated), wasPruned, loadingAsPrunedFor);
         }
 
         return result;
@@ -1562,13 +1564,14 @@ public class CommandsForKey extends CommandsForKeyUpdate
         return insertOrUpdate(this, pos, plainTxnId, null, newInfo, wasPruned, loadingAsPrunedFor);
     }
 
-    private CommandsForKeyUpdate insertOrUpdateOutOfRange(int updatePos, TxnId plainTxnId, @Nullable TxnInfo curInfo, InternalStatus newStatus, boolean mayExecute, boolean wasPruned, TxnId[] loadingAsPrunedFor)
+    private CommandsForKeyUpdate insertOrUpdateOutOfRange(int updatePos, TxnId plainTxnId, @Nullable TxnInfo curInfo, InternalStatus newStatus, boolean mayExecute, Command update, boolean wasPruned, TxnId[] loadingAsPrunedFor)
     {
         Invariants.checkArgument(!mayExecute);
-        TxnInfo baseInfo = curInfo == null ? NO_INFO : curInfo;
+        int statusOverridesXor = newStatus.flags & 1;
+        TxnInfo newInfo;
+        if (curInfo == null) newInfo = TxnInfo.create(plainTxnId, newStatus, false, statusOverridesXor, plainTxnId, update.acceptedOrCommitted());
+        else newInfo = curInfo.withEncodedStatus(TxnInfo.encode(plainTxnId, newStatus, false, statusOverridesXor));
         // out of range means we have no deps, we're just marking committed, so we set HAS_DEPS to 0
-        int statusOverridesXor = curInfo == null ? 0 : newStatus.flags & 1;
-        TxnInfo newInfo = baseInfo.withEncodedStatus(TxnInfo.encode(plainTxnId, newStatus, false, statusOverridesXor));
         return insertOrUpdate(this, updatePos, plainTxnId, curInfo, newInfo, wasPruned, loadingAsPrunedFor);
     }
 
@@ -1880,26 +1883,28 @@ public class CommandsForKey extends CommandsForKeyUpdate
         }
     }
 
-    public CommandsForKeyUpdate withRedundantBeforeAtLeast(RedundantBefore.Entry newRedundantBeforeEntry)
+    public CommandsForKeyUpdate withRedundantBeforeAtLeast(RedundantBefore.Entry newBoundsInfo)
     {
-        return withRedundantBeforeAtLeast(newRedundantBeforeEntry, false);
-    }
-
-    /**
-     * Use force=true on load from disk to ensure any notifications that may be needed after an out-of-band truncation are run.
-     */
-    public CommandsForKeyUpdate withRedundantBeforeAtLeast(RedundantBefore.Entry newBoundsInfo, boolean force)
-    {
-        // TODO (required): handle receiving an entry from the past, e.g. on reload (OR expunge all CFK on restart)
-        if (!force && newBoundsInfo.gcBefore.equals(boundsInfo.gcBefore)
-            && newBoundsInfo.bootstrappedAt.equals(boundsInfo.bootstrappedAt)
-            && newBoundsInfo.locallyDecidedAndAppliedOrInvalidatedBefore.equals(boundsInfo.locallyDecidedAndAppliedOrInvalidatedBefore)
-            && newBoundsInfo.endOwnershipEpoch == boundsInfo.endOwnershipEpoch)
-            return this;
-
-        // we can't let HLC go backwards as this breaks assumptions around maxHlc tracking
+        // we can't let HLC epoch go backwards as this breaks assumptions around maxHlc tracking
         if (newBoundsInfo.gcBefore.hlc() < boundsInfo.gcBefore.hlc())
+        {
+            if (newBoundsInfo.endOwnershipEpoch != boundsInfo.endOwnershipEpoch || !newBoundsInfo.bootstrappedAt.equals(boundsInfo.bootstrappedAt))
+            {
+                newBoundsInfo = boundsInfo.withEpochs(boundsInfo.startOwnershipEpoch, newBoundsInfo.endOwnershipEpoch)
+                                          .withBootstrappedAtLeast(newBoundsInfo.bootstrappedAt);
+            }
+            else
+            {
+                return this;
+            }
+        }
+        else if (newBoundsInfo.gcBefore.equals(boundsInfo.gcBefore)
+                 && newBoundsInfo.bootstrappedAt.equals(boundsInfo.bootstrappedAt)
+                 && newBoundsInfo.locallyDecidedAndAppliedOrInvalidatedBefore.equals(boundsInfo.locallyDecidedAndAppliedOrInvalidatedBefore)
+                 && newBoundsInfo.endOwnershipEpoch == boundsInfo.endOwnershipEpoch)
+        {
             return this;
+        }
 
         long maxHlc = Math.max(this.maxHlc, newBoundsInfo.gcBefore.hlc());
         if (newBoundsInfo.gcBefore.epoch() >= newBoundsInfo.endOwnershipEpoch)

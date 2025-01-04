@@ -103,6 +103,7 @@ public class BTreeReducingIntervalMap<K extends Comparable<? super K>, V>
 
     public V foldl(BiFunction<V, V, V> reduce)
     {
+        // TODO (expected): use BTree fold methods
         checkState(!isEmpty());
         Iterator<V> iter = valuesIterator(false);
         V result = iter.next();
@@ -129,6 +130,7 @@ public class BTreeReducingIntervalMap<K extends Comparable<? super K>, V>
 
     public <V2> V2 foldlWithBounds(QuadFunction<V, V2, K, K, V2> fold, V2 accumulator, Predicate<V2> terminate)
     {
+        // TODO (expected): use BTree fold methods
         WithBoundsIterator<K, V> iter = withBoundsIterator(true);
         while (iter.advance())
         {

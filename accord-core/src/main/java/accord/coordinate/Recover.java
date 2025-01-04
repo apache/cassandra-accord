@@ -342,17 +342,17 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         Invariants.checkState(committedExecuteAt == null || committedExecuteAt.equals(txnId));
         // should all be PreAccept
         Deps proposeDeps = LatestDeps.mergeProposal(recoverOkList, ok -> ok == null ? null : ok.deps);
-        Deps earlierAcceptedNoWitness = Deps.merge(recoverOkList, recoverOkList.size(), List::get, ok -> ok.earlierAcceptedNoWitness);
-        Deps earlierCommittedWitness = Deps.merge(recoverOkList, recoverOkList.size(), List::get, ok -> ok.earlierCommittedWitness);
-        earlierAcceptedNoWitness = earlierAcceptedNoWitness.without(earlierCommittedWitness::contains);
-        if (!earlierAcceptedNoWitness.isEmpty())
+        Deps earlierWait = Deps.merge(recoverOkList, recoverOkList.size(), List::get, ok -> ok.earlierWait);
+        Deps earlierNoWait = Deps.merge(recoverOkList, recoverOkList.size(), List::get, ok -> ok.earlierNoWait);
+        earlierWait = earlierWait.without(earlierNoWait);
+        if (!earlierWait.isEmpty())
         {
             // If there exist commands that were proposed an earlier execution time than us that have not witnessed us,
             // we have to be certain these commands have not successfully committed without witnessing us (thereby
             // ruling out a fast path decision for us and changing our recovery decision).
             // So, we wait for these commands to finish committing before retrying recovery.
             // See whitepaper for more details
-            awaitCommits(node, earlierAcceptedNoWitness).addCallback((success, failure) -> {
+            awaitCommits(node, earlierWait).addCallback((success, failure) -> {
                 if (failure != null) accept(null, failure);
                 else retry();
             });

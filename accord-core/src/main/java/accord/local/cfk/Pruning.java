@@ -272,6 +272,8 @@ public class Pruning
      * TODO (desired): we could limit this restriction to epochs where ownership changes; introduce some global summary info to facilitate this
      * TODO (desired): we may be able prune more transactions that cross epochs if we have a prune point in both epochs,
      *   where the execution epoch prune point as ahead of the executeAt, and the coordination epoch prune point is ahead of the TxnId
+     * TODO (expected): remove any unmanaged transactions that precede the prune point
+     *  this requires updating txn.missing collections, so might be preferable as a separate pass
      */
     static CommandsForKey pruneBefore(CommandsForKey cfk, TxnInfo newPrunedBefore, int pos)
     {

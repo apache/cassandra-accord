@@ -659,7 +659,7 @@ public class Commands
         Invariants.checkState(dependency.hasBeen(PreCommitted));
         TxnId dependencyId = dependency.txnId();
         if (waitingId.awaitsOnlyDeps() && dependency.known().executeAt == ExecuteAtKnown && dependency.executeAt().compareTo(waitingId) > 0)
-            waitingOn.updateExecuteAtLeast(dependency.executeAt());
+            waitingOn.updateExecuteAtLeast(waitingId, dependency.executeAt());
 
         if (dependency.hasBeen(Truncated))
         {
@@ -937,8 +937,8 @@ public class Commands
 
     public static boolean maybeCleanup(SafeCommandStore safeStore, SafeCommand safeCommand, Command command, @Nonnull StoreParticipants newParticipants)
     {
-        Cleanup cleanup = shouldCleanup(safeStore, command, newParticipants);
         StoreParticipants cleanupParticipants = newParticipants.filter(LOAD, safeStore, command.txnId(), command.executeAtIfKnown());
+        Cleanup cleanup = shouldCleanup(safeStore, command, cleanupParticipants);
         if (cleanup == NO)
         {
             if (cleanupParticipants == newParticipants)

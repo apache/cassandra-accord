@@ -78,7 +78,7 @@ public class WaitUntilApplied extends ReadData
     }
 
     @Override
-    void read(SafeCommandStore safeStore, Command command)
+    protected void read(SafeCommandStore safeStore, Command command)
     {
         long retryInLaterEpoch = ReadEphemeralTxnData.retryInLaterEpoch(executeAtEpoch, safeStore, command);
         if (retryInLaterEpoch > this.retryInLaterEpoch)

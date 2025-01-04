@@ -126,6 +126,5 @@ interface NotifySink
                 }).begin(safeStore.agent());
             }
         }
-
     }
 }

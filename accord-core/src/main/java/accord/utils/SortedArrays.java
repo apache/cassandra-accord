@@ -24,6 +24,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.BiFunction;
 import java.util.function.IntBinaryOperator;
 import java.util.function.IntFunction;
 import java.util.function.Predicate;
@@ -248,38 +249,65 @@ public class SortedArrays
 
     public static <O, T extends O> O[] linearUnion(T[] left, int leftStart, int leftEnd, T[] right, int rightStart, int rightEnd, AsymmetricComparator<? super T, ? super T> comparator, ObjectBuffers<O> buffers)
     {
+        return linearUnion(left, leftStart, leftEnd, right, rightStart, rightEnd, comparator, null, buffers);
+    }
+
+    public static <O, T extends O> O[] linearUnion(T[] left, int leftStart, int leftEnd, T[] right, int rightStart, int rightEnd, AsymmetricComparator<? super T, ? super T> comparator, @Nullable BiFunction<? super T, ? super T, ? extends T> merge, ObjectBuffers<O> buffers)
+    {
         int leftIdx = leftStart;
         int rightIdx = rightStart;
 
-        O[] result = null;
-        int resultSize = 0;
+        O[] result;
+        int resultSize;
 
         // first, pick the superset candidate and merge the two until we find the first missing item
         // if none found, return the superset candidate
         if (leftEnd - leftIdx >= rightEnd - rightIdx)
         {
-            while (leftIdx < leftEnd && rightIdx < rightEnd)
+            int cmp = 0;
+            boolean unfinished;
+            if (merge == null)
             {
-                T leftKey = left[leftIdx];
-                T rightKey = right[rightIdx];
-                int cmp = leftKey == rightKey ? 0 : comparator.compare(leftKey, rightKey);
-
-                if (cmp <= 0)
+                while (unfinished = (leftIdx < leftEnd && rightIdx < rightEnd))
                 {
+                    T leftKey = left[leftIdx];
+                    T rightKey = right[rightIdx];
+
+                    cmp = leftKey == rightKey ? 0 : comparator.compare(leftKey, rightKey);
+                    if (cmp > 0) break;
+
                     leftIdx += 1;
                     rightIdx += cmp == 0 ? 1 : 0;
                 }
-                else
+            }
+            else
+            {
+                while (unfinished = (leftIdx < leftEnd && rightIdx < rightEnd))
                 {
-                    resultSize = leftIdx - leftStart;
-                    result = buffers.get(resultSize + (leftEnd - leftIdx) + (rightEnd - (rightIdx - 1)));
-                    System.arraycopy(left, leftStart, result, 0, resultSize);
-                    result[resultSize++] = right[rightIdx++];
-                    break;
+                    T leftKey = left[leftIdx];
+                    T rightKey = right[rightIdx];
+                    cmp = leftKey == rightKey ? 0 : comparator.compare(leftKey, rightKey);
+                    if (cmp > 0) break;
+
+                    if (cmp == 0)
+                    {
+                        if (merge.apply(leftKey, rightKey) != leftKey)
+                            break;
+                        ++rightIdx;
+                    }
+                    ++leftIdx;
                 }
             }
 
-            if (result == null)
+            if (unfinished)
+            {
+                resultSize = leftIdx - leftStart;
+                result = buffers.get(resultSize + (leftEnd - leftIdx) + (rightEnd - (rightIdx - 1)));
+                System.arraycopy(left, leftStart, result, 0, resultSize);
+                if (cmp != 0)
+                    result[resultSize++] = right[rightIdx++];
+            }
+            else
             {
                 if (rightIdx == rightEnd) // all elements matched, so can return the other array
                 {
@@ -299,28 +327,50 @@ public class SortedArrays
         }
         else
         {
-            while (leftIdx < leftEnd && rightIdx < rightEnd)
+            int cmp = 0;
+            boolean unfinished;
+            if (merge == null)
             {
-                T leftKey = left[leftIdx];
-                T rightKey = right[rightIdx];
-                int cmp = leftKey == rightKey ? 0 : comparator.compare(leftKey, rightKey);
-
-                if (cmp >= 0)
+                while (unfinished = (leftIdx < leftEnd && rightIdx < rightEnd))
                 {
+                    T leftKey = left[leftIdx];
+                    T rightKey = right[rightIdx];
+                    cmp = leftKey == rightKey ? 0 : comparator.compare(leftKey, rightKey);
+
+                    if (cmp < 0) break;
                     rightIdx += 1;
                     leftIdx += cmp == 0 ? 1 : 0;
                 }
-                else
+            }
+            else
+            {
+                while (unfinished = (leftIdx < leftEnd && rightIdx < rightEnd))
                 {
-                    resultSize = rightIdx - rightStart;
-                    result = buffers.get(resultSize + (leftEnd - (leftIdx - 1)) + (rightEnd - rightIdx));
-                    System.arraycopy(right, rightStart, result, 0, resultSize);
-                    result[resultSize++] = left[leftIdx++];
-                    break;
+                    T leftKey = left[leftIdx];
+                    T rightKey = right[rightIdx];
+                    cmp = leftKey == rightKey ? 0 : comparator.compare(leftKey, rightKey);
+
+                    if (cmp < 0) break;
+
+                    if (cmp == 0)
+                    {
+                        if (merge.apply(rightKey, leftKey) != rightKey)
+                            break;
+                        ++leftIdx;
+                    }
+                    ++rightIdx;
                 }
             }
 
-            if (result == null)
+            if (unfinished)
+            {
+                resultSize = rightIdx - rightStart;
+                result = buffers.get(resultSize + (leftEnd - (leftIdx - 1)) + (rightEnd - rightIdx));
+                System.arraycopy(right, rightStart, result, 0, resultSize);
+                if (cmp != 0)
+                    result[resultSize++] = left[leftIdx++];
+            }
+            else
             {
                 if (leftIdx == leftEnd) // all elements matched, so can return the other array
                 {
@@ -353,7 +403,7 @@ public class SortedArrays
                 {
                     leftIdx++;
                     rightIdx++;
-                    minKey = leftKey;
+                    minKey = merge == null ? leftKey : merge.apply(leftKey, rightKey);
                 }
                 else if (cmp < 0)
                 {
@@ -1309,7 +1359,6 @@ public class SortedArrays
             return null;
 
         int[] result = allocator.getInts(srcLength);
-
         int i = 0, j = 0;
         while (i < srcLength && j < trgLength)
         {

@@ -151,34 +151,26 @@ public class KeyDepsTest
     {
         qt().forAll(Deps::generate).check(deps -> {
             // no matches
-            Assertions.assertSame(deps.test, deps.test.without(ignore -> false));
+            Assertions.assertSame(deps.test, deps.test.without(KeyDeps.NONE));
             // all match
-            Assertions.assertSame(accord.primitives.KeyDeps.NONE, deps.test.without(ignore -> true));
+            Assertions.assertSame(accord.primitives.KeyDeps.NONE, deps.test.without(deps.test));
 
-            // remove specific TxnId
-            for (TxnId txnId : deps.test.txnIds())
+            // remove specific key
+            for (RoutingKey key : deps.test.keys())
             {
-                accord.primitives.KeyDeps without = deps.test.without(i -> i.equals(txnId));
-                // Was the TxnId removed?
-                List<TxnId> expectedTxnId = new ArrayList<>(deps.test.txnIds());
-                expectedTxnId.remove(txnId);
-                Assertions.assertEquals(expectedTxnId, without.txnIds());
+                RoutingKeys withoutKeys = RoutingKeys.of(key);
+                RoutingKeys expectedKeys = (RoutingKeys) deps.test.keys.without(withoutKeys);
+                accord.primitives.KeyDeps without = deps.test.without(deps.test.intersecting(expectedKeys));
+                Assertions.assertEquals(expectedKeys, without.keys());
 
-                Assertions.assertEquals(RoutingKeys.EMPTY, without.participatingKeys(txnId));
                 // all other keys are fine?
-                for (TxnId other : deps.test.txnIds())
-                {
-                    if (other == txnId)
-                        continue;
-                    Assertions.assertEquals(deps.test.participatingKeys(other), without.participatingKeys(other), "someKeys(" + other + ")");
-                }
+                for (RoutingKey otherKey : expectedKeys)
+                    Assertions.assertEquals(deps.test.txnIds(key), without.txnIds(key), "txnIds(" + otherKey + ")");
 
-                // check each key
-                for (RoutingKey key : deps.test.keys())
+                // check each TxnId
+                for (TxnId txnId : deps.test.txnIds())
                 {
-                    List<TxnId> expected = get(deps.test, key);
-                    expected.remove(txnId);
-
+                    RoutingKeys expected = (RoutingKeys) deps.test.participatingKeys(txnId).without(withoutKeys);
                     Assertions.assertEquals(expected, get(without, key), () -> "TxnId " + txnId + " is expected to be removed for key " + key);
                 }
             }

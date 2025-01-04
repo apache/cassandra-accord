@@ -339,7 +339,7 @@ public abstract class ReadData implements PreLoadContext, Request, MapReduceCons
         return safeStore.unsafeToReadAt(executeAt);
     }
 
-    void read(SafeCommandStore safeStore, Command command)
+    protected void read(SafeCommandStore safeStore, Command command)
     {
         // TODO (required): do we need to check unavailable again on completion, or throughout execution?
         //    e.g. if we are marked stale and begin processing later commands
@@ -425,7 +425,7 @@ public abstract class ReadData implements PreLoadContext, Request, MapReduceCons
         }
     }
 
-    boolean cancel()
+    protected boolean cancel()
     {
         Cancellable clear;
         synchronized (this)

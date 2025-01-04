@@ -29,6 +29,7 @@ import accord.impl.InMemoryCommandStore;
 import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.PreLoadContext;
+import accord.local.SafeCommandStore;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Ranges;
@@ -36,6 +37,7 @@ import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
+import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncResult;
 
 public class ListFetchCoordinator extends AbstractFetchCoordinator
@@ -71,15 +73,30 @@ public class ListFetchCoordinator extends AbstractFetchCoordinator
     }
 
     @Override
-    protected FetchRequest newFetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn)
+    protected ListFetchRequest newFetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn)
     {
         if (((ListAgent)node.agent()).collectMaxApplied())
             return new CollectMaxAppliedFetchRequest(sourceEpoch, syncId, ranges, partialDeps, partialTxn);
 
-        return super.newFetchRequest(sourceEpoch, syncId, ranges, partialDeps, partialTxn);
+        return new ListFetchRequest(sourceEpoch, syncId, ranges, partialDeps, partialTxn);
     }
 
-    class CollectMaxAppliedFetchRequest extends FetchRequest
+    static class ListFetchRequest extends FetchRequest
+    {
+        public ListFetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn)
+        {
+            super(sourceEpoch, syncId, ranges, partialDeps, partialTxn);
+        }
+
+        @Override
+        protected AsyncChain<Data> beginRead(SafeCommandStore safeStore, Timestamp executeAt, PartialTxn txn, Ranges unavailable)
+        {
+            readStarted(safeStore, unavailable);
+            return super.beginRead(safeStore, executeAt, txn, unavailable);
+        }
+    }
+
+    static class CollectMaxAppliedFetchRequest extends ListFetchRequest
     {
         private transient Timestamp maxApplied;
 
@@ -89,10 +106,11 @@ public class ListFetchCoordinator extends AbstractFetchCoordinator
         }
 
         @Override
-        protected void readComplete(CommandStore commandStore, Data result, Ranges unavailable)
+        protected void readStarted(SafeCommandStore safeStore, Ranges unavailable)
         {
-            Ranges slice = commandStore.unsafeGetRangesForEpoch().allAt(txnId).without(unavailable);
-            ((InMemoryCommandStore)commandStore).maxAppliedFor((Ranges)readScope, slice).begin((newMaxApplied, failure) -> {
+            CommandStore commandStore = safeStore.commandStore();
+            Ranges slice = safeStore.ranges().allAt(txnId).without(unavailable);
+            ((InMemoryCommandStore)commandStore).maxAppliedFor(readScope, slice).begin((newMaxApplied, failure) -> {
                 if (failure != null)
                 {
                     commandStore.agent().onUncaughtException(failure);
@@ -103,17 +121,15 @@ public class ListFetchCoordinator extends AbstractFetchCoordinator
                     {
                         if (maxApplied == null) maxApplied = newMaxApplied;
                         else maxApplied = Timestamp.max(maxApplied, newMaxApplied);
-                        super.readComplete(commandStore, result, unavailable);
                     }
                 }
             });
         }
 
         @Override
-        protected Timestamp maxApplied()
+        protected Timestamp safeToReadAfter()
         {
             return maxApplied;
         }
     }
-
 }
