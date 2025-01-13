@@ -158,7 +158,7 @@ public class Datum implements Comparable<Datum>
 
     public boolean equals(Datum that)
     {
-        return this.kind.equals(that.kind) && this.value.equals(that.value);
+        return this.kind.equals(that.kind) && Objects.equals(this.value, that.value);
     }
 
     @Override

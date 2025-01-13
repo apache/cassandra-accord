@@ -39,7 +39,11 @@ import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import accord.api.Agent;
+import accord.api.DataStore;
+import accord.api.LocalListeners;
 import accord.api.MessageSink;
+import accord.api.ProgressLog;
 import accord.api.Scheduler;
 import accord.api.LocalConfig;
 import accord.coordinate.CoordinationAdapter;
@@ -50,9 +54,12 @@ import accord.impl.progresslog.DefaultProgressLogs;
 import accord.impl.DefaultRemoteListeners;
 import accord.impl.SizeOfIntersectionSorter;
 import accord.local.AgentExecutor;
+import accord.local.CommandStore;
+import accord.local.CommandStores;
 import accord.local.DurableBefore;
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.local.NodeCommandStoreService;
 import accord.local.ShardDistributor;
 import accord.local.TimeService;
 import accord.messages.Callback;
@@ -65,6 +72,7 @@ import accord.topology.Topology;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
 
 import static accord.local.TimeService.elapsedWrapperFromNonMonotonicSource;
 import static java.util.stream.Collectors.toList;
@@ -352,7 +360,7 @@ public class Cluster implements Scheduler
 
             AsyncResult<?> startup = AsyncChains.reduce(lookup.values().stream().map(Node::unsafeStart).collect(toList()), (a, b) -> null).beginAsResult();
             while (sinks.processPending());
-            if (!startup.isDone()) throw new AssertionError();
+            while (!startup.isDone());
 
             List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));
             sinks.recurring(() ->
