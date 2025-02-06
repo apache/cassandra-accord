@@ -806,6 +806,8 @@ public class Property
         private Set<Setup<State, SystemUnderTest>> unknownWeights = null;
         @Nullable
         private Map<Predicate<State>, List<Setup<State, SystemUnderTest>>> conditionalCommands = null;
+        @Nullable
+        private Map<Predicate<State>, List<Pair<Setup<State, SystemUnderTest>, Integer>>> conditionalCommandsKnownWeights = null;
         private Gen.IntGen unknownWeightGen = Gens.ints().between(1, 10);
         @Nullable
         private FailingConsumer<State> preCommands = null;
@@ -909,16 +911,42 @@ public class Property
             return this;
         }
 
+        public CommandsBuilder<State, SystemUnderTest> addIf(Predicate<State> predicate, int weight, Command<State, SystemUnderTest, ?> cmd)
+        {
+            return addIf(predicate, weight, (i1, i2) -> cmd);
+        }
+
+        public CommandsBuilder<State, SystemUnderTest> addIf(Predicate<State> predicate, int weight, Gen<Command<State, SystemUnderTest, ?>> cmd)
+        {
+            return addIf(predicate, weight, (rs, state) -> cmd.next(rs));
+        }
+
+        public CommandsBuilder<State, SystemUnderTest> addIf(Predicate<State> predicate, int weight, Setup<State, SystemUnderTest> cmd)
+        {
+            if (conditionalCommandsKnownWeights == null)
+                conditionalCommandsKnownWeights = new LinkedHashMap<>();
+            conditionalCommandsKnownWeights.computeIfAbsent(predicate, i -> new ArrayList<>()).add(Pair.create(cmd, weight));
+            return this;
+        }
+
         public CommandsBuilder<State, SystemUnderTest> addAllIf(Predicate<State> predicate, Consumer<IfBuilder<State, SystemUnderTest>> sub)
         {
             sub.accept(new IfBuilder<>()
             {
+                @Override
+                public IfBuilder<State, SystemUnderTest> add(int weight, Setup<State, SystemUnderTest> cmd)
+                {
+                    CommandsBuilder.this.addIf(predicate, weight, cmd);
+                    return this;
+                }
+
                 @Override
                 public IfBuilder<State, SystemUnderTest> add(Setup<State, SystemUnderTest> cmd)
                 {
                     CommandsBuilder.this.addIf(predicate, cmd);
                     return this;
                 }
+
 
                 @Override
                 public IfBuilder<State, SystemUnderTest> addIf(Predicate<State> nextPredicate, Setup<State, SystemUnderTest> cmd) {
@@ -931,6 +959,24 @@ public class Property
 
         public interface IfBuilder<State, SystemUnderTest>
         {
+            default IfBuilder<State, SystemUnderTest> add(int weight, Command<State, SystemUnderTest, ?> cmd)
+            {
+                return add(weight, (i1, i2) -> cmd);
+            }
+            default IfBuilder<State, SystemUnderTest> add(int weight, Gen<Command<State, SystemUnderTest, ?>> cmd)
+            {
+                return add(weight, (rs, state) -> cmd.next(rs));
+            }
+            IfBuilder<State, SystemUnderTest> add(int weight, Setup<State, SystemUnderTest> cmd);
+
+            default IfBuilder<State, SystemUnderTest> add(Command<State, SystemUnderTest, ?> cmd)
+            {
+                return add((i1, i2) -> cmd);
+            }
+            default IfBuilder<State, SystemUnderTest> add(Gen<Command<State, SystemUnderTest, ?>> cmd)
+            {
+                return add((rs, state) -> cmd.next(rs));
+            }
             IfBuilder<State, SystemUnderTest> add(Setup<State, SystemUnderTest> cmd);
             IfBuilder<State, SystemUnderTest> addIf(Predicate<State> predicate, Setup<State, SystemUnderTest> cmd);
         }
@@ -956,7 +1002,7 @@ public class Property
         public Commands<State, SystemUnderTest> build()
         {
             Gen<Setup<State, SystemUnderTest>> commandsGen;
-            if (unknownWeights == null && conditionalCommands == null)
+            if (unknownWeights == null && conditionalCommands == null && conditionalCommandsKnownWeights == null)
             {
                 commandsGen = Gens.pick(new LinkedHashMap<>(knownWeights));
             }
@@ -989,15 +1035,36 @@ public class Property
                                         conditionalWeights.put(c, unknownWeightGen.nextInt(rs));
                                 }
                             }
+                            if (conditionalCommandsKnownWeights != null)
+                            {
+                                if (conditionalWeights == null)
+                                    conditionalWeights = new LinkedHashMap<>();
+                                for (List<Pair<Setup<State, SystemUnderTest>, Integer>> commands : conditionalCommandsKnownWeights.values())
+                                {
+                                    for (Pair<Setup<State, SystemUnderTest>, Integer> pair : commands)
+                                        conditionalWeights.put(pair.left, pair.right);
+                                }
+                            }
                         }
                         if (conditionalWeights == null) return nonConditional.next(rs);
                         return (r, s) -> {
                             // need to figure out what conditions apply...
                             LinkedHashMap<Setup<State, SystemUnderTest>, Integer> clone = new LinkedHashMap<>(weights);
-                            for (Map.Entry<Predicate<State>, List<Setup<State, SystemUnderTest>>> e : conditionalCommands.entrySet())
+                            if (conditionalCommands != null)
                             {
-                                if (e.getKey().test(s))
-                                    e.getValue().forEach(c -> clone.put(c, conditionalWeights.get(c)));
+                                for (Map.Entry<Predicate<State>, List<Setup<State, SystemUnderTest>>> e : conditionalCommands.entrySet())
+                                {
+                                    if (e.getKey().test(s))
+                                        e.getValue().forEach(c -> clone.put(c, conditionalWeights.get(c)));
+                                }
+                            }
+                            if (conditionalCommandsKnownWeights != null)
+                            {
+                                for (Map.Entry<Predicate<State>, List<Pair<Setup<State, SystemUnderTest>, Integer>>> e : conditionalCommandsKnownWeights.entrySet())
+                                {
+                                    if (e.getKey().test(s))
+                                        e.getValue().forEach(p -> clone.put(p.left, p.right));
+                                }
                             }
                             Setup<State, SystemUnderTest> select = Gens.pick(clone).next(r);
                             return select.setup(r, s);
