@@ -91,7 +91,7 @@ public class TopologyManager
         SUCCESS.future.trySuccess(null);
     }
 
-    static class EpochState
+    public static class EpochState
     {
         final Id self;
         private final Topology global;
@@ -118,6 +118,11 @@ public class TopologyManager
             this.addedRanges = global.ranges.without(prevRanges).mergeTouching();
             this.removedRanges = prevRanges.mergeTouching().without(global.ranges);
             this.synced = addedRanges;
+        }
+
+        public EpochReady ready()
+        {
+            return ready;
         }
 
         public boolean hasReachedQuorum()
@@ -636,7 +641,7 @@ public class TopologyManager
     }
 
     @VisibleForTesting
-    EpochState getEpochStateUnsafe(long epoch)
+    public EpochState getEpochStateUnsafe(long epoch)
     {
         return epochs.get(epoch);
     }
