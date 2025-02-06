@@ -125,6 +125,21 @@ public class TopologyManager
             return ready;
         }
 
+        public Ranges synced()
+        {
+            return synced;
+        }
+
+        public Ranges closed()
+        {
+            return closed;
+        }
+
+        public Ranges complete()
+        {
+            return complete;
+        }
+
         public boolean hasReachedQuorum()
         {
             return syncTracker == null || syncTracker.hasReachedQuorum();
