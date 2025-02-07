@@ -486,15 +486,10 @@ public class Property
                     }
                     catch (Throwable t)
                     {
-                        try
-                        {
-                            commands.destroySut(sut, t);
-                            commands.destroyState(state, t);
-                        }
-                        catch (Throwable t2)
-                        {
-                            t.addSuppressed(t2);
-                        }
+                        State finalState = state;
+                        safeHandle(t, () -> commands.onFailure(finalState, sut, maybeRewriteHistory(history, historyTiming), t));
+                        safeHandle(t, () -> commands.destroySut(sut, t));
+                        safeHandle(t, () -> commands.destroyState(finalState, t));
                         throw t;
                     }
                 }
@@ -508,6 +503,18 @@ public class Property
                     seed = rs.nextLong();
                     rs.setSeed(seed);
                 }
+            }
+        }
+
+        private static void safeHandle(Throwable t, CommandsBuilder.FailingRunnable fn)
+        {
+            try
+            {
+                fn.run();
+            }
+            catch (Throwable t2)
+            {
+                t.addSuppressed(t2);
             }
         }
 
@@ -768,11 +775,14 @@ public class Property
         }
     }
 
-    public interface Commands<State, SystemUnderTest>
+    public interface Commands<State, SystemUnderTest> extends StatefulSuccess<State, SystemUnderTest>, StatefulFailure<State, SystemUnderTest>
     {
         Gen<State> genInitialState() throws Throwable;
         SystemUnderTest createSut(State state) throws Throwable;
+        @Override
         default void onSuccess(State state, SystemUnderTest sut, List<String> history) throws Throwable {}
+        @Override
+        default void onFailure(State state, SystemUnderTest sut, List<String> history, Throwable cause) throws Throwable {}
         default void destroyState(State state, @Nullable Throwable cause) throws Throwable {}
         default void destroySut(SystemUnderTest sut, @Nullable Throwable cause) throws Throwable {}
         Gen<Command<State, SystemUnderTest, ?>> commands(State state) throws Throwable;
@@ -790,7 +800,12 @@ public class Property
 
     public interface StatefulSuccess<State, SystemUnderTest>
     {
-        void apply(State state, SystemUnderTest sut, List<String> history) throws Throwable;
+        void onSuccess(State state, SystemUnderTest sut, List<String> history) throws Throwable;
+    }
+
+    public interface StatefulFailure<State, SystemUnderTest>
+    {
+        void onFailure(State state, SystemUnderTest sut, List<String> history, Throwable cause) throws Throwable;
     }
 
     public static class CommandsBuilder<State, SystemUnderTest>
@@ -818,6 +833,7 @@ public class Property
         @Nullable
         private BiFunction<State, Gen<Command<State, SystemUnderTest, ?>>, Gen<Command<State, SystemUnderTest, ?>>> commandsTransformer = null;
         private final List<StatefulSuccess<State, SystemUnderTest>> onSuccess = new ArrayList<>();
+        private final List<StatefulFailure<State, SystemUnderTest>> onFailures = new ArrayList<>();
 
         public CommandsBuilder(Supplier<Gen<State>> stateGen, Function<State, SystemUnderTest> sutFactory)
         {
@@ -999,6 +1015,12 @@ public class Property
             return this;
         }
 
+        public CommandsBuilder<State, SystemUnderTest> onFailure(StatefulFailure<State, SystemUnderTest> fn)
+        {
+            onFailures.add(fn);
+            return this;
+        }
+
         public Commands<State, SystemUnderTest> build()
         {
             Gen<Setup<State, SystemUnderTest>> commandsGen;
@@ -1123,7 +1145,14 @@ public class Property
                 public void onSuccess(State state, SystemUnderTest sut, List<String> history) throws Throwable
                 {
                     for (var fn : onSuccess)
-                        fn.apply(state, sut, history);
+                        fn.onSuccess(state, sut, history);
+                }
+
+                @Override
+                public void onFailure(State state, SystemUnderTest sut, List<String> history, Throwable cause) throws Throwable
+                {
+                    for (var fn : onFailures)
+                        fn.onFailure(state, sut, history, cause);
                 }
             };
         }
@@ -1131,6 +1160,11 @@ public class Property
         public interface FailingConsumer<T>
         {
             void accept(T value) throws Throwable;
+        }
+
+        public interface FailingRunnable
+        {
+            void run() throws Throwable;
         }
 
         public interface FailingBiConsumer<A, B>
