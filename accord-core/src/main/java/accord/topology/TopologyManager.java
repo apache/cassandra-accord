@@ -657,6 +657,8 @@ public class TopologyManager
         List<FutureEpoch> futureEpochs = new ArrayList<>(current.futureEpochs);
         FutureEpoch toComplete = !futureEpochs.isEmpty() ? futureEpochs.remove(0) : null;
         epochs = new Epochs(nextEpochs, pending, futureEpochs);
+        //TODO (performance): this can trigger many callbacks leading to effectivally unbounded work holding a critical lock!
+        // should look into moving this outside of the lock
         if (toComplete != null)
             toComplete.future.trySuccess(null);
 
