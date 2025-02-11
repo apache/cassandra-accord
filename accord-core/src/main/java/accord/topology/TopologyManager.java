@@ -20,6 +20,7 @@ package accord.topology;
 
 import java.util.ArrayList;
 import java.util.BitSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
@@ -31,8 +32,10 @@ import javax.annotation.Nullable;
 import javax.annotation.concurrent.GuardedBy;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableList;
 
 import accord.api.Agent;
+import accord.api.ConfigurationService;
 import accord.api.ConfigurationService.EpochReady;
 import accord.api.ProtocolModifiers.QuorumEpochIntersections.Include;
 import accord.api.Scheduler;
@@ -91,7 +94,7 @@ public class TopologyManager
         SUCCESS.future.trySuccess(null);
     }
 
-    public static class EpochState
+    static class EpochState
     {
         final Id self;
         private final Topology global;
@@ -99,9 +102,12 @@ public class TopologyManager
         private final QuorumTracker syncTracker;
         private final BitSet curShardSyncComplete;
         private final Ranges addedRanges, removedRanges;
+        @GuardedBy("TopologyManager.this")
         private EpochReady ready;
+        @GuardedBy("TopologyManager.this")
         private Ranges synced;
-        Ranges closed = Ranges.EMPTY, complete = Ranges.EMPTY;
+        @GuardedBy("TopologyManager.this")
+        Ranges closed = Ranges.EMPTY, retired = Ranges.EMPTY;
 
         EpochState(Id node, Topology global, TopologySorter sorter, Ranges prevRanges)
         {
@@ -118,26 +124,6 @@ public class TopologyManager
             this.addedRanges = global.ranges.without(prevRanges).mergeTouching();
             this.removedRanges = prevRanges.mergeTouching().without(global.ranges);
             this.synced = addedRanges;
-        }
-
-        public EpochReady ready()
-        {
-            return ready;
-        }
-
-        public Ranges synced()
-        {
-            return synced;
-        }
-
-        public Ranges closed()
-        {
-            return closed;
-        }
-
-        public Ranges complete()
-        {
-            return complete;
         }
 
         public boolean hasReachedQuorum()
@@ -190,12 +176,12 @@ public class TopologyManager
             return true;
         }
 
-        boolean recordComplete(Ranges ranges)
+        boolean recordRetired(Ranges ranges)
         {
-            if (complete.containsAll(ranges))
+            if (retired.containsAll(ranges))
                 return false;
             closed = closed.union(MERGE_ADJACENT, ranges);
-            complete = complete.union(MERGE_ADJACENT, ranges);
+            retired = retired.union(MERGE_ADJACENT, ranges);
             return true;
         }
 
@@ -241,7 +227,7 @@ public class TopologyManager
         static class Notifications
         {
             final Set<Id> syncComplete = new TreeSet<>();
-            Ranges closed = Ranges.EMPTY, complete = Ranges.EMPTY;
+            Ranges closed = Ranges.EMPTY, retired = Ranges.EMPTY;
         }
 
         private static final Epochs EMPTY = new Epochs(new EpochState[0]);
@@ -380,14 +366,14 @@ public class TopologyManager
          * Mark the epoch as "redundant" for the provided ranges; this means that all transactions that can be
          * proposed for this epoch have now been executed globally.
          */
-        public void epochRedundant(Ranges ranges, long epoch)
+        public void epochRetired(Ranges ranges, long epoch)
         {
             Invariants.requireArgument(epoch > 0);
             int i;
             if (epoch > currentEpoch)
             {
                 Notifications notifications = pending(epoch);
-                notifications.complete = notifications.complete.union(MERGE_ADJACENT, ranges);
+                notifications.retired = notifications.retired.union(MERGE_ADJACENT, ranges);
                 i = 0; // record these ranges as complete for all earlier epochs as well
             }
             else
@@ -396,7 +382,7 @@ public class TopologyManager
                 if (i < 0)
                     return;
             }
-            while (epochs[i].recordComplete(ranges) && ++i < epochs.length) {}
+            while (epochs[i].recordRetired(ranges) && ++i < epochs.length) {}
         }
 
         private Notifications pending(long epoch)
@@ -462,6 +448,102 @@ public class TopologyManager
         }
     }
 
+    // this class could be just the list, but left it here in case we wish to expose "futureEpochs" and "pending" as well
+    public static class EpochsSnapshot implements Iterable<EpochsSnapshot.Epoch>
+    {
+        public final ImmutableList<Epoch> epochs;
+
+        public EpochsSnapshot(ImmutableList<Epoch> epochs)
+        {
+            this.epochs = epochs;
+        }
+
+        @Override
+        public Iterator<Epoch> iterator()
+        {
+            return epochs.iterator();
+        }
+
+        public enum ResultStatus
+        {
+            PENDING("pending"),
+            SUCCESS("success"),
+            FAILURE("failure");
+
+            public final String value;
+
+            ResultStatus(String value)
+            {
+                this.value = value;
+            }
+
+            private static ResultStatus of(AsyncResult<?> result)
+            {
+                if (result == null || !result.isDone())
+                    return PENDING;
+
+                return result.isSuccess() ? SUCCESS : FAILURE;
+            }
+        }
+
+        public static class EpochReady
+        {
+            public final ResultStatus metadata, coordinate, data, reads;
+
+            public EpochReady(ResultStatus metadata, ResultStatus coordinate, ResultStatus data, ResultStatus reads)
+            {
+                this.metadata = metadata;
+                this.coordinate = coordinate;
+                this.data = data;
+                this.reads = reads;
+            }
+
+            private static EpochReady of(ConfigurationService.EpochReady ready)
+            {
+                return new EpochReady(ResultStatus.of(ready.metadata),
+                                      ResultStatus.of(ready.coordinate),
+                                      ResultStatus.of(ready.data),
+                                      ResultStatus.of(ready.reads));
+            }
+        }
+
+        public static class Epoch
+        {
+            public final long epoch;
+            public final EpochReady ready;
+            public final Ranges global, addedRanges, removedRanges, synced, closed, retired;
+
+            public Epoch(long epoch, EpochReady ready, Ranges global, Ranges addedRanges, Ranges removedRanges, Ranges synced, Ranges closed, Ranges retired)
+            {
+                this.epoch = epoch;
+                this.ready = ready;
+                this.global = global;
+                this.addedRanges = addedRanges;
+                this.removedRanges = removedRanges;
+                this.synced = synced;
+                this.closed = closed;
+                this.retired = retired;
+            }
+        }
+
+        private static class Builder
+        {
+            private final ImmutableList.Builder<Epoch> epochs = ImmutableList.builder();
+
+            private void add(long epoch, EpochReady ready,
+                             Ranges global, Ranges addedRanges, Ranges removedRanges,
+                             Ranges synced, Ranges closed, Ranges retired)
+            {
+                epochs.add(new Epoch(epoch, ready, global, addedRanges, removedRanges, synced, closed, retired));
+            }
+
+            private EpochsSnapshot build()
+            {
+                return new EpochsSnapshot(epochs.build());
+            }
+        }
+    }
+
     private final TopologySorter.Supplier sorter;
     private final TopologiesCollectors topologiesCollectors;
     private final BestFastPath bestFastPath;
@@ -487,6 +569,41 @@ public class TopologyManager
         this.time = time;
         this.epochs = Epochs.EMPTY;
         this.localConfig = localConfig;
+    }
+
+    public EpochsSnapshot epochsSnapshot()
+    {
+        EpochsSnapshot.Builder builder = new EpochsSnapshot.Builder();
+        // Write to this volatile variable is done via synchronized, so this is single-writer multi-consumer; safe to read without locks
+        Epochs epochs = this.epochs;
+        for (int i = 0; i < epochs.epochs.length; i++)
+        {
+            // This class's state is mutable with regaurd to: ready, synced, closed, retired
+            EpochState epoch = epochs.epochs[i];
+            // Even though this field is populated with the same lock epochs is, it is done before publishing to epochs!
+            // For this reason the field maybe null, in which case we need to use the lock to wait for the field.
+            EpochReady ready = epoch.ready;
+            if (ready == null)
+            {
+                synchronized (this)
+                {
+                    ready = epoch.ready;
+                }
+            }
+            Ranges global, addedRanges, removedRanges, synced, closed, retired;
+            global = epoch.global.ranges.mergeTouching();
+            addedRanges = epoch.addedRanges;
+            removedRanges = epoch.removedRanges;
+            // synced, closed, and retired all rely on TM's object lock
+            synchronized (this)
+            {
+                synced = epoch.synced;
+                closed = epoch.closed;
+                retired = epoch.retired;
+            }
+            builder.add(epoch.epoch(), EpochsSnapshot.EpochReady.of(ready), global, addedRanges, removedRanges, synced, closed, retired);
+        }
+        return builder.build();
     }
 
     public void shutdown()
@@ -535,7 +652,7 @@ public class TopologyManager
         nextEpochs[0] = new EpochState(self, topology, sorter.get(topology), prevAll);
         notifications.syncComplete.forEach(nextEpochs[0]::recordSyncComplete);
         nextEpochs[0].recordClosed(notifications.closed);
-        nextEpochs[0].recordComplete(notifications.complete);
+        nextEpochs[0].recordRetired(notifications.retired);
 
         List<FutureEpoch> futureEpochs = new ArrayList<>(current.futureEpochs);
         FutureEpoch toComplete = !futureEpochs.isEmpty() ? futureEpochs.remove(0) : null;
@@ -620,9 +737,9 @@ public class TopologyManager
         epochs.epochClosed(ranges, epoch);
     }
 
-    public synchronized void onEpochRedundant(Ranges ranges, long epoch)
+    public synchronized void onEpochRetired(Ranges ranges, long epoch)
     {
-        epochs.epochRedundant(ranges, epoch);
+        epochs.epochRetired(ranges, epoch);
     }
 
     public TopologySorter.Supplier sorter()
@@ -656,7 +773,7 @@ public class TopologyManager
     }
 
     @VisibleForTesting
-    public EpochState getEpochStateUnsafe(long epoch)
+    EpochState getEpochStateUnsafe(long epoch)
     {
         return epochs.get(epoch);
     }
@@ -746,7 +863,7 @@ public class TopologyManager
         return withSufficientEpochsAtLeast(select,
                                           min == null ? Long.MIN_VALUE : min.epoch(),
                                           max == null ? Long.MAX_VALUE : max.epoch(),
-                                          prev -> prev.complete);
+                                          prev -> prev.retired);
     }
 
     private Topologies withSufficientEpochsAtLeast(Unseekables<?> select, long minEpoch, long maxEpoch, Function<EpochState, Ranges> isSufficientFor)
