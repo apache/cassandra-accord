@@ -525,23 +525,6 @@ public class TopologyManager
                 this.retired = retired;
             }
         }
-
-        private static class Builder
-        {
-            private final ImmutableList.Builder<Epoch> epochs = ImmutableList.builder();
-
-            private void add(long epoch, EpochReady ready,
-                             Ranges global, Ranges addedRanges, Ranges removedRanges,
-                             Ranges synced, Ranges closed, Ranges retired)
-            {
-                epochs.add(new Epoch(epoch, ready, global, addedRanges, removedRanges, synced, closed, retired));
-            }
-
-            private EpochsSnapshot build()
-            {
-                return new EpochsSnapshot(epochs.build());
-            }
-        }
     }
 
     private final TopologySorter.Supplier sorter;
@@ -573,7 +556,7 @@ public class TopologyManager
 
     public EpochsSnapshot epochsSnapshot()
     {
-        EpochsSnapshot.Builder builder = new EpochsSnapshot.Builder();
+        ImmutableList.Builder<EpochsSnapshot.Epoch> builder = ImmutableList.builder();
         // Write to this volatile variable is done via synchronized, so this is single-writer multi-consumer; safe to read without locks
         Epochs epochs = this.epochs;
         for (int i = 0; i < epochs.epochs.length; i++)
@@ -595,9 +578,9 @@ public class TopologyManager
                 closed = epoch.closed;
                 retired = epoch.retired;
             }
-            builder.add(epoch.epoch(), EpochsSnapshot.EpochReady.of(ready), global, addedRanges, removedRanges, synced, closed, retired);
+            builder.add(new EpochsSnapshot.Epoch(epoch.epoch(), EpochsSnapshot.EpochReady.of(ready), global, addedRanges, removedRanges, synced, closed, retired));
         }
-        return builder.build();
+        return new EpochsSnapshot(builder.build());
     }
 
     public void shutdown()
