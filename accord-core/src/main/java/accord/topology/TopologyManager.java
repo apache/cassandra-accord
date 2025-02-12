@@ -556,9 +556,9 @@ public class TopologyManager
 
     public EpochsSnapshot epochsSnapshot()
     {
-        ImmutableList.Builder<EpochsSnapshot.Epoch> builder = ImmutableList.builder();
         // Write to this volatile variable is done via synchronized, so this is single-writer multi-consumer; safe to read without locks
         Epochs epochs = this.epochs;
+        ImmutableList.Builder<EpochsSnapshot.Epoch> builder = ImmutableList.builderWithExpectedSize(epochs.epochs.length);
         for (int i = 0; i < epochs.epochs.length; i++)
         {
             // This class's state is mutable with regaurd to: ready, synced, closed, retired
