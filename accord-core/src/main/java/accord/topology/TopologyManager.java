@@ -582,21 +582,15 @@ public class TopologyManager
             EpochState epoch = epochs.epochs[i];
             // Even though this field is populated with the same lock epochs is, it is done before publishing to epochs!
             // For this reason the field maybe null, in which case we need to use the lock to wait for the field.
-            EpochReady ready = epoch.ready;
-            if (ready == null)
-            {
-                synchronized (this)
-                {
-                    ready = epoch.ready;
-                }
-            }
+            EpochReady ready;
             Ranges global, addedRanges, removedRanges, synced, closed, retired;
             global = epoch.global.ranges.mergeTouching();
             addedRanges = epoch.addedRanges;
             removedRanges = epoch.removedRanges;
-            // synced, closed, and retired all rely on TM's object lock
+            // ready, synced, closed, and retired all rely on TM's object lock
             synchronized (this)
             {
+                ready = epoch.ready;
                 synced = epoch.synced;
                 closed = epoch.closed;
                 retired = epoch.retired;
