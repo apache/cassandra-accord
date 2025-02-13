@@ -61,6 +61,7 @@ import accord.primitives.TxnId;
 import accord.topology.Topology;
 import accord.topology.TopologyUtils;
 import accord.utils.DefaultRandom;
+import accord.utils.RandomSource;
 
 import static accord.Utils.id;
 import static accord.Utils.writeTxn;
@@ -104,13 +105,14 @@ public class ImmutableCommandTest
         MockCluster.Clock clock = new MockCluster.Clock(100);
         LocalConfig localConfig = LocalConfig.DEFAULT;
         Agent agent = new TestAgent();
+        RandomSource random = new DefaultRandom();
         Node node = new Node(id, null, new MockConfigurationService(null, (epoch, service) -> { }, storeSupport.local.get()), clock,
-                             () -> storeSupport.data, new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()), agent, new DefaultRandom(), Scheduler.NEVER_RUN_SCHEDULED,
+                             () -> storeSupport.data, new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()), agent, random.fork(), Scheduler.NEVER_RUN_SCHEDULED,
                              SizeOfIntersectionSorter.SUPPLIER, DefaultRemoteListeners::new, DefaultTimeouts::new, ignore -> ignore2 -> new NoOpProgressLog(), DefaultLocalListeners.Factory::new,
                              InMemoryCommandStores.Synchronized::new,
                              new CoordinationAdapter.DefaultFactory(),
                              DurableBefore.NOOP_PERSISTER,
-                             localConfig, new InMemoryJournal(id, agent));
+                             localConfig, new InMemoryJournal(id, agent, random.fork()));
         awaitUninterruptibly(node.unsafeStart());
         node.onTopologyUpdate(storeSupport.local.get(), false, true);
         return node;

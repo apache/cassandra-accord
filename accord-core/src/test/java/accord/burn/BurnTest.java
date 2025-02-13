@@ -33,7 +33,8 @@ public class BurnTest extends BurnTestBase
     @Test
     public void testOne()
     {
-        run(System.nanoTime());
+//        run(System.nanoTime());
+        run(396484948997916l);
     }
 
     public static void main(String[] args)

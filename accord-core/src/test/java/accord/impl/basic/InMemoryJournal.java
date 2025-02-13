@@ -20,6 +20,7 @@ package accord.impl.basic;
 
 import java.util.AbstractList;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.Iterator;
 import java.util.List;
@@ -28,6 +29,9 @@ import java.util.NavigableMap;
 import java.util.TreeMap;
 
 import com.google.common.collect.ImmutableSortedMap;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import accord.api.Agent;
 import accord.api.Journal;
@@ -40,7 +44,6 @@ import accord.local.Command.WaitingOnWithExecuteAt;
 import accord.local.Command.WaitingOnWithMinUniqueHlc;
 import accord.local.CommandStore;
 import accord.local.CommandStores;
-import accord.local.Commands;
 import accord.local.DurableBefore;
 import accord.local.Node;
 import accord.local.RedundantBefore;
@@ -56,6 +59,8 @@ import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.utils.Invariants;
 import accord.utils.PersistentField;
+import accord.utils.RandomSource;
+import accord.utils.UnhandledEnum;
 import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResult;
 import org.agrona.collections.Int2ObjectHashMap;
@@ -63,6 +68,7 @@ import org.agrona.collections.Int2ObjectHashMap;
 import static accord.api.Journal.Load.ALL;
 import static accord.impl.CommandChange.Field;
 import static accord.impl.CommandChange.Field.ACCEPTED;
+import static accord.impl.CommandChange.Field.CLEANUP;
 import static accord.impl.CommandChange.Field.DURABILITY;
 import static accord.impl.CommandChange.Field.EXECUTES_AT_LEAST;
 import static accord.impl.CommandChange.Field.EXECUTE_AT;
@@ -82,11 +88,18 @@ import static accord.impl.CommandChange.isChanged;
 import static accord.impl.CommandChange.isNull;
 import static accord.impl.CommandChange.nextSetField;
 import static accord.impl.CommandChange.setChanged;
-import static accord.impl.CommandChange.setFieldIsNullAndChanged;
+import static accord.impl.CommandChange.setIsNullAndChanged;
 import static accord.impl.CommandChange.toIterableSetFields;
 import static accord.impl.CommandChange.unsetIterable;
 import static accord.impl.CommandChange.validateFlags;
+import static accord.local.Cleanup.*;
 import static accord.local.Cleanup.Input.FULL;
+import static accord.local.Cleanup.Input.PARTIAL;
+import static accord.local.Command.Truncated.erased;
+import static accord.local.Command.Truncated.invalidated;
+import static accord.local.Command.Truncated.truncated;
+import static accord.local.Command.Truncated.truncatedApplyWithOutcome;
+import static accord.local.Command.Truncated.vestigial;
 import static accord.primitives.SaveStatus.Erased;
 import static accord.primitives.Status.Invalidated;
 import static accord.primitives.Status.Truncated;
@@ -94,17 +107,20 @@ import static accord.utils.Invariants.illegalState;
 
 public class InMemoryJournal implements Journal
 {
+    private static final Logger log = LoggerFactory.getLogger(InMemoryJournal.class);
     private final Int2ObjectHashMap<NavigableMap<TxnId, List<Diff>>> diffsPerCommandStore = new Int2ObjectHashMap<>();
     private final List<TopologyUpdate> topologyUpdates = new ArrayList<>();
     private final Int2ObjectHashMap<FieldUpdates> fieldStates = new Int2ObjectHashMap<>();
 
     private final Node.Id id;
     private final Agent agent;
+    private final RandomSource random;
 
-    public InMemoryJournal(Node.Id id, Agent agent)
+    public InMemoryJournal(Node.Id id, Agent agent, RandomSource random)
     {
         this.id = id;
         this.agent = agent;
+        this.random = random;
     }
 
     @Override
@@ -296,6 +312,7 @@ public class InMemoryJournal implements Journal
     @Override
     public void purge(CommandStores commandStores)
     {
+        boolean isPartialCompaction = random.nextBoolean();
         for (Map.Entry<Integer, NavigableMap<TxnId, List<Diff>>> e : diffsPerCommandStore.entrySet())
         {
             int commandStoreId = e.getKey();
@@ -308,29 +325,77 @@ public class InMemoryJournal implements Journal
             {
                 List<Diff> diffs = e2.getValue();
                 if (diffs.isEmpty()) continue;
+                if (isPartialCompaction)
+                {
+                    List<Diff> copy = new ArrayList<>();
+                    int tmp1 = random.nextInt(diffs.size());
+                    int tmp2 = random.nextInt(diffs.size());
+                    int min = Math.min(tmp1, tmp2);
+                    int max = Math.max(tmp1, tmp2);
+                    for (int i = min; i < max; i++)
+                        copy.add(diffs.get(i));
+
+                    if (copy.isEmpty())
+                        continue;
+                    diffs = copy;
+                }
                 InMemoryJournal.Builder builder = reconstruct(diffs, ALL);
+                if (builder.saveStatus() == null)
+                    continue; // Partial compaction, no save status present
+
                 if (builder.saveStatus().status == Truncated || builder.saveStatus().status == Invalidated)
                     continue; // Already truncated
 
-                Command command = builder.construct(store.unsafeGetRedundantBefore());
-                Cleanup cleanup = Cleanup.shouldCleanup(FULL, store.agent(), command, store.unsafeGetRedundantBefore(), store.durableBefore());
-                switch (cleanup)
-                {
-                    case NO:
-                        break;
-                    case INVALIDATE:
-                    case TRUNCATE_WITH_OUTCOME:
-                    case TRUNCATE:
-                    case ERASE:
-                        command = Commands.purgeUnsafe(store, command, cleanup);
-                        Invariants.require(command.saveStatus() != SaveStatus.Uninitialised);
-                        Diff diff = toDiff(new CommandUpdate(null, command));
-                        e2.setValue(cleanup == Cleanup.ERASE ? new ErasedList(diff) : new TruncatedList(diff));
-                        break;
+                Input input = isPartialCompaction ? PARTIAL : FULL;
+                Cleanup cleanup = shouldCleanup(input,
+                                                store.agent(),
+                                                builder.txnId(),
+                                                builder.executeAt(),
+                                                builder.saveStatus(),
+                                                builder.durability(),
+                                                builder.participants(),
+                                                store.unsafeGetRedundantBefore(),
+                                                store.durableBefore());
 
-                    case EXPUNGE:
-                        e2.setValue(new PurgedList(e2.getValue()));
-                        break;
+                if (builder.maybeCleanup(input, cleanup))
+                {
+                    Invariants.require(cleanup != NO);
+                    if (cleanup == EXPUNGE)
+                        e2.setValue(new PurgedList());
+                    else
+                    {
+                        int flags = CommandChange.flagsForPurge(cleanup.appliesIfNot);
+                        EnumMap<Field, Object> values = new EnumMap<>(Field.class);
+                        for (Field field : Field.values())
+                        {
+                            if (field == CLEANUP || field == SAVE_STATUS)
+                                continue;
+
+                            Object v = builder.get(field);
+                            if (!isChanged(field, flags) && v != null)
+                            {
+                                flags = setChanged(field, flags);
+                                values.put(field, v);
+                            }
+                        }
+                        values.put(SAVE_STATUS, cleanup.appliesIfNot);
+                        flags = setChanged(SAVE_STATUS, flags);
+                        Diff diff = new Diff(builder.txnId(), flags, values);
+                        // During partial compaction, we can only append_to the existing list, removing items that got compacted away
+                        if (isPartialCompaction)
+                        {
+                            List<Diff> newDiffs = new ArrayList<>();
+                            newDiffs.addAll(e2.getValue());
+                            newDiffs.removeIf(diffs::contains);
+                            newDiffs.add(diff);
+                            e2.setValue(newDiffs);
+                        }
+                        // During full compaction, we can erase all previous records, replacing them with new image
+                        else
+                        {
+                            e2.setValue(cleanup == ERASE ? new ErasedList(diff) : new TruncatedList(diff));
+                        }
+                    }
                 }
             }
         }
@@ -405,12 +470,6 @@ public class InMemoryJournal implements Journal
 
     private static class PurgedList extends AbstractList<Diff>
     {
-        final List<Diff> purged;
-        PurgedList(List<Diff> purged)
-        {
-            this.purged = purged;
-        }
-
         @Override
         public Diff get(int index)
         {
@@ -453,6 +512,13 @@ public class InMemoryJournal implements Journal
         public final TxnId txnId;
         public final Map<Field, Object> changes;
         public final int flags;
+
+        private Diff(TxnId txnId, int flags, Map<Field, Object> changes)
+        {
+            this.txnId = txnId;
+            this.flags = flags;
+            this.changes = changes;
+        }
 
         private Diff(int flags, CommandUpdate update)
         {
@@ -526,6 +592,16 @@ public class InMemoryJournal implements Journal
                 iterable = unsetIterable(field, iterable);
             }
         }
+
+        @Override
+        public String toString()
+        {
+            return "Diff{" +
+                   "txnId=" + txnId +
+                   ", changes=" + changes +
+                   ", flags=" + flags +
+                   '}';
+        }
     }
 
     private static class Builder extends CommandChange.Builder
@@ -533,6 +609,16 @@ public class InMemoryJournal implements Journal
         private Builder(TxnId txnId, Load load)
         {
             super(txnId, load);
+        }
+
+        public TxnId txnId()
+        {
+            return txnId;
+        }
+
+        public Timestamp executeAt()
+        {
+            return executeAt;
         }
 
         private void apply(Diff diff)
@@ -557,7 +643,7 @@ public class InMemoryJournal implements Journal
 
                 if (isNull(field, diff.flags))
                 {
-                    this.flags = setFieldIsNullAndChanged(field, this.flags);
+                    this.flags = setIsNullAndChanged(field, this.flags);
                 }
                 else
                 {
@@ -573,6 +659,7 @@ public class InMemoryJournal implements Journal
         {
             switch (field)
             {
+                default: throw new UnhandledEnum(field);
                 case EXECUTE_AT:
                     executeAt = Invariants.nonNull((Timestamp) diff.changes.get(EXECUTE_AT));
                     break;

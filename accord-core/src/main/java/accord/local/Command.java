@@ -1683,7 +1683,8 @@ public abstract class Command implements ICommand
     public static <T extends Command> T validate(T validate)
     {
         Invariants.require(validate.txnId().hasOnlyIdentityFlags());
-        Invariants.require(!validate.participants().hasTouched().isEmpty() || validate.saveStatus() == Uninitialised);
+        Invariants.require(!validate.participants().hasTouched().isEmpty() || validate.saveStatus() == Uninitialised,
+                           validate.toString());
         Known known = validate.known();
         switch (known.route())
         {

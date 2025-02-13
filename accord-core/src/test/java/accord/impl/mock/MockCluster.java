@@ -134,7 +134,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         MockConfigurationService configurationService = new MockConfigurationService(messageSink, onFetchTopology, topology);
         LocalConfig localConfig = LocalConfig.DEFAULT;
         Agent agent = new TestAgent();
-        Journal journal = new InMemoryJournal(id, agent);
+        Journal journal = new InMemoryJournal(id, agent, random.fork());
         Node node = new Node(id,
                              messageSink,
                              configurationService,
