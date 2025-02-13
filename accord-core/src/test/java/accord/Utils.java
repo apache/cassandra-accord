@@ -67,6 +67,7 @@ import accord.topology.TopologyManager;
 import accord.utils.DefaultRandom;
 import accord.utils.EpochFunction;
 import accord.utils.Invariants;
+import accord.utils.RandomSource;
 import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.ThreadPoolScheduler;
 import org.awaitility.Awaitility;
@@ -182,6 +183,7 @@ public class Utils
     {
         MockStore store = new MockStore();
         ThreadPoolScheduler scheduler = new ThreadPoolScheduler();
+        RandomSource randomSource = new DefaultRandom();
         Node node = new Node(nodeId,
                              messageSink,
                              new MockConfigurationService(messageSink, EpochFunction.noop(), topology),
@@ -189,7 +191,7 @@ public class Utils
                              () -> store,
                              new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()),
                              agent,
-                             new DefaultRandom(),
+                             randomSource,
                              scheduler,
                              SizeOfIntersectionSorter.SUPPLIER,
                              DefaultRemoteListeners::new,
@@ -199,7 +201,7 @@ public class Utils
                              InMemoryCommandStores.Synchronized::new,
                              new CoordinationAdapter.DefaultFactory(),
                              DurableBefore.NOOP_PERSISTER,
-                             new InMemoryJournal(nodeId, agent));
+                             new InMemoryJournal(nodeId, agent, randomSource));
         awaitUninterruptibly(node.unsafeStart());
         return node;
     }
