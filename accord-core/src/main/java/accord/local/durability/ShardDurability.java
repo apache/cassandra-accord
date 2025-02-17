@@ -496,6 +496,24 @@ public class ShardDurability
         }
     }
 
+    synchronized void retireRanges(Ranges retiredRanges, long epoch)
+    {
+        Map<Range, ShardScheduler> prev = new HashMap<>(this.shardSchedulers);
+        this.shardSchedulers.clear();
+
+        for (Map.Entry<Range, ShardScheduler> e : prev.entrySet())
+        {
+            if (retiredRanges.contains(e.getKey()))
+            {
+                logger.info("Cancelling durability scheduling for {}, since it was retired in epoch {}",
+                            e.getKey(), epoch);
+                e.getValue().markDefunct();
+            }
+            else
+                this.shardSchedulers.put(e.getKey(), e.getValue());
+        }
+    }
+
     synchronized void updateTopology(Topology latestGlobal)
     {
         if (latestGlobal.epoch() <= latestEpoch)

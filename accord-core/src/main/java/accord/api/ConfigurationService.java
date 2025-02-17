@@ -143,12 +143,6 @@ public interface ConfigurationService
         void onRemoteSyncComplete(Node.Id node, long epoch);
 
         /**
-         * Called when the configuration service is meant to truncate it's topology data up to (but not including)
-         * the given epoch
-         */
-        void truncateTopologyUntil(long epoch);
-
-        /**
          * Called when no new TxnId may be agreed with an epoch less than or equal to the provided one.
          * This means future epochs are now aware of all TxnId with this epoch or earlier that may be executed
          * on this range.
@@ -197,4 +191,9 @@ public interface ConfigurationService
     void reportEpochClosed(Ranges ranges, long epoch);
 
     void reportEpochRetired(Ranges ranges, long epoch);
+
+    /**
+     * Called after this epoch is garbage collected / removed on the current node.
+     */
+    void reportEpochRemoved(long epoch);
 }

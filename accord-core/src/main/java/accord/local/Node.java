@@ -335,7 +335,8 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
             if (this.topology.isEmpty()) return bootstrap.get();
             return orderFastPathReporting(this.topology.epochReady(topology.epoch() - 1), bootstrap.get());
         };
-        return this.topology.onTopologyUpdate(topology, orderFastPathReporting);
+
+        return this.topology.onTopologyUpdate(topology, orderFastPathReporting, configService::reportEpochRemoved);
     }
 
     private static EpochReady orderFastPathReporting(EpochReady previous, EpochReady next)
@@ -368,12 +369,6 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
     }
 
     @Override
-    public void truncateTopologyUntil(long epoch)
-    {
-        topology.truncateTopologyUntil(epoch);
-    }
-
-    @Override
     public void onEpochClosed(Ranges ranges, long epoch)
     {
         topology.onEpochClosed(ranges, epoch);
@@ -383,6 +378,7 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
     public void onEpochRetired(Ranges ranges, long epoch)
     {
         topology.onEpochRetired(ranges, epoch);
+        durabilityService.onEpochRetired(ranges, epoch);
     }
 
     // TODO (required): audit error handling, as the refactor to provide epoch timeouts appears to have broken a number of coordination
@@ -397,6 +393,12 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
 
     public void withEpoch(long epoch, BiConsumer<Void, Throwable> callback)
     {
+        if (epoch < topology.minEpoch())
+        {
+            callback.accept(null, new TopologyManager.TopologyRetiredException(epoch, topology.minEpoch()));
+            return;
+        }
+
         if (topology.hasAtLeastEpoch(epoch))
         {
             callback.accept(null, null);
@@ -410,7 +412,9 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
 
     public void withEpoch(long epoch, BiConsumer<?, ? super Throwable> ifFailure, Runnable ifSuccess)
     {
-        if (topology.hasEpoch(epoch))
+        if (epoch < topology.minEpoch())
+            throw new TopologyManager.TopologyRetiredException(epoch, topology.minEpoch());
+        if (topology.hasAtLeastEpoch(epoch))
         {
             ifSuccess.run();
         }
@@ -426,6 +430,8 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
 
     public void withEpoch(long epoch, BiConsumer<?, Throwable> ifFailure, Function<Throwable, Throwable> onFailure, Runnable ifSuccess)
     {
+        if (epoch < topology.minEpoch())
+            throw new TopologyManager.TopologyRetiredException(epoch, topology.minEpoch());
         if (topology.hasEpoch(epoch))
         {
             ifSuccess.run();
@@ -443,6 +449,8 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
     @Inline
     public <T> AsyncChain<T> withEpoch(long epoch, Supplier<? extends AsyncChain<T>> supplier)
     {
+        if (epoch < topology.minEpoch())
+            throw new TopologyManager.TopologyRetiredException(epoch, topology.minEpoch());
         if (topology.hasEpoch(epoch))
         {
             return supplier.get();

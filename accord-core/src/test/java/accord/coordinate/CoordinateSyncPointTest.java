@@ -70,7 +70,7 @@ class CoordinateSyncPointTest
                                    Utils.shard(removed, new SortedArrayList<>(new Node.Id[] { N2 })));
 
         Node n1 = Utils.createNode(N1, t1, happyPathMessaging(), new MockCluster.Clock(0), new TestAgent.RethrowAgent());
-        n1.topology().onTopologyUpdate(t2, () -> null);
+        n1.topology().onTopologyUpdate(t2, () -> null, e -> {});
         for (Node.Id node : ALL)
             n1.topology().onEpochSyncComplete(node, t1.epoch());
 
@@ -86,7 +86,7 @@ class CoordinateSyncPointTest
                                    Utils.shard(IntKey.range(0, 10), ALL));
 
         Node n1 = Utils.createNode(N1, t1, happyPathMessaging(), new MockCluster.Clock(0), new TestAgent.RethrowAgent());
-        n1.topology().onTopologyUpdate(t2, () -> null);
+        n1.topology().onTopologyUpdate(t2, () -> null, e -> {});
         for (Node.Id node : ALL)
             n1.topology().onEpochSyncComplete(node, t1.epoch());
 

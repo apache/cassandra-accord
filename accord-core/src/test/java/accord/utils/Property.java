@@ -495,7 +495,6 @@ public class Property
                 }
                 catch (Throwable t)
                 {
-
                     throw new PropertyError(statefulPropertyError(this, t, state, maybeRewriteHistory(history, historyTiming)), t);
                 }
                 if (pure)

@@ -139,7 +139,10 @@ public class BurnTestConfigurationService extends AbstractConfigurationService.M
         public void onSuccess(Node.Id from, FetchTopologyReply reply)
         {
             if (reply.topology != null)
+            {
                 reportTopology(reply.topology);
+                pendingEpochs.remove(reply.topology.epoch());
+            }
             else
                 sendNext();
         }
@@ -223,5 +226,10 @@ public class BurnTestConfigurationService extends AbstractConfigurationService.M
         Topology topology = lookup.apply(localId).topology().maybeGlobalForEpoch(epoch);
         if (topology != null)
             topologyUpdates.epochRetired(lookup.apply(localId), topology.nodes(), ranges, epoch);
+    }
+
+    @Override
+    public void reportEpochRemoved(long epoch)
+    {
     }
 }

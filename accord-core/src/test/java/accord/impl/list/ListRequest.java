@@ -49,6 +49,7 @@ import accord.messages.Request;
 import accord.primitives.RoutingKeys;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
+import accord.topology.TopologyManager;
 
 import javax.annotation.Nullable;
 
@@ -95,8 +96,15 @@ public class ListRequest implements Request
 
         static void checkOnResult(Node node, TxnId txnId, RoutingKey homeKey, BiConsumer<Outcome, Throwable> callback)
         {
-            CheckOnResult result = new CheckOnResult(node, txnId, homeKey, callback);
-            result.start();
+            try
+            {
+                CheckOnResult result = new CheckOnResult(node, txnId, homeKey, callback);
+                result.start();
+            }
+            catch (Throwable t)
+            {
+                callback.accept(null, t);
+            }
         }
 
         @Override
@@ -104,7 +112,7 @@ public class ListRequest implements Request
         {
             ++count;
             // this method is called for each reply, so if we see a reply where the status is not known, it may be known on others;
-            // once all status are merged, then onDone will apply aditional logic to make sure things are safe.
+            // once all status are merged, then onDone will apply additional logic to make sure things are safe.
             if (ok.maxKnowledgeSaveStatus == SaveStatus.Uninitialised)
                 return Action.ApproveIfQuorum;
             return ok.maxKnowledgeSaveStatus.hasBeen(PreApplied) ? Action.Approve : Action.Reject;
@@ -205,6 +213,14 @@ public class ListRequest implements Request
                 node.withEpoch(txnId.epoch(), (success, fail) -> checkOnResult(hk, txnId, attempt + 1, t));
                 return;
             }
+
+            if (txnId.epoch() < node.topology().minEpoch())
+            {
+                node.reply(client, replyContext, ListResult.failure(client, ((Packet)replyContext).requestId, txnId), null);
+                node.agent().onUncaughtException(new TopologyManager.TopologyRetiredException(txnId.epoch(), node.topology().minEpoch()));
+                return;
+            }
+
             if (homeKey == null)
                 homeKey = node.computeRoute(txnId, txn.keys()).homeKey();
             RoutingKey finalHomeKey = homeKey;

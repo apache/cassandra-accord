@@ -18,6 +18,9 @@
 
 package accord.impl.list;
 
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
@@ -46,6 +49,7 @@ import accord.primitives.Status;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
+import accord.topology.TopologyManager;
 import accord.utils.Invariants;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncChain;
@@ -122,12 +126,17 @@ public class ListAgent implements Agent
         onStale.accept(staleSince, ranges);
     }
 
+    private static final Set<Class<?>> expectedExceptions = new HashSet<>(Arrays.asList(SimulatedFault.class, ExecuteSyncPoint.SyncPointErased.class, CancellationException.class, TopologyManager.TopologyRetiredException.class));
     @Override
     public void onUncaughtException(Throwable t)
     {
+        if (expectedExceptions.contains(t.getClass()))
+            return;
+
         // TODO (required): why are we now seeing SnapshotAborted? Nothing inherently wrong with it, but should find out what has changed.
-        if (!(t instanceof CoordinationFailed) && !(t instanceof SimulatedFault) && !(t instanceof ExecuteSyncPoint.SyncPointErased)
-            && !(t instanceof CancellationException) && !(t.getCause() instanceof CancellationException) && !(t instanceof ListStore.SnapshotAborted))
+        if (!(t instanceof CoordinationFailed)
+            && !(t.getCause() instanceof CancellationException)
+            && !(t instanceof ListStore.SnapshotAborted))
             onFailure.accept(t);
     }
 

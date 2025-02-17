@@ -597,11 +597,6 @@ public class ListStore implements DataStore, ConfigurationService.Listener
     }
 
     @Override
-    public void truncateTopologyUntil(long epoch)
-    {
-    }
-
-    @Override
     public void onEpochClosed(Ranges ranges, long epoch)
     {
     }

@@ -573,7 +573,7 @@ public interface Topologies extends TopologySorter
 
         public Builder(int initialCapacity)
         {
-            buffer = ArrayBuffers.cachedAny().get(4);
+            buffer = ArrayBuffers.cachedAny().get(initialCapacity);
         }
 
         public void add(Topology topology)

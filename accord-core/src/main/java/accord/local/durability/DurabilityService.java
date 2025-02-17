@@ -178,17 +178,17 @@ public class DurabilityService implements ConfigurationService.Listener
     }
 
     @Override
-    public void truncateTopologyUntil(long epoch)
-    {
-    }
-
-    @Override
     public void onEpochClosed(Ranges ranges, long epoch)
     {
     }
 
     @Override
-    public void onEpochRetired(Ranges ranges, long epoch)
+    public void onEpochRetired(Ranges retiredRanges, long epoch)
     {
+        // No need to cancel work for ranges that are still active
+        if (!node.topology().isFullyRetired(retiredRanges))
+            return;
+
+        shards.retireRanges(retiredRanges, epoch);
     }
 }

@@ -760,7 +760,7 @@ public class Cluster
 
                 // Replay journal
                 Journal journal = journalMap.get(id);
-                Iterator<Journal.TopologyUpdate> iter = journal.replayTopologies();
+                Iterator<? extends Journal.TopologyUpdate> iter = journal.replayTopologies();
                 Journal.TopologyUpdate lastUpdate = null;
                 while (iter.hasNext())
                 {
@@ -859,7 +859,7 @@ public class Cluster
             CommandStores stores = nodeMap.get(node.id()).commandStores();
             // run on node scheduler so doesn't run during replay
             scheduled = node.scheduler().selfRecurring(() -> {
-                journal.purge(stores);
+                journal.purge(stores, node.topology()::minEpoch);
                 schedule(clusterScheduler, rs, nodes, nodeMap, journalMap);
             }, 0, SECONDS);
         }

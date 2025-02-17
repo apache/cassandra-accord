@@ -105,6 +105,12 @@ public class MockConfigurationService implements TestableConfigurationService
     }
 
     @Override
+    public void reportEpochRemoved(long epoch)
+    {
+
+    }
+
+    @Override
     public synchronized void reportTopology(Topology topology)
     {
         if (topology.epoch() > epochs.size())

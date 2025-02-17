@@ -46,6 +46,7 @@ import accord.local.Node;
 import accord.local.RedundantBefore;
 import accord.local.StoreParticipants;
 import accord.primitives.Ballot;
+import accord.primitives.EpochSupplier;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Ranges;
@@ -105,6 +106,7 @@ public class InMemoryJournal implements Journal
     {
         this.id = id;
         this.agent = agent;
+
     }
 
     @Override
@@ -217,14 +219,14 @@ public class InMemoryJournal implements Journal
 
     public void truncateTopologiesForTesting(long minEpoch)
     {
-        List<TopologyUpdate> next = new ArrayList<>();
-        for (int i = 0; i < topologyUpdates.size(); i++)
+        Iterator<TopologyUpdate> iter = topologyUpdates.iterator();
+        while (iter.hasNext())
         {
-            TopologyUpdate update = topologyUpdates.get(i);
-            if (update.global.epoch() >= minEpoch)
-                next.add(update);
+            TopologyUpdate current = iter.next();
+            if (current.global.epoch() >= minEpoch)
+                break;
+            iter.remove();
         }
-        topologyUpdates.retainAll(next);
     }
 
     @Override
@@ -294,8 +296,9 @@ public class InMemoryJournal implements Journal
     }
 
     @Override
-    public void purge(CommandStores commandStores)
+    public void purge(CommandStores commandStores, EpochSupplier minEpoch)
     {
+        truncateTopologiesForTesting(minEpoch.epoch());
         for (Map.Entry<Integer, NavigableMap<TxnId, List<Diff>>> e : diffsPerCommandStore.entrySet())
         {
             int commandStoreId = e.getKey();

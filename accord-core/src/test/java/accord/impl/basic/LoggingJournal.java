@@ -32,6 +32,7 @@ import accord.local.Command;
 import accord.local.CommandStores;
 import accord.local.DurableBefore;
 import accord.local.RedundantBefore;
+import accord.primitives.EpochSupplier;
 import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -92,7 +93,7 @@ public class LoggingJournal implements Journal
     }
 
     @Override
-    public Iterator<TopologyUpdate> replayTopologies()
+    public Iterator<? extends TopologyUpdate> replayTopologies()
     {
         log("REPLAY TOPOLOGIES\n");
         return delegate.replayTopologies();
@@ -108,10 +109,10 @@ public class LoggingJournal implements Journal
     }
 
     @Override
-    public void purge(CommandStores commandStores)
+    public void purge(CommandStores commandStores, EpochSupplier minEpoch)
     {
         log("PURGE\n");
-        delegate.purge(commandStores);
+        delegate.purge(commandStores, minEpoch);
     }
 
     @Override

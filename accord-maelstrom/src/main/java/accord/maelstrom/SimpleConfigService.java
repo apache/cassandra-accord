@@ -69,5 +69,10 @@ public class SimpleConfigService implements ConfigurationService
     public void reportEpochRetired(Ranges ranges, long epoch)
     {
     }
+
+    @Override
+    public void reportEpochRemoved(long epoch)
+    {
+    }
 }
 

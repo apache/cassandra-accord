@@ -69,10 +69,24 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
             return epoch;
         }
 
+        public boolean isReady()
+        {
+            return reads != null && reads.isDone();
+        }
+
         @Override
         public String toString()
         {
             return "EpochState{" + epoch + '}';
+        }
+
+        @VisibleForTesting
+        public synchronized void setReadyForTesting(Topology topology)
+        {
+            this.topology = topology;
+            received.setSuccess(topology);
+            acknowledged.setSuccess(null);
+            reads = AsyncResults.success(null);
         }
     }
 
@@ -96,6 +110,7 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
          */
         private volatile long lastReceived = 0;
         private volatile long lastAcknowledged = 0;
+        private volatile long lastTruncated = -1;
 
         protected abstract EpochState createEpochState(long epoch);
 
@@ -132,6 +147,11 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
             return epochs.size();
         }
 
+        public boolean wasTruncated(long epoch)
+        {
+            return lastTruncated > 0 && lastTruncated >= epoch;
+        }
+
         public boolean isEmpty()
         {
             return lastReceived == 0;
@@ -139,8 +159,9 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
 
         synchronized EpochState getOrCreate(long epoch)
         {
+            Invariants.requireArgument(!wasTruncated(epoch), "Can not re-create truncated epoch %d. Last truncated: %d", epoch, lastTruncated);
             Invariants.requireArgument(epoch >= 0, "Epoch must be non-negative but given %d", epoch);
-            Invariants.requireArgument(epoch > 0 || (lastReceived == 0 && epochs.isEmpty()), "Received epoch 0 after initialization. Last received %d, epochsf; %s", lastReceived, epochs);
+            Invariants.requireArgument(epoch > 0 || (lastReceived == 0 && epochs.isEmpty()), "Received epoch 0 after initialization. Last received %d, epochs; %s", lastReceived, epochs);
             if (epochs.isEmpty())
             {
                 EpochState state = createEpochState(epoch);
@@ -237,15 +258,31 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
             return getOrCreate(epoch).acknowledged;
         }
 
-        synchronized void truncateUntil(long epoch)
+        public synchronized void truncateUntil(long epoch)
         {
             Invariants.requireArgument(epoch <= maxEpoch(), "epoch %d > %d", epoch, maxEpoch());
             long minEpoch = minEpoch();
-            int toTrim = Ints.checkedCast(epoch - minEpoch);
-            if (toTrim <= 0)
+            int trimFrom = Ints.checkedCast(epoch - minEpoch);
+
+            final int count = epochs.size();
+            int highestReadyIdx = -1;
+            for (int i = trimFrom; i >= 0; i--)
+            {
+                if (epochs.get(i).isReady())
+                {
+                    highestReadyIdx = i;
+                    break;
+                }
+            }
+
+            // Always leave least 1 ready epoch after truncation
+            if (highestReadyIdx <= 0)
                 return;
 
-            epochs = new ArrayList<>(epochs.subList(toTrim, epochs.size()));
+            List<EpochState> next = new ArrayList<>(epochs.subList(highestReadyIdx, count));
+            Invariants.require(next.get(0).reads.isDone());
+            epochs = next;
+            lastTruncated = next.get(0).epoch - 1;
         }
     }
 
@@ -294,12 +331,14 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
     @Override
     public void acknowledgeEpoch(EpochReady ready, boolean startSync)
     {
+        if (epochs.wasTruncated(ready.epoch))
+            return;
+
         ready.metadata.addCallback(() -> epochs.acknowledge(ready));
-        ready.coordinate.addCallback(() ->  localSyncComplete(epochs.getOrCreate(ready.epoch).topology, startSync));
+        ready.coordinate.addCallback(() -> localSyncComplete(epochs.getOrCreate(ready.epoch).topology, startSync));
         ready.reads.addCallback(() ->  localBootstrapsComplete(epochs.getOrCreate(ready.epoch).topology));
     }
 
-    protected void topologyUpdatePreListenerNotify(Topology topology) {}
     protected void topologyUpdatePostListenerNotify(Topology topology) {}
 
     public void reportTopology(Topology topology, boolean isLoad, boolean startSync)
@@ -332,7 +371,6 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
         }
 
         epochs.receive(topology);
-        topologyUpdatePreListenerNotify(topology);
         for (Listener listener : listeners)
             listener.onTopologyUpdate(topology, isLoad, startSync);
         topologyUpdatePostListenerNotify(topology);
@@ -362,18 +400,6 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
     {
         for (Listener listener : listeners)
             listener.onEpochRetired(ranges, epoch);
-    }
-
-    protected void truncateTopologiesPreListenerNotify(long epoch) {}
-    protected void truncateTopologiesPostListenerNotify(long epoch) {}
-
-    public void truncateTopologiesUntil(long epoch)
-    {
-        truncateTopologiesPreListenerNotify(epoch);
-        for (Listener listener : listeners)
-            listener.truncateTopologyUntil(epoch);
-        truncateTopologiesPostListenerNotify(epoch);
-        epochs.truncateUntil(epoch);
     }
 
     // synchronized because state.reads is written

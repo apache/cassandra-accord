@@ -28,6 +28,7 @@ import accord.local.Command;
 import accord.local.CommandStores;
 import accord.local.DurableBefore;
 import accord.local.RedundantBefore;
+import accord.primitives.EpochSupplier;
 import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -47,10 +48,10 @@ public interface Journal
     // TODO (required): propagate exceptions (i.e. using OnDone instead of Runnable)
     void saveCommand(int store, CommandUpdate value, Runnable onFlush);
 
-    Iterator<TopologyUpdate> replayTopologies();
+    Iterator<? extends TopologyUpdate> replayTopologies();
     void saveTopology(TopologyUpdate topologyUpdate, Runnable onFlush);
 
-    void purge(CommandStores commandStores);
+    void purge(CommandStores commandStores, EpochSupplier minEpoch);
     void replay(CommandStores commandStores);
 
     RedundantBefore loadRedundantBefore(int store);

@@ -79,13 +79,6 @@ public class AbstractConfigurationServiceTest
         }
 
         @Override
-        public void truncateTopologyUntil(long epoch)
-        {
-            if (!truncates.add(epoch))
-                throw new AssertionError(String.format("Recieved multiple truncates for epoch", epoch));
-        }
-
-        @Override
         public void onEpochClosed(Ranges ranges, long epoch)
         {
         }
@@ -169,6 +162,12 @@ public class AbstractConfigurationServiceTest
         @Override
         public void reportEpochRetired(Ranges ranges, long epoch)
         {
+        }
+
+        @Override
+        public void reportEpochRemoved(long epoch)
+        {
+
         }
     }
 
@@ -313,12 +312,12 @@ public class AbstractConfigurationServiceTest
         EpochHistory history = new EpochHistory();
         Assertions.assertEquals(0, history.size());
 
-        history.getOrCreate(1);
-        history.getOrCreate(2);
-        history.getOrCreate(3);
-        history.getOrCreate(4);
-        history.getOrCreate(5);
-        history.getOrCreate(6);
+        history.getOrCreate(1).setReadyForTesting(new Topology(1));
+        history.getOrCreate(2).setReadyForTesting(new Topology(2));
+        history.getOrCreate(3).setReadyForTesting(new Topology(3));
+        history.getOrCreate(4).setReadyForTesting(new Topology(4));
+        history.getOrCreate(5).setReadyForTesting(new Topology(5));
+        history.getOrCreate(6).setReadyForTesting(new Topology(6));
 
         assertHistoryEpochs(history, 1, 2, 3, 4, 5, 6);
 
