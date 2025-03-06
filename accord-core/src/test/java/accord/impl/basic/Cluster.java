@@ -847,7 +847,7 @@ public class Cluster
 
         private void schedule(Scheduler clusterScheduler, RandomSource rs, List<Id> nodes, Map<Id, Node> nodeMap, Map<Id, Journal> journalMap)
         {
-            scheduled = clusterScheduler.selfRecurring(() -> run(clusterScheduler, rs, nodes, nodeMap, journalMap), rs.nextInt(1, 30), SECONDS);
+            scheduled = clusterScheduler.selfRecurring(() -> run(clusterScheduler, rs, nodes, nodeMap, journalMap), rs.nextInt(1, 2), SECONDS);
         }
 
         private void run(Scheduler clusterScheduler, RandomSource rs, List<Id> nodes, Map<Id, Node> nodeMap, Map<Id, Journal> journalMap)
