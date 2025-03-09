@@ -318,17 +318,17 @@ public class CommandChange
 
         public boolean maybeCleanup(Input input, Cleanup cleanup)
         {
-            if (saveStatus == null)
-                return false;
-
-            cleanup = cleanup.filter(saveStatus);
-            if (cleanup == NO)
+            if (saveStatus == null || cleanup == NO)
                 return false;
 
             SaveStatus newSaveStatus = cleanup.appliesIfNot;
-            setNulls(eraseKnownFieldsMask[newSaveStatus.ordinal()]);
+            if (saveStatus.compareTo(newSaveStatus) >= 0)
+                return false;
+
+            forceSetNulls(eraseKnownFieldsMask[newSaveStatus.ordinal()]);
             if (input == Input.FULL)
             {
+                // TODO (expected): this special-casing shouldn't be necessary
                 if (newSaveStatus == SaveStatus.TruncatedApply && !saveStatus.known.is(ApplyAtKnown))
                     newSaveStatus = SaveStatus.TruncatedUnapplied;
                 saveStatus = newSaveStatus;
@@ -338,10 +338,15 @@ public class CommandChange
 
         protected void setNulls(int mask)
         {
-            // limit ourselves to those fields that have been changed to null
-            mask &= 0xffff | (mask << 16);
-            // low bits of flags represent fields already nulled out, so no need to visit them again
-            int iterable = toIterableSetFields(mask) & ~flags;
+            mask &= ~(flags >>> 16); // limit ourselves to those fields that have not already been set (high 16 bits are those already-set fields)
+            forceSetNulls(mask);
+        }
+
+        protected void forceSetNulls(int mask)
+        {
+            mask &= ~nullMask(flags); // limit ourselves to those fields that are not already null
+            mask = nullMask(mask); // limit ourselves to those fields that are now being set to null
+            int iterable = toIterableSetFields(mask);
             for (Field next = nextSetField(iterable); next != null; iterable = unsetIterable(next, iterable), next = nextSetField(iterable))
             {
                 switch (next)
@@ -364,6 +369,11 @@ public class CommandChange
                 }
             }
             flags |= mask;
+        }
+
+        static int nullMask(int mask)
+        {
+            return (mask & 0xffff) | (mask << 16);
         }
 
         public Command.Minimal asMinimal()
