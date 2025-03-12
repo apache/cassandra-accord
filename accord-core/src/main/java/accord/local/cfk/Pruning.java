@@ -299,7 +299,7 @@ public class Pruning
             return null;
         if (newPrunedBefore.executeAt.compareSimultaneousEpochAndHlc(cfk.prunedBefore().executeAt) <= 0)
             return null;
-        return null;
+        return newPrunedBefore;
     }
 
     /**
