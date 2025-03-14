@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.TreeSet;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.IntFunction;
@@ -29,6 +30,7 @@ import java.util.stream.IntStream;
 
 import accord.api.Key;
 import accord.api.RoutingKey;
+import accord.impl.IntHashKey;
 import accord.impl.IntKey;
 import accord.impl.IntKey.Raw;
 import accord.primitives.AbstractKeys;
@@ -40,6 +42,7 @@ import accord.primitives.Routables;
 import accord.primitives.RoutingKeys;
 import accord.utils.Gen;
 import accord.utils.Gens;
+import accord.utils.RandomSource;
 import accord.utils.RandomTestRunner;
 import org.agrona.collections.IntHashSet;
 
@@ -314,5 +317,38 @@ public class KeysTest
                     Collections.sort(a);
                     return a;
                 });
+    }
+
+    @Test
+    public void containsAllWithoutConflict()
+    {
+        Gen.IntGen valueGen = Gens.ints().between(0, Short.MAX_VALUE);
+        Gen<Key> keyGen = rs -> IntKey.key(valueGen.nextInt(rs));
+        qt().check(rs -> testContains(keyGen, rs));
+    }
+
+    @Test
+    public void containsAllWithConflict()
+    {
+        Gen.IntGen valueGen = Gens.ints().between(0, Short.MAX_VALUE);
+        Gen.IntGen hashGen = Gens.ints().between(0, 3);
+        Gen<Key> keyGen = rs -> IntHashKey.key(valueGen.nextInt(rs), hashGen.nextInt(rs));
+        qt().check(rs -> testContains(keyGen, rs));
+    }
+
+    private static void testContains(Gen<Key> keyGen, RandomSource rs)
+    {
+        int numKeys = rs.nextInt(2, 100);
+        List<Key> keysList = Gens.lists(keyGen).unique().ofSize(numKeys).next(rs);
+        Keys keys = Keys.ofUnique(keysList.toArray(Key[]::new));
+        assert keys.size() == keysList.size();
+        TreeSet<RoutingKey> tokens = new TreeSet<>();
+        for (var k : keys)
+            tokens.add(k.toUnseekable());
+        Gen<List<RoutingKey>> selectGen = Gens.select(new ArrayList<>(tokens));
+        for (int i = 0; i < 1000; i++)
+        {
+            Assertions.assertTrue(keys.containsAll(RoutingKeys.of(selectGen.next(rs).toArray(RoutingKey[]::new))));
+        }
     }
 }

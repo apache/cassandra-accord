@@ -94,7 +94,10 @@ public class Keys extends AbstractKeys<Key> implements Seekables<Key, Keys>
     @Override
     public final boolean containsAll(AbstractUnseekableKeys that)
     {
-        return that.size() == SortedArrays.foldlIntersection(0, RoutableKey::compareAsRoutingKey, that.keys, 0, that.keys.length, keys, 0, keys.length, (k, p, v, l, r) -> v + 1, 0, 0, 0);
+        return that.size() == SortedArrays.foldlIntersection(0, RoutableKey::compareAsRoutingKey,
+                                                             keys, 0, keys.length,
+                                                             that.keys, 0, that.keys.length,
+                                                             (k, p, v, l, r) -> v + 1, 0, 0, 0);
     }
 
     @Override

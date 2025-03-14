@@ -116,6 +116,11 @@ public abstract class IntHashKey implements RoutableKey
             super(key);
         }
 
+        public Key(int key, int token)
+        {
+            super(key, token);
+        }
+
         @Override
         public Object suffix()
         {
@@ -208,9 +213,20 @@ public abstract class IntHashKey implements RoutableKey
         this.hash = hash;
     }
 
+    private IntHashKey(int key, int hash)
+    {
+        this.key = key;
+        this.hash = hash;
+    }
+
     public static Key key(int k)
     {
         return new Key(k);
+    }
+
+    public static Key key(int k, int hash)
+    {
+        return new Key(k, hash);
     }
 
     public static Hash forHash(int hash)
@@ -291,8 +307,11 @@ public abstract class IntHashKey implements RoutableKey
     }
 
     @Override
-    public int compareTo(@Nonnull RoutableKey that)
+    public int compareTo(@Nonnull RoutableKey other)
     {
-        return Integer.compare(this.hash, ((IntHashKey)that).hash);
+        IntHashKey that = (IntHashKey) other;
+        int rc = Integer.compare(this.hash, that.hash);
+        if (rc != 0) return rc;
+        return Integer.compare(this.key, that.key);
     }
 }

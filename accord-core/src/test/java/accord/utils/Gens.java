@@ -285,6 +285,18 @@ public class Gens {
         };
     }
 
+    public static <T> Gen<List<T>> select(List<T> input)
+    {
+        return rs -> {
+            int size = rs.nextInt(0, input.size() + 1);
+            List<T> remaining = new ArrayList<>(input);
+            List<T> list = new ArrayList<>(size);
+            for (int i = 0; i < size; i++)
+                list.add(remaining.remove(rs.nextInt(0, remaining.size())));
+            return list;
+        };
+    }
+
     public static Gen<Gen.IntGen> randomWeights(int[] array)
     {
         return rs -> {
