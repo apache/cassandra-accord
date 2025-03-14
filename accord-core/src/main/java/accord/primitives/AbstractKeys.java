@@ -304,17 +304,10 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
 
     protected <T> T toRoutingKeysArray(RoutingKey withKey, boolean permitInsert, ToRoutingKeysFactory<T> toRoutingKeysFactory)
     {
-        RoutingKey[] copy;
-        if (keys.getClass() == RoutingKey[].class)
-        {
-            copy = (RoutingKey[])keys;
-        }
-        else
-        {
-            copy = new RoutingKey[keys.length];
-            for (int i = 0; i < keys.length; i++)
-                copy[i] = keys[i].toUnseekable();
-        }
+        RoutingKey[] copy = new RoutingKey[keys.length];
+        int resultCount = copyToRoutingKeys(keys, 0, copy, 0, keys.length);
+        if (resultCount < copy.length)
+            copy = Arrays.copyOf(copy, resultCount);
 
         int insertPos = Arrays.binarySearch(copy, withKey);
         if (insertPos >= 0)
