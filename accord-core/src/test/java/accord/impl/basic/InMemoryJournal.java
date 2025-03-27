@@ -201,13 +201,13 @@ public class InMemoryJournal implements Journal
     }
 
     @Override
-    public void saveCommand(int commandStoreId, CommandUpdate update, Runnable onFlush)
+    public void saveCommand(int commandStoreId, CommandUpdate update, OnDone onDone)
     {
         Diff diff;
         if ((diff = toDiff(update)) == null)
         {
-            if (onFlush!= null)
-                onFlush.run();
+            if (onDone != null)
+                onDone.success();
             return;
         }
 
@@ -215,8 +215,8 @@ public class InMemoryJournal implements Journal
                             .computeIfAbsent(update.txnId, (k_) -> new ArrayList<>())
                             .add(diff);
 
-        if (onFlush!= null)
-            onFlush.run();
+        if (onDone!= null)
+            onDone.success();
     }
 
     @Override
@@ -238,11 +238,11 @@ public class InMemoryJournal implements Journal
     }
 
     @Override
-    public void saveTopology(TopologyUpdate topologyUpdate, Runnable onFlush)
+    public void saveTopology(TopologyUpdate topologyUpdate, OnDone onDone)
     {
         topologyUpdates.add(topologyUpdate);
-        if (onFlush != null)
-            onFlush.run();
+        if (onDone != null)
+            onDone.success();
     }
 
     public void truncateTopologiesForTesting(long minEpoch)
@@ -300,7 +300,7 @@ public class InMemoryJournal implements Journal
     }
 
     @Override
-    public void saveStoreState(int store, FieldUpdates fieldUpdates, Runnable onFlush)
+    public void saveStoreState(int store, FieldUpdates fieldUpdates, OnDone onDone)
     {
         FieldUpdates fieldStates = this.fieldStates.computeIfAbsent(store, s -> {
             FieldUpdates init = new FieldUpdates();
@@ -319,8 +319,8 @@ public class InMemoryJournal implements Journal
         if (fieldUpdates.newRangesForEpoch != null)
             fieldStates.newRangesForEpoch = fieldUpdates.newRangesForEpoch;
 
-        if (onFlush!= null)
-            onFlush.run();
+        if (onDone!= null)
+            onDone.success();
     }
 
     static int counter = 0;

@@ -844,7 +844,19 @@ public abstract class CommandStores
         if (update.snapshot != current)
         {
             AsyncResults.SettableResult<Void> flush = new AsyncResults.SettableResult<>();
-            journal.saveTopology(update.snapshot.asTopologyUpdate(), () -> flush.setSuccess(null));
+            journal.saveTopology(update.snapshot.asTopologyUpdate(), new Journal.OnDone() {
+                @Override
+                public void success()
+                {
+                    flush.setSuccess(null);
+                }
+
+                @Override
+                public void failure(Throwable t)
+                {
+                    flush.setFailure(t);
+                }
+            });
             current = update.snapshot;
             return () -> {
                 EpochReady ready = update.bootstrap.get();

@@ -48,11 +48,10 @@ public interface Journal
     Command loadCommand(int store, TxnId txnId, RedundantBefore redundantBefore, DurableBefore durableBefore);
     Command.Minimal loadMinimal(int store, TxnId txnId, Load load, RedundantBefore redundantBefore, DurableBefore durableBefore);
 
-    // TODO (required): propagate exceptions (i.e. using OnDone instead of Runnable)
-    void saveCommand(int store, CommandUpdate value, Runnable onFlush);
+    void saveCommand(int store, CommandUpdate value, OnDone onDone);
 
     Iterator<? extends TopologyUpdate> replayTopologies();
-    void saveTopology(TopologyUpdate topologyUpdate, Runnable onFlush);
+    void saveTopology(TopologyUpdate topologyUpdate, OnDone onDone);
 
     void purge(CommandStores commandStores, EpochSupplier minEpoch);
     void replay(CommandStores commandStores);
@@ -64,7 +63,7 @@ public interface Journal
 
     Persister<DurableBefore, DurableBefore> durableBeforePersister();
 
-    void saveStoreState(int store, FieldUpdates fieldUpdates, Runnable onFlush);
+    void saveStoreState(int store, FieldUpdates fieldUpdates, OnDone onDone);
 
     class TopologyUpdate
     {
@@ -161,6 +160,22 @@ public interface Journal
 
     interface OnDone
     {
+        public static OnDone fromRunnable(Runnable r)
+        {
+            return new OnDone()
+            {
+                @Override
+                public void success()
+                {
+                    r.run();
+                }
+
+                public void failure(Throwable t)
+                {
+                    throw new RuntimeException(t);
+                }
+            };
+        }
         void success();
         void failure(Throwable t);
     }

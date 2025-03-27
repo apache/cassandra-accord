@@ -391,9 +391,9 @@ public class Cluster implements Scheduler
         @Override public Journal start(Node node) { return null; }
         @Override public Command loadCommand(int store, TxnId txnId, RedundantBefore redundantBefore, DurableBefore durableBefore) { throw new IllegalStateException("Not impelemented"); }
         @Override public Command.Minimal loadMinimal(int store, TxnId txnId, Load load, RedundantBefore redundantBefore, DurableBefore durableBefore) { throw new IllegalStateException("Not impelemented"); }
-        @Override public void saveCommand(int store, CommandUpdate value, Runnable onFlush)  { throw new IllegalStateException("Not impelemented"); }
+        @Override public void saveCommand(int store, CommandUpdate value, OnDone onDone)  { throw new IllegalStateException("Not impelemented"); }
         @Override public Iterator<TopologyUpdate> replayTopologies() { throw new IllegalStateException("Not impelemented"); }
-        @Override public void saveTopology(TopologyUpdate topologyUpdate, Runnable onFlush)  { throw new IllegalStateException("Not impelemented"); }
+        @Override public void saveTopology(TopologyUpdate topologyUpdate, OnDone onDone)  { throw new IllegalStateException("Not impelemented"); }
         @Override public void purge(CommandStores commandStores, EpochSupplier minEpoch)  { throw new IllegalStateException("Not impelemented"); }
         @Override public void replay(CommandStores commandStores)  { throw new IllegalStateException("Not impelemented"); }
         @Override public RedundantBefore loadRedundantBefore(int store) { throw new IllegalStateException("Not impelemented"); }
@@ -401,6 +401,6 @@ public class Cluster implements Scheduler
         @Override public NavigableMap<Timestamp, Ranges> loadSafeToRead(int store) { throw new IllegalStateException("Not impelemented"); }
         @Override public CommandStores.RangesForEpoch loadRangesForEpoch(int store) { throw new IllegalStateException("Not impelemented"); }
         @Override public PersistentField.Persister<DurableBefore, DurableBefore> durableBeforePersister() { throw new IllegalStateException("Not impelemented"); }
-        @Override public void saveStoreState(int store, FieldUpdates fieldUpdates, Runnable onFlush)  { throw new IllegalStateException("Not impelemented"); }
+        @Override public void saveStoreState(int store, FieldUpdates fieldUpdates, OnDone onDone)  { throw new IllegalStateException("Not impelemented"); }
     }
 }

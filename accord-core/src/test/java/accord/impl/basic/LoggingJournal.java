@@ -94,10 +94,10 @@ public class LoggingJournal implements Journal
     }
 
     @Override
-    public void saveCommand(int store, CommandUpdate update, Runnable onFlush)
+    public void saveCommand(int store, CommandUpdate update, OnDone onDone)
     {
         log("%d: %s\n", store, update.after);
-        delegate.saveCommand(store, update, onFlush);
+        delegate.saveCommand(store, update, onDone);
     }
 
     @Override
@@ -108,11 +108,11 @@ public class LoggingJournal implements Journal
     }
 
     @Override
-    public void saveTopology(TopologyUpdate topologyUpdate, Runnable onFlush)
+    public void saveTopology(TopologyUpdate topologyUpdate, OnDone onDone)
     {
         log("%d: %s\n", topologyUpdate);
-        if (onFlush != null)
-            onFlush.run();
+        if (onDone != null)
+            onDone.success();
         throw new IllegalArgumentException();
     }
 
@@ -159,9 +159,10 @@ public class LoggingJournal implements Journal
         return delegate.durableBeforePersister();
     }
 
-    public void saveStoreState(int store, FieldUpdates fieldUpdates, Runnable onFlush)
+    @Override
+    public void saveStoreState(int store, FieldUpdates fieldUpdates, OnDone onDone)
     {
         log("%d: %s", store, fieldUpdates);
-        delegate.saveStoreState(store, fieldUpdates, onFlush);
+        delegate.saveStoreState(store, fieldUpdates, onDone);
     }
 }
