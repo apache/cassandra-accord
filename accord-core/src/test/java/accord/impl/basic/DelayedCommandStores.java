@@ -60,6 +60,7 @@ import accord.primitives.RoutableKey;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topology;
+import accord.utils.Async;
 import accord.utils.Invariants;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncChain;
@@ -185,6 +186,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
             }
 
             @Override
+            @Async.Execute
             public void run()
             {
                 unsafeRunIn(super::run);
@@ -294,7 +296,11 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         @Override
         public AsyncChain<Void> build(PreLoadContext context, Consumer<? super SafeCommandStore> consumer)
         {
-            return submit(newTask(context, i -> { consumer.accept(i); return null; }));
+            Consumer<? super SafeCommandStore> capture = Async.capture(consumer);
+            return submit(newTask(context, i -> {
+                capture.accept(i);
+                return null;
+            }));
         }
 
         @Override
@@ -317,7 +323,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
             return new DelayedTask<>(() -> executeInContext(this, context, function), origin);
         }
 
-        private <T> AsyncChain<T> submit(DelayedTask<T> task)
+        private <T> AsyncChain<T> submit(@Async.Schedule DelayedTask<T> task)
         {
             if (Invariants.testParanoia(LINEAR, LINEAR, HIGH))
             {
@@ -333,6 +339,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
                 return new AsyncChains.Head<T>()
                 {
                     @Override
+                    @Async.Execute
                     protected Cancellable start(BiConsumer<? super T, Throwable> callback)
                     {
                         boolean wasEmpty = pending.isEmpty();

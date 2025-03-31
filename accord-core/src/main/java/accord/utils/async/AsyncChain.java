@@ -36,6 +36,11 @@ public interface AsyncChain<V>
      */
     <T> AsyncChain<T> map(Function<? super V, ? extends T> mapper);
 
+    /**
+     * Used for testing and debug purposes only. Identifies the root/entrypoint of the given async chain.
+     */
+    Throwable asyncChainRoot();
+
     default <T> AsyncChain<T> map(Function<? super V, ? extends T> mapper, Executor executor)
     {
         return AsyncChains.map(this, mapper, executor);

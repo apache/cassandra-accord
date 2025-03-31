@@ -20,7 +20,6 @@ package accord.local;
 
 import java.util.Set;
 import java.util.function.BiConsumer;
-
 import javax.annotation.Nonnull;
 
 import accord.api.Agent;
@@ -142,11 +141,13 @@ class Bootstrap
                          return CoordinateSyncPoint.exclusive(node, globalSyncId, commitRanges);
                      })
                      .flatMap(i -> i)
-                     .flatMap(syncPoint -> node.withEpoch(epoch, () -> store.build(empty(), safeStore1 -> {
-                         if (valid.isEmpty()) // we've lost ownership of the range
-                             return AsyncResults.success(Ranges.EMPTY);
-                         return fetch = safeStore1.dataStore().fetch(node, safeStore1, valid, syncPoint, this);
-                     })))
+                     .flatMap(syncPoint -> {
+                         return node.withEpoch(epoch, () -> store.build(empty(), safeStore1 -> {
+                             if (valid.isEmpty()) // we've lost ownership of the range
+                                 return AsyncResults.success(Ranges.EMPTY);
+                             return fetch = safeStore1.dataStore().fetch(node, safeStore1, valid, syncPoint, this);
+                         }));
+                     })
                      .flatMap(i -> i)
                      .begin(this);
         }

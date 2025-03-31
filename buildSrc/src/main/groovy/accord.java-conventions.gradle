@@ -46,7 +46,7 @@ test {
     maxParallelForks = Runtime.runtime.availableProcessors().intdiv(2) ?: 1
     minHeapSize = "1g"
     maxHeapSize = "1g"
-    jvmArgs += ['-XX:+HeapDumpOnOutOfMemoryError', "-XX:HeapDumpPath=${buildDir}"]
+    jvmArgs += ['-XX:+HeapDumpOnOutOfMemoryError', "-XX:HeapDumpPath=${buildDir}", "-Daccord.test.enable_async_chain_debug=true"]
 }
 
 dependencies {

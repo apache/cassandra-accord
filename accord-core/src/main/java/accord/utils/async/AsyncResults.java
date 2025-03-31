@@ -30,17 +30,20 @@ import accord.api.VisibleForImplementation;
 import accord.utils.Invariants;
 
 import static accord.utils.Invariants.createIllegalState;
+import static accord.utils.async.AsyncChains.DEBUG;
 
 public class AsyncResults
 {
     private static final Logger logger = LoggerFactory.getLogger(AsyncResults.class);
-    public static final AsyncResult SUCCESS_NULL = new Immediate<>(null);
+    public static final AsyncResult SUCCESS_NULL = new Immediate<>((Object) null);
 
     private AsyncResults() {}
 
     public static class AbstractResult<V> implements AsyncResult<V>
     {
         private static final AtomicReferenceFieldUpdater<AbstractResult, Object> STATE = AtomicReferenceFieldUpdater.newUpdater(AbstractResult.class, Object.class, "state");
+
+        private final Exception asyncChainRoot = DEBUG ? new Exception("Async stack trace injection") : null;
 
         static final class FailureHolder
         {
@@ -49,6 +52,12 @@ public class AsyncResults
             {
                 this.cause = cause;
             }
+        }
+
+        @Override
+        public Throwable asyncChainRoot()
+        {
+            return asyncChainRoot;
         }
 
         private static final class Listener<V>
@@ -243,6 +252,25 @@ public class AsyncResults
 
     public static class SettableResult<V> extends AbstractResult<V> implements AsyncResult.Settable<V>
     {
+        final Exception trace;
+
+        public SettableResult()
+        {
+            super();
+            if (DEBUG)
+            {
+                this.trace = new Exception();
+            }
+            else
+                this.trace = null;
+        }
+
+        @Override
+        public Throwable asyncChainRoot()
+        {
+            return trace;
+        }
+
         @Override
         public boolean trySuccess(V value)
         {
@@ -252,6 +280,8 @@ public class AsyncResults
         @Override
         public boolean tryFailure(Throwable throwable)
         {
+            if (DEBUG)
+                throwable.addSuppressed(trace);
             return super.tryFailure(throwable);
         }
     }
@@ -270,6 +300,7 @@ public class AsyncResults
     {
         private final V value;
         private final Throwable failure;
+        private final Exception trace = DEBUG ? new Exception("Async stack trace injection") : null;
 
         Immediate(V value)
         {
@@ -281,6 +312,8 @@ public class AsyncResults
         {
             this.value = null;
             this.failure = failure;
+            if (asyncChainRoot() != null)
+                failure.initCause(asyncChainRoot());
         }
 
         private AsyncChain<V> newChain()
@@ -300,6 +333,12 @@ public class AsyncResults
         public <T> AsyncChain<T> map(Function<? super V, ? extends T> mapper)
         {
             return newChain().map(mapper);
+        }
+
+        @Override
+        public Throwable asyncChainRoot()
+        {
+            return trace;
         }
 
         @Override

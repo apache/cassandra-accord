@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -352,6 +353,79 @@ public class AsyncChainsTest
             assertThatThrownBy(() -> start.get().flatMap(i -> AsyncChains.success(i)).begin((s, f) -> {throw new UserFailure();})).isInstanceOf(UserFailure.class);
         }
     }
+
+    /**
+     * Tests for error propagation in different situations
+     */
+
+    @Test
+    void propagateErrorFromMap()
+    {
+        ResultCallback<Integer> finalCallback = new ResultCallback<>();
+        AsyncChain<Integer> chain = AsyncChains.ofCallable(MoreExecutors.directExecutor(), () -> 5);
+        chain = chain.map(i -> i + 1);
+        chain = chain.map(i -> i + 1);
+        chain = chain.map(i -> i + 1);
+        chain = chain.map(i -> { throw new RuntimeException(); });
+        chain.begin(finalCallback);
+        Assertions.assertEquals("Async stack trace injection (map)", finalCallback.failure().getCause().getMessage());
+    }
+
+    @Test
+    void propagateErrorFromFlatMapResult()
+    {
+        ResultCallback<Integer> finalCallback = new ResultCallback<>();
+        AsyncChain<Integer> chain = AsyncChains.ofCallable(MoreExecutors.directExecutor(), () -> 5);
+        chain = chain.map(i -> i + 1);
+        chain = chain.map(i -> i + 1);
+        chain = chain.map(i -> i + 1);
+        chain = chain.map(i -> i + 1);
+        chain = chain.flatMap(i -> AsyncChains.failure(new RuntimeException("failure")));
+        chain.begin(finalCallback);
+        Assertions.assertEquals("Async stack trace injection", finalCallback.failure().getCause().getMessage());
+    }
+
+    @Test
+    void propagateErrorFromFlatMapAsyncResult()
+    {
+        ResultCallback<Integer> finalCallback = new ResultCallback<>();
+        AsyncChain<Integer> chain = AsyncChains.ofCallable(MoreExecutors.directExecutor(), () -> 5);
+        chain = chain.map(i -> i + 1);
+        chain = chain.map(i -> i + 1);
+        chain = chain.map(i -> i + 1);
+        chain = chain.flatMap(i -> AsyncResults.failure(new RuntimeException("failure")));
+        chain.begin(finalCallback);
+        Assertions.assertEquals("Async stack trace injection", finalCallback.failure().getCause().getMessage());
+    }
+
+    @Test
+    void propagateErrorFromFlatMapFn()
+    {
+        ResultCallback<Integer> finalCallback = new ResultCallback<>();
+        AsyncChain<Integer> chain = AsyncChains.ofCallable(MoreExecutors.directExecutor(), () -> 5);
+        chain = chain.map(i -> i + 1);
+        chain = chain.map(i -> i + 1);
+        chain = chain.map(i -> i + 1);
+        chain = chain.flatMap(i -> { throw new RuntimeException("failure"); });
+        chain.begin(finalCallback);
+        Assertions.assertTrue(finalCallback.failure().getCause().getMessage().equals("Async stack trace injection (flatmap)"));
+    }
+
+    @Test
+    void propagateErrorFromMultipleFlatMapCalls()
+    {
+        ResultCallback<Integer> finalCallback = new ResultCallback<>();
+        AsyncChain<Integer> chain = AsyncChains.ofCallable(MoreExecutors.directExecutor(), () -> 5);
+        chain = chain.map(i -> i + 1);
+        chain = chain.map(i -> i + 1);
+        chain = chain.map(i -> i + 1);
+        chain = chain.map(i -> i + 1);
+        chain = chain.flatMap(i -> AsyncResults.success(i));
+        chain = chain.flatMap(i -> { throw new RuntimeException("failure"); });
+        chain.begin(finalCallback);
+        Assertions.assertTrue(finalCallback.failure().getCause().getMessage().equals("Async stack trace injection (flatmap)"));
+    }
+
 
     private static class UserFailure extends RuntimeException
     {

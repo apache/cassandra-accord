@@ -29,6 +29,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import accord.local.AgentExecutor;
+import accord.utils.Async;
 import accord.utils.async.AsyncResults;
 
 public abstract class TaskExecutorService extends AbstractExecutorService implements AgentExecutor
@@ -95,6 +96,7 @@ public abstract class TaskExecutorService extends AbstractExecutorService implem
     protected abstract void execute(Task<?> task);
 
     @Override
+    @Async.Execute
     public final void execute(Runnable command)
     {
         execute(newTaskFor(command));
