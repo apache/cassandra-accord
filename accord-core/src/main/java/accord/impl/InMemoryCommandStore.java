@@ -889,7 +889,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                 {
                     return enqueueAndRun(() -> executeInContext(InMemoryCommandStore.Synchronized.this, context, function, callback));
                 }
-            };
+            }.maybeWrapDebug();
         }
 
         @Override
@@ -912,7 +912,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                         }
                     });
                 }
-            };
+            }.maybeWrapDebug();
         }
 
         @Override

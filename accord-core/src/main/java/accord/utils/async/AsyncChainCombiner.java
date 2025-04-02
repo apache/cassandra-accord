@@ -31,12 +31,36 @@ public class AsyncChainCombiner<I> extends AsyncChains.Head<I[]>
     private volatile BiConsumer<? super I[], Throwable> callback;
     private volatile int remaining;
 
-    public AsyncChainCombiner(List<? extends AsyncChain<? extends I>> inputs)
+    private AsyncChainCombiner(List<? extends AsyncChain<? extends I>> inputs)
     {
         Invariants.requireArgument(!inputs.isEmpty(), "No inputs defined");
         this.state = inputs;
     }
 
+    public static <I> AsyncChainCombiner<I> make(List<? extends AsyncChain<? extends I>> inputs)
+    {
+        if (AsyncChains.DEBUG)
+            return new Debug<>(inputs);
+
+        return new AsyncChainCombiner<>(inputs);
+    }
+
+    private static class Debug<I> extends AsyncChainCombiner<I> implements AsyncChain.Debug<I[]>
+    {
+        final Exception trace;
+
+        private Debug(List<? extends AsyncChain<? extends I>> inputs)
+        {
+            super(inputs);
+            this.trace = new Exception("Async stack trace injection");
+        }
+
+        @Override
+        public Throwable asyncChainRoot()
+        {
+            return null;
+        }
+    }
     List<AsyncChain<? extends I>> inputs()
     {
         Object current = state;

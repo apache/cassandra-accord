@@ -355,11 +355,9 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
                             }
                         };
                     }
-                };
+                }.maybeWrapDebug();
             }
         }
-
-
 
         private void runNextTask()
         {

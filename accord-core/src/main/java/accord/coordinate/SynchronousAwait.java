@@ -58,7 +58,7 @@ public class SynchronousAwait implements Callback<Await.AwaitOk>
     public static AsyncChain<Boolean> awaitQuorum(Node node, Topologies topologies, TxnId txnId, BlockedUntil blockedUntil, boolean notifyProgressLog, Participants<?> participants)
     {
         // TODO (expected): copy this pattern elsewhere; should also make it easier to share exception handling logic etc
-        return new AsyncChains.Head<>()
+        AsyncChains.Head<Boolean> head = new AsyncChains.Head<>()
         {
             protected @Nullable @Override Cancellable start(BiConsumer<? super Boolean, Throwable> callback)
             {
@@ -67,6 +67,7 @@ public class SynchronousAwait implements Callback<Await.AwaitOk>
                 return null;
             }
         };
+        return head.maybeWrapDebug();
     }
 
     @Override

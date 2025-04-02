@@ -39,7 +39,10 @@ public interface AsyncChain<V>
     /**
      * Used for testing and debug purposes only. Identifies the root/entrypoint of the given async chain.
      */
-    Throwable asyncChainRoot();
+    interface Debug<V> extends AsyncChain<V>
+    {
+        Throwable asyncChainRoot();
+    }
 
     default <T> AsyncChain<T> map(Function<? super V, ? extends T> mapper, Executor executor)
     {

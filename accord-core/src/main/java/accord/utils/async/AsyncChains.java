@@ -47,7 +47,6 @@ import accord.api.VisibleForImplementation;
 import accord.utils.Async;
 import accord.utils.Invariants;
 
-import static accord.utils.Invariants.debug;
 import static accord.utils.Invariants.illegalState;
 
 public abstract class AsyncChains<V> implements AsyncChain<V>
@@ -69,33 +68,18 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
             }
         }
 
-        final private Object value;
-        private final Throwable trace;
+        protected Object value;
 
         private Immediate(V success)
         {
             this.value = success;
-            this.trace = DEBUG ? new Exception("Async stack trace injection") : null;
         }
 
         private Immediate(Throwable failure)
         {
-            this(failure, DEBUG ? new Exception("Async stack trace injection") : null);
-        }
-
-        private Immediate(Throwable failure, Throwable trace)
-        {
             this.value = new FailureHolder(failure);
-            this.trace = trace;
-            if (trace != null)
-                failure.initCause(trace);
         }
 
-        @Override
-        public Throwable asyncChainRoot()
-        {
-            return trace;
-        }
 
         @Override
         public <T> AsyncChain<T> map(Function<? super V, ? extends T> mapper)
@@ -174,28 +158,44 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
             addCallback(callback);
             return null;
         }
+
+        static class Debug<V> extends Immediate<V> implements AsyncChain.Debug<V>
+        {
+            private final Throwable trace;
+
+            private Debug(V success)
+            {
+                super(success);
+                this.trace = new Exception("Async stack trace injection");
+            }
+
+            private Debug(Throwable failure)
+            {
+                this(failure, new Exception("Async stack trace injection"));
+            }
+
+            private Debug(Throwable failure, Throwable trace)
+            {
+                super(failure);
+                this.trace = trace;
+                if (trace != null)
+                    failure.initCause(trace);
+            }
+
+            @Override
+            public Throwable asyncChainRoot()
+            {
+                return trace;
+            }
+        }
     }
 
     public abstract static class Head<V> extends AsyncChains<V> implements BiConsumer<V, Throwable>
     {
-        final Exception trace;
-
-        protected Head()
-        {
-            this(DEBUG ? new Exception("Async stack trace injection") : null);
-        }
-
-        @Override
-        public Throwable asyncChainRoot()
-        {
-            return trace;
-        }
-
-        protected Head(Exception trace)
+        public Head()
         {
             super(null);
             next = this;
-            this.trace = trace;
         }
 
         protected abstract @Nullable Cancellable start(BiConsumer<? super V, Throwable> callback);
@@ -222,23 +222,63 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
             // we implement here just to simplify logic a little
             throw new UnsupportedOperationException();
         }
+
+        /**
+         * A method to be called upon Head construction to wrap it into a specialized Debug object that will
+         * preserve the call site  for async chain debugging.
+         */
+        public Head<V> maybeWrapDebug()
+        {
+            if (DEBUG)
+                return new Debug<>(this);
+
+            return this;
+        }
+
+        static class Debug<V> extends Head<V> implements AsyncChain.Debug<V>
+        {
+            final Exception trace;
+            final Head<V> delegate;
+
+            private Debug(Head<V> delegate)
+            {
+                this(delegate, new Exception("Async stack trace injection"));
+            }
+
+            private Debug(Head<V> delegate, Exception trace)
+            {
+                super();
+                this.trace = trace;
+                this.delegate = delegate;
+            }
+
+            @Override
+            public Throwable asyncChainRoot()
+            {
+                return trace;
+            }
+
+            @Nullable
+            protected Cancellable start(BiConsumer<? super V, Throwable> callback)
+            {
+                return delegate.start(callback);
+            }
+
+            public Head<V> unwrap()
+            {
+                return delegate;
+            }
+        }
+
     }
 
     static abstract class Link<I, O> extends AsyncChains<O> implements BiConsumer<I, Throwable>
     {
-        final Exception trace;
-
-        protected Link(Head<?> head, Exception trace)
+        protected Link(Head<?> head)
         {
             super(head);
-            this.trace = trace;
         }
 
-        @Override
-        public Throwable asyncChainRoot()
-        {
-            return trace;
-        }
 
         @Override
         public Cancellable begin(BiConsumer<? super O, Throwable> callback)
@@ -249,13 +289,30 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
             next = callback;
             return head.begin();
         }
+
+        static abstract class Debug<I, O> extends Link<I, O> implements AsyncChain.Debug<O>
+        {
+            final Exception trace;
+
+            protected Debug(Head<?> head, Exception trace)
+            {
+                super(head);
+                this.trace = trace;
+            }
+
+            @Override
+            public Throwable asyncChainRoot()
+            {
+                return trace;
+            }
+        }
     }
 
     public static abstract class Map<I, O> extends Link<I, O> implements Function<I, O>
     {
-        Map(Head<?> head, Exception trace)
+        Map(Head<?> head)
         {
-            super(head, trace);
+            super(head);
         }
 
         @Override
@@ -279,11 +336,63 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         }
     }
 
+    private static abstract class DebugMap<I, O> extends Link.Debug<I, O> implements Function<I, O>
+    {
+        DebugMap(Head<?> head, Exception trace)
+        {
+            super(head, trace);
+        }
+
+        @Override
+        public void accept(I i, Throwable throwable)
+        {
+            if (throwable != null)
+            {
+                if (throwable.getCause() == null)
+                    throwable.initCause(trace);
+                next.accept(null, throwable);
+            }
+            else
+            {
+                O update;
+                try
+                {
+                    update = apply(i);
+                }
+                catch (Throwable t)
+                {
+                    if (t.getCause() == null)
+                        t.initCause(trace);
+                    next.accept(null, t);
+                    return;
+                }
+                next.accept(update, null);
+            }
+        }
+    }
+
     static class EncapsulatedMap<I, O> extends Map<I, O>
     {
         final Function<? super I, ? extends O> map;
 
-        EncapsulatedMap(Head<?> head, Exception trace, Function<? super I, ? extends O> map)
+        EncapsulatedMap(Head<?> head, Function<? super I, ? extends O> map)
+        {
+            super(head);
+            this.map = map;
+        }
+
+        @Override
+        public O apply(I i)
+        {
+            return map.apply(i);
+        }
+    }
+
+    static class EncapsulatedDebugMap<I, O> extends DebugMap<I, O>
+    {
+        final Function<? super I, ? extends O> map;
+
+        EncapsulatedDebugMap(Head<?> head, Exception trace, Function<? super I, ? extends O> map)
         {
             super(head, trace);
             this.map = map;
@@ -292,22 +401,35 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         @Override
         public O apply(I i)
         {
-            try
-            {
-                return map.apply(i);
-            }
-            catch (Throwable t)
-            {
-                if (trace != null)
-                    t.initCause(trace);
-                throw t;
-            }
+            return map.apply(i);
         }
     }
 
     public static abstract class FlatMap<I, O> extends Link<I, O> implements Function<I, AsyncChain<O>>
     {
-        FlatMap(Head<?> head, Exception trace)
+        FlatMap(Head<?> head)
+        {
+            super(head);
+        }
+
+        @Override
+        public void accept(I i, Throwable throwable)
+        {
+            try
+            {
+                if (throwable != null) next.accept(null, throwable);
+                else                   apply(i).begin(next);
+            }
+            catch (Throwable t)
+            {
+                throw t;
+            }
+        }
+    }
+
+    private static abstract class DebugFlatMap<I, O> extends Link.Debug<I, O> implements Function<I, AsyncChain<O>>
+    {
+        DebugFlatMap(Head<?> head, Exception trace)
         {
             super(head, trace);
         }
@@ -331,7 +453,31 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
     {
         final Function<? super I, ? extends AsyncChain<O>> map;
 
-        EncapsulatedFlatMap(Head<?> head, Exception trace, Function<? super I, ? extends AsyncChain<O>> map)
+        EncapsulatedFlatMap(Head<?> head, Function<? super I, ? extends AsyncChain<O>> map)
+        {
+            super(head);
+            this.map = map;
+        }
+
+        @Override
+        public AsyncChain<O> apply(I i)
+        {
+            try
+            {
+                return map.apply(i);
+            }
+            catch (Throwable t)
+            {
+                return AsyncChains.failure(t);
+            }
+        }
+    }
+
+    static class EncapsulatedDebugFlatMap<I, O> extends DebugFlatMap<I, O>
+    {
+        final Function<? super I, ? extends AsyncChain<O>> map;
+
+        EncapsulatedDebugFlatMap(Head<?> head, Exception trace, Function<? super I, ? extends AsyncChain<O>> map)
         {
             super(head, trace);
             this.map = map;
@@ -353,7 +499,28 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
 
     public static abstract class Recover<I> extends Link<I, I> implements Function<Throwable, AsyncChain<I>>
     {
-        Recover(Head<?> head, Exception trace)
+        Recover(Head<?> head)
+        {
+            super(head);
+        }
+
+        @Override
+        public void accept(I i, Throwable throwable)
+        {
+            if (throwable == null)
+            {
+                next.accept(i, null);
+                return;
+            }
+            AsyncChain<I> recover = apply(throwable);
+            if (recover == null) next.accept(null, throwable);
+            else                 recover.begin(next);
+        }
+    }
+
+    static abstract class DebugRecover<I> extends Link.Debug<I, I> implements Function<Throwable, AsyncChain<I>>
+    {
+        DebugRecover(Head<?> head, Exception trace)
         {
             super(head, trace);
         }
@@ -376,7 +543,31 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
     {
         private final Function<? super Throwable, ? extends AsyncChain<I>> map;
 
-        public EncapsulatedRecover(Head<?> head, Exception trace, Function<? super Throwable, ? extends AsyncChain<I>> function)
+        public EncapsulatedRecover(Head<?> head, Function<? super Throwable, ? extends AsyncChain<I>> function)
+        {
+            super(head);
+            this.map = function;
+        }
+
+        @Override
+        public AsyncChain<I> apply(Throwable throwable)
+        {
+            try
+            {
+                return map.apply(throwable);
+            }
+            catch (Throwable t)
+            {
+                return AsyncChains.failure(t);
+            }
+        }
+    }
+
+    static class EncapsulatedDebugRecover<I> extends DebugRecover<I>
+    {
+        private final Function<? super Throwable, ? extends AsyncChain<I>> map;
+
+        public EncapsulatedDebugRecover(Head<?> head, Exception trace, Function<? super Throwable, ? extends AsyncChain<I>> function)
         {
             super(head, trace);
             this.map = function;
@@ -399,7 +590,21 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
     // if extending Callback, be sure to invoke super.accept()
     static class Callback<I> extends Link<I, I>
     {
-        Callback(Head<?> head, Exception trace)
+        Callback(Head<?> head)
+        {
+            super(head);
+        }
+
+        @Override
+        public void accept(I i, Throwable throwable)
+        {
+            next.accept(i, throwable);
+        }
+    }
+
+    static class DebugCallback<I> extends Link.Debug<I, I>
+    {
+        DebugCallback(Head<?> head, Exception trace)
         {
             super(head, trace);
         }
@@ -415,7 +620,33 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
     {
         final BiConsumer<? super I, Throwable> callback;
 
-        EncapsulatedCallback(Head<?> head, Exception trace, BiConsumer<? super I, Throwable> callback)
+        EncapsulatedCallback(Head<?> head, BiConsumer<? super I, Throwable> callback)
+        {
+            super(head);
+            this.callback = callback;
+        }
+
+        @Override
+        public void accept(I i, Throwable throwable)
+        {
+            try
+            {
+                callback.accept(i, throwable);
+            }
+            catch (Throwable t)
+            {
+                super.accept(null, throwable);
+                return;
+            }
+            super.accept(i, throwable);
+        }
+    }
+
+    static class EncapsulatedDebugCallback<I> extends DebugCallback<I>
+    {
+        final BiConsumer<? super I, Throwable> callback;
+
+        EncapsulatedDebugCallback(Head<?> head, Exception trace, BiConsumer<? super I, Throwable> callback)
         {
             super(head, trace);
             this.callback = callback;
@@ -424,8 +655,18 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         @Override
         public void accept(I i, Throwable throwable)
         {
+            try
+            {
+                callback.accept(i, throwable);
+            }
+            catch (Throwable t)
+            {
+                if (trace != null)
+                    t.initCause(trace);
+                super.accept(null, t);
+                return;
+            }
             super.accept(i, throwable);
-            callback.accept(i, throwable);
         }
     }
 
@@ -470,13 +711,19 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
             List<AsyncChain<V>> list = new ArrayList<>(2);
             list.add(accum);
             list.add(add);
-            this.chain = new AsyncChainCombiner<>(list);
+            this.chain = AsyncChainCombiner.make(list);
             this.reducer = reducer;
         }
 
         private static <V> boolean match(AsyncChain<V> accum, BiFunction<? super V, ? super V, ? extends V> reducer)
         {
-            return accum instanceof AccumulatingReducerAsyncChain && ((AccumulatingReducerAsyncChain<?>) accum).reducer == reducer;
+            boolean res = accum instanceof AccumulatingReducerAsyncChain && ((AccumulatingReducerAsyncChain<?>) accum).reducer == reducer;
+            if (res)
+                return true;
+            if (accum instanceof Head.Debug)
+                return match(((Head.Debug) accum).unwrap(), reducer);
+
+            return false;
         }
 
         private void add(AsyncChain<V> a)
@@ -509,11 +756,11 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
     {
         if (DEBUG)
         {
-            Exception trace = new Exception("Async stack trace injection (map)", asyncChainRoot());
-            return add((head, map) -> new EncapsulatedMap(head, trace, map), mapper);
+            Exception trace = new Exception("Async stack trace injection (map)", ((AsyncChain.Debug) this).asyncChainRoot());
+            return add((head, map) -> new EncapsulatedDebugMap<>(head, trace, map), mapper);
         }
 
-        return add((head, map) -> new EncapsulatedMap(head, null, map), mapper);
+        return add(EncapsulatedMap::new, mapper);
     }
 
     @Override
@@ -521,11 +768,11 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
     {
         if (DEBUG)
         {
-            Exception trace = new Exception("Async stack trace injection (flatmap)", asyncChainRoot());
-            return add((head, map) -> new EncapsulatedFlatMap(head, trace, map), mapper);
+            Exception trace = new Exception("Async stack trace injection (flatmap)", ((AsyncChain.Debug) this).asyncChainRoot());
+            return add((head, map) -> new EncapsulatedDebugFlatMap(head, trace, map), mapper);
         }
 
-        return add((head, map) -> new EncapsulatedFlatMap(head, null, map), mapper);
+        return add(EncapsulatedFlatMap::new, mapper);
     }
 
     @Override
@@ -533,11 +780,11 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
     {
         if (DEBUG)
         {
-            Exception trace = new Exception("Async stack trace injection (recover)", asyncChainRoot());
-            return add((head, map) -> new EncapsulatedRecover(head, trace, map), mapper);
+            Exception trace = new Exception("Async stack trace injection (recover)", ((AsyncChain.Debug) this).asyncChainRoot());
+            return add((head, map) -> new EncapsulatedDebugRecover(head, trace, map), mapper);
         }
 
-        return add((head, map) -> new EncapsulatedRecover(head, null, map), mapper);
+        return add(EncapsulatedRecover::new, mapper);
     }
 
     @Override
@@ -545,11 +792,11 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
     {
         if (DEBUG)
         {
-            Exception trace = new Exception("Async stack trace injection (callback)", asyncChainRoot());
-            return add((head, map) -> new EncapsulatedCallback(head, trace, map), callback);
+            Exception trace = new Exception("Async stack trace injection (callback)", ((AsyncChain.Debug) this).asyncChainRoot());
+            return add((head, map) -> new EncapsulatedDebugCallback(head, trace, map), callback);
         }
 
-        return add((head, map) -> new EncapsulatedCallback(head, null, map), callback);
+        return add((head, map) -> new EncapsulatedCallback(head, map), callback);
     }
 
     // can be used by transformations that want efficiency, and can directly extend Link, FlatMap or Callback
@@ -623,17 +870,21 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
 
     public static <V> AsyncChain<V> success(V success)
     {
+        if (DEBUG)
+            return new Immediate.Debug<>(success);
         return new Immediate<>(success);
     }
 
     public static <V> AsyncChain<V> failure(Throwable failure)
     {
+        if (DEBUG)
+            return new Immediate.Debug<>(failure);
         return new Immediate<>(failure);
     }
 
-    static <V> AsyncChain<V> failure(Throwable failure, Throwable trace)
+    private static <V> AsyncChain<V> failure(Throwable failure, Throwable trace)
     {
-        return new Immediate<>(failure, trace);
+        return new Immediate.Debug<>(failure, trace);
     }
 
     public static <V, T> AsyncChain<T> map(AsyncChain<V> chain, Function<? super V, ? extends T> mapper, Executor executor)
@@ -657,7 +908,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
                     callback.accept(value, null);
                 });
             }
-        });
+        }.maybeWrapDebug());
     }
 
     public static <V, T> AsyncChain<T> flatMap(AsyncChain<V> chain, Function<? super V, ? extends AsyncChain<T>> mapper, Executor executor)
@@ -678,7 +929,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
                     }
                 });
             }
-        });
+        }.maybeWrapDebug());
     }
 
     private static Cancellable submit(Executor executor, BiConsumer<?, Throwable> callback, @Async.Schedule Runnable run)
@@ -713,7 +964,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
                                                @Async.Schedule Callable<V> callable,
                                                BiFunction<Callable<V>, BiConsumer<? super V, Throwable>, Runnable> encapsulator)
     {
-        return new Head<>(DEBUG ? new Exception("Async stack trace injection") : null)
+        Head<V> head = new Head<>()
         {
             @Override
             protected Cancellable start(BiConsumer<? super V, Throwable> callback)
@@ -721,6 +972,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
                 return AsyncChains.submit(executor, callback, encapsulator.apply(callable, callback));
             }
         };
+        return head.maybeWrapDebug();
     }
 
     public static AsyncChain<Void> ofRunnable(Executor executor, Runnable runnable)
@@ -732,7 +984,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
             {
                 return AsyncChains.submit(executor, callback, encapsulate(runnable, callback));
             }
-        };
+        }.maybeWrapDebug();
     }
 
     @VisibleForImplementation
@@ -761,12 +1013,12 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
 
     public static <V> AsyncChain<V[]> allOf(List<? extends AsyncChain<? extends V>> chains)
     {
-        return new AsyncChainCombiner<>(chains);
+        return AsyncChainCombiner.make(chains);
     }
 
     public static <V> AsyncChain<List<V>> all(List<? extends AsyncChain<? extends V>> chains)
     {
-        return new AsyncChainCombiner<>(chains).map(Lists::newArrayList);
+        return AsyncChainCombiner.make(chains).map(Lists::newArrayList);
     }
 
     public static <V> AsyncChain<V> reduce(List<? extends AsyncChain<? extends V>> chains, BiFunction<? super V, ? super V, ? extends V> reducer)
@@ -799,12 +1051,15 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
      */
     public static <V> AsyncChain<V> reduce(AsyncChain<V> accum, AsyncChain<V> add, BiFunction<? super V, ? super V, ? extends V> reducer)
     {
+        if (DEBUG && accum instanceof Head.Debug)
+            accum = ((Head.Debug) accum).unwrap();
+
         if (AccumulatingReducerAsyncChain.match(accum, reducer))
         {
             ((AccumulatingReducerAsyncChain<V>) accum).add(add);
             return accum;
         }
-        return new AccumulatingReducerAsyncChain<>(accum, add, reducer);
+        return new AccumulatingReducerAsyncChain<>(accum, add, reducer).maybeWrapDebug();
     }
 
     public static <A, B> AsyncChain<B> reduce(List<? extends AsyncChain<? extends A>> chains, B identity, BiFunction<B, ? super A, B> reducer)
@@ -886,7 +1141,6 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
 
         AtomicReference<Result> callbackResult = new AtomicReference<>();
         CountDownLatch latch = new CountDownLatch(1);
-
         chain.begin((result, failure) -> {
             callbackResult.set(new Result(result, failure));
             latch.countDown();

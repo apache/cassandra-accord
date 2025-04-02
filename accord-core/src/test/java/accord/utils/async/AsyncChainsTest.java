@@ -22,7 +22,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -198,7 +197,7 @@ public class AsyncChainsTest
                 callback.accept("success", null);
                 return null;
             }
-        };
+        }.maybeWrapDebug();
 
         chain.begin((i1, i2) -> {});
         assertThrows(() -> chain.begin((i1, i2) -> {}));
@@ -213,7 +212,7 @@ public class AsyncChainsTest
                 callback.accept("success", null);
                 return null;
             }
-        };
+        }.maybeWrapDebug();
         chain = chain.map(s -> s + " is true");
         chain.begin((i1, i2) -> {});
         AsyncChain<String> finalChain = chain;
@@ -261,7 +260,7 @@ public class AsyncChainsTest
                 callback.accept(0, null);
                 return null;
             }
-        };
+        }.maybeWrapDebug();
         chain = chain.map(i -> i + 1)
                      .map(i -> i + 2)
                      .map(i -> i + 3)
@@ -271,8 +270,14 @@ public class AsyncChainsTest
         Assertions.assertEquals(15, AsyncChains.getBlocking(chain));
     }
 
-    private static void assertCombinerSize(int size, AsyncChain<?> chain)
+    private static void assertCombinerSize(int size, AsyncChain<?> orig)
     {
+        AsyncChain<?> chain;
+        if (orig instanceof AsyncChains.Head.Debug)
+            chain = ((AsyncChains.Head.Debug) orig).unwrap();
+        else
+            chain = orig;
+
         Assertions.assertTrue(chain instanceof AsyncChains.AccumulatingReducerAsyncChain, () -> String.format("%s is not an instance of AsyncChainCombiner", chain));
         AsyncChains.AccumulatingReducerAsyncChain<?> combiner = (AsyncChains.AccumulatingReducerAsyncChain<?>) chain;
         Assertions.assertEquals(size, combiner.size());
@@ -289,7 +294,7 @@ public class AsyncChainsTest
         assertCombinerSize(2, reduction1);
         AsyncChain<Integer> reduction2 = AsyncChains.reduce(reduction1, chain3, add);
         assertCombinerSize(3, reduction2);
-        Assertions.assertSame(reduction1, reduction2);
+        Assertions.assertSame(((AsyncChains.Head.Debug)reduction1).unwrap(), reduction2);
 
         ResultCallback<Integer> callback = new ResultCallback<>();
         reduction2.begin(callback);
@@ -328,7 +333,7 @@ public class AsyncChainsTest
                 callback.accept(42, null);
                 return null;
             }
-        });
+        }.maybeWrapDebug() );
         topLevel.add(() -> {
             AsyncResult.Settable<Integer> settable = AsyncResults.settable();
             settable.setSuccess(42);
@@ -366,10 +371,28 @@ public class AsyncChainsTest
         chain = chain.map(i -> i + 1);
         chain = chain.map(i -> i + 1);
         chain = chain.map(i -> i + 1);
-        chain = chain.map(i -> { throw new RuntimeException(); });
+        chain = chain.map(i -> {
+            throw new RuntimeException();
+        });
         chain.begin(finalCallback);
         Assertions.assertEquals("Async stack trace injection (map)", finalCallback.failure().getCause().getMessage());
     }
+
+    @Test
+    void propagateErrorFromMapMidChain()
+    {
+        ResultCallback<Integer> finalCallback = new ResultCallback<>();
+        AsyncChain<Integer> chain = AsyncChains.ofCallable(MoreExecutors.directExecutor(), () -> 5);
+        chain = chain.map(i -> i + 1);
+        chain = chain.map(i -> i + 1);
+        chain = chain.map(i -> {
+            throw new RuntimeException();
+        });
+        chain = chain.map(i -> i + 1);
+        chain.begin(finalCallback);
+        Assertions.assertEquals("Async stack trace injection (map)", finalCallback.failure().getCause().getMessage());
+    }
+
 
     @Test
     void propagateErrorFromFlatMapResult()
@@ -426,6 +449,21 @@ public class AsyncChainsTest
         Assertions.assertTrue(finalCallback.failure().getCause().getMessage().equals("Async stack trace injection (flatmap)"));
     }
 
+    @Test
+    void propagateErrorFromCallback()
+    {
+        ResultCallback<Integer> finalCallback = new ResultCallback<>();
+        AsyncChain<Integer> chain = AsyncChains.ofCallable(MoreExecutors.directExecutor(), () -> 5);
+        chain = chain.map(i -> i + 1);
+        chain = chain.map(i -> i + 1);
+        chain = chain.map(i -> i + 1);
+        chain = chain.map(i -> i + 1);
+        chain = chain.addCallback(() -> {
+            throw new RuntimeException("failure");
+        });
+        chain.begin(finalCallback);
+        Assertions.assertTrue(finalCallback.failure().getCause().getMessage().equals("Async stack trace injection (callback)"));
+    }
 
     private static class UserFailure extends RuntimeException
     {

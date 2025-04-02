@@ -23,6 +23,8 @@ import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 
+import javax.annotation.Nullable;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,8 +45,6 @@ public class AsyncResults
     {
         private static final AtomicReferenceFieldUpdater<AbstractResult, Object> STATE = AtomicReferenceFieldUpdater.newUpdater(AbstractResult.class, Object.class, "state");
 
-        private final Exception asyncChainRoot = DEBUG ? new Exception("Async stack trace injection") : null;
-
         static final class FailureHolder
         {
             final Throwable cause;
@@ -52,12 +52,6 @@ public class AsyncResults
             {
                 this.cause = cause;
             }
-        }
-
-        @Override
-        public Throwable asyncChainRoot()
-        {
-            return asyncChainRoot;
         }
 
         private static final class Listener<V>
@@ -140,7 +134,7 @@ public class AsyncResults
 
         private AsyncChain<V> newChain()
         {
-            return new AsyncChains.Head<>()
+            AsyncChains.Head<V> head = new AsyncChains.Head<>()
             {
                 @Override
                 protected Cancellable start(BiConsumer<? super V, Throwable> callback)
@@ -149,6 +143,8 @@ public class AsyncResults
                     return null;
                 }
             };
+
+            return head.maybeWrapDebug();
         }
 
         void setResult(V result, Throwable failure)
@@ -252,23 +248,9 @@ public class AsyncResults
 
     public static class SettableResult<V> extends AbstractResult<V> implements AsyncResult.Settable<V>
     {
-        final Exception trace;
-
         public SettableResult()
         {
             super();
-            if (DEBUG)
-            {
-                this.trace = new Exception();
-            }
-            else
-                this.trace = null;
-        }
-
-        @Override
-        public Throwable asyncChainRoot()
-        {
-            return trace;
         }
 
         @Override
@@ -280,9 +262,32 @@ public class AsyncResults
         @Override
         public boolean tryFailure(Throwable throwable)
         {
-            if (DEBUG)
-                throwable.addSuppressed(trace);
             return super.tryFailure(throwable);
+        }
+
+        public static class Debug<V> extends SettableResult<V> implements AsyncChain.Debug<V>
+        {
+            final Exception trace;
+
+            public Debug()
+            {
+                super();
+                this.trace = new Exception();
+            }
+
+            @Override
+            public Throwable asyncChainRoot()
+            {
+                return trace;
+            }
+
+            @Override
+            public boolean tryFailure(Throwable throwable)
+            {
+                if (DEBUG)
+                    throwable.addSuppressed(trace);
+                return super.tryFailure(throwable);
+            }
         }
     }
 
@@ -298,9 +303,8 @@ public class AsyncResults
 
     static class Immediate<V> implements AsyncResult<V>
     {
-        private final V value;
-        private final Throwable failure;
-        private final Exception trace = DEBUG ? new Exception("Async stack trace injection") : null;
+        protected final V value;
+        protected final Throwable failure;
 
         Immediate(V value)
         {
@@ -312,33 +316,46 @@ public class AsyncResults
         {
             this.value = null;
             this.failure = failure;
-            if (asyncChainRoot() != null)
+        }
+
+        public static class Debug<V> extends Immediate<V> implements AsyncChain.Debug<V>
+        {
+            private final Exception trace = new Exception("Async stack trace injection");
+
+            Debug(V value)
+            {
+                super(value);
+            }
+
+            Debug(Throwable failure)
+            {
+                super(failure);
                 failure.initCause(asyncChainRoot());
+            }
+
+            @Override
+            public Throwable asyncChainRoot()
+            {
+                return trace;
+            }
         }
 
         private AsyncChain<V> newChain()
         {
             return new AsyncChains.Head<V>()
             {
-                @Override
-                protected Cancellable start(BiConsumer<? super V, Throwable> callback)
+                @Nullable protected Cancellable start(BiConsumer<? super V, Throwable> callback)
                 {
                     AsyncResults.Immediate.this.addCallback(callback);
                     return null;
                 }
-            };
+            }.maybeWrapDebug();
         }
 
         @Override
         public <T> AsyncChain<T> map(Function<? super V, ? extends T> mapper)
         {
             return newChain().map(mapper);
-        }
-
-        @Override
-        public Throwable asyncChainRoot()
-        {
-            return trace;
         }
 
         @Override
@@ -392,11 +409,15 @@ public class AsyncResults
         if (value == null)
             return SUCCESS_NULL;
 
+        if (DEBUG)
+            return new Immediate.Debug<>(value);
         return new Immediate<>(value);
     }
 
     public static <V> AsyncResult<V> failure(Throwable failure)
     {
+        if (DEBUG)
+            return new Immediate.Debug<>(failure);
         return new Immediate<>(failure);
     }
 
@@ -414,6 +435,7 @@ public class AsyncResults
     {
         protected final Callable<V> callable;
 
+        // TODO: try adding annotations to these, check bootstrap flatmap debugging
         public RunnableResult(Callable<V> callable)
         {
             this.callable = callable;

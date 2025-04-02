@@ -155,6 +155,6 @@ public interface Observable<T>
                 work.accept(forCallback(callback, collector).map(mapper));
                 return null;
             }
-        };
+        }.maybeWrapDebug();
     }
 }
