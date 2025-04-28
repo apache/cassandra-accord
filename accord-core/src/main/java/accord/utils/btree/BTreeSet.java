@@ -22,7 +22,6 @@ import java.util.AbstractSet;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
-import java.util.List;
 import java.util.ListIterator;
 import java.util.NavigableSet;
 import java.util.NoSuchElementException;
@@ -34,7 +33,7 @@ import java.util.Spliterators;
 import static accord.utils.btree.BTree.Dir;
 import static accord.utils.btree.BTree.findIndex;
 
-public class BTreeSet<V> extends AbstractSet<V> implements NavigableSet<V>, List<V>
+public class BTreeSet<V> extends AbstractSet<V> implements NavigableSet<V>
 {
     protected final Comparator<? super V> comparator;
     protected final Object[] tree;
