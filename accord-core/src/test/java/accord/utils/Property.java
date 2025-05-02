@@ -944,6 +944,19 @@ public class Property
             return this;
         }
 
+        @SafeVarargs
+        public final CommandsBuilder<State, SystemUnderTest> addAllIf(Predicate<State> predicate,
+                                                                      Setup<State, SystemUnderTest> first,
+                                                                      Setup<State, SystemUnderTest> second,
+                                                                      Setup<State, SystemUnderTest>... reset)
+        {
+            addIf(predicate, first);
+            addIf(predicate, second);
+            for (var s : reset)
+                addIf(predicate, s);
+            return this;
+        }
+
         public CommandsBuilder<State, SystemUnderTest> addAllIf(Predicate<State> predicate, Consumer<IfBuilder<State, SystemUnderTest>> sub)
         {
             sub.accept(new IfBuilder<>()
