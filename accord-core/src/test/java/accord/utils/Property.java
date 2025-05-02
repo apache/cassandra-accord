@@ -948,11 +948,11 @@ public class Property
         public final CommandsBuilder<State, SystemUnderTest> addAllIf(Predicate<State> predicate,
                                                                       Setup<State, SystemUnderTest> first,
                                                                       Setup<State, SystemUnderTest> second,
-                                                                      Setup<State, SystemUnderTest>... reset)
+                                                                      Setup<State, SystemUnderTest>... rest)
         {
             addIf(predicate, first);
             addIf(predicate, second);
-            for (var s : reset)
+            for (var s : rest)
                 addIf(predicate, s);
             return this;
         }
