@@ -18,16 +18,9 @@
 
 package accord.local;
 
-import java.util.function.BiFunction;
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
-
 import accord.api.RoutingKey;
+import accord.primitives.*;
 import accord.primitives.Status.Durability;
-import accord.primitives.AbstractRanges;
-import accord.primitives.Participants;
-import accord.primitives.TxnId;
-import accord.primitives.Unseekables;
 import accord.utils.Invariants;
 import accord.utils.PersistentField;
 import accord.utils.ReducingIntervalMap;
@@ -35,9 +28,11 @@ import accord.utils.ReducingRangeMap;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
-import static accord.primitives.Status.Durability.MajorityOrInvalidated;
-import static accord.primitives.Status.Durability.NotDurable;
-import static accord.primitives.Status.Durability.UniversalOrInvalidated;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+import java.util.function.BiFunction;
+
+import static accord.primitives.Status.Durability.*;
 
 public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
 {
@@ -153,6 +148,27 @@ public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
             }
             this.min = min;
         }
+    }
+
+    public boolean fullyContainedIn(DurableBefore other)
+    {
+        if (values == NO_OBJECTS)
+            return true;
+
+        for (int i = 0 ; i < values.length; i++)
+        {
+            if (values[i] != null &&
+                !other.foldlWithDefault(Ranges.of(starts[i].rangeFactory().newRange(starts[i], starts[i + 1])),
+                                        (v, a) -> {
+                                            System.out.println("v = " + v);
+                                            return a || v != null;
+                                        },
+                                        null,
+                                        false,
+                                        a -> a))
+                return false;
+        }
+        return true;
     }
 
     public static DurableBefore create(AbstractRanges ranges, @Nonnull TxnId majority, @Nonnull TxnId universal)

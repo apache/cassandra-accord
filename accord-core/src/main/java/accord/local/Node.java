@@ -33,6 +33,7 @@ import java.util.function.Supplier;
 
 import javax.annotation.Nullable;
 
+import accord.primitives.*;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
 import org.slf4j.Logger;
@@ -65,18 +66,8 @@ import accord.messages.Reply;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
 import accord.messages.TxnRequest;
-import accord.primitives.Ballot;
-import accord.primitives.EpochSupplier;
-import accord.primitives.FullRoute;
-import accord.primitives.Ranges;
 import accord.primitives.Routable.Domain;
-import accord.primitives.Routables;
-import accord.primitives.Seekables;
-import accord.primitives.Timestamp;
-import accord.primitives.Txn;
-import accord.primitives.TxnId;
 import accord.primitives.TxnId.Cardinality;
-import accord.primitives.Unseekables;
 import accord.topology.Shard;
 import accord.topology.Topology;
 import accord.topology.TopologyManager;
@@ -273,7 +264,9 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
             DurableBefore newDurableBefore = DurableBefore.merge(durableBefore, addDurableBefore);
             // TODO (required): it is possible for this invariant to be breached if topologies are received out of order.
             //  We should not update min past the max known epoch.
-            Invariants.require(newDurableBefore.min.majorityBefore.compareTo(durableBefore.min.majorityBefore) >= 0);
+            Invariants.require(newDurableBefore.min.majorityBefore.compareTo(durableBefore.min.majorityBefore) >= 0 || durableBefore.fullyContainedIn(newDurableBefore),
+                    "Previous durable before: %s, new: %s", durableBefore, newDurableBefore);
+
             minDurableBefore = DurableBefore.merge(minDurableBefore, addDurableBefore);
             durableBefore = newDurableBefore;
         }

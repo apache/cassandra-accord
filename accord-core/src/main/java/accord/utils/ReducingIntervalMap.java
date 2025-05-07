@@ -194,7 +194,7 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
         return values.length;
     }
 
-    RangeIterator rangeIterator()
+    public RangeIterator rangeIterator()
     {
         return new RangeIterator();
     }
@@ -367,7 +367,7 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
         return left == null ? right : right == null ? left : builder.reduce(left, right);
     }
 
-    RangeIterator intersecting(K start, K end)
+    public boolean contains(K start, K end)
     {
         int from = Arrays.binarySearch(starts, start);
         if (from < 0) from = Math.max(0, -2 - from);
@@ -376,10 +376,24 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
         int to = Arrays.binarySearch(starts, end);
         if (to < 0) to = -1 - to;
         else if (inclusiveStarts()) ++to;
+
+        return to < from;
+    }
+
+    public RangeIterator intersecting(K start, K end)
+    {
+        int from = Arrays.binarySearch(starts, start);
+        if (from < 0) from = Math.max(0, -2 - from);
+        else if (!inclusiveStarts()) ++from;
+
+        int to = Arrays.binarySearch(starts, end);
+        if (to < 0) to = -1 - to;
+        else if (inclusiveStarts()) ++to;
+
         return new RangeIterator(from, to);
     }
 
-    class RangeIterator
+    protected class RangeIterator
     {
         final int end;
         int i;
@@ -395,27 +409,27 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
             this.end = to;
         }
 
-        boolean hasCurrent()
+        public boolean hasCurrent()
         {
             return i < end;
         }
 
-        void next()
+        public void next()
         {
             ++i;
         }
 
-        K start()
+        public K start()
         {
             return starts[i];
         }
 
-        K end()
+        public K end()
         {
             return starts[i + 1];
         }
 
-        V value()
+        public V value()
         {
             return values[i];
         }
