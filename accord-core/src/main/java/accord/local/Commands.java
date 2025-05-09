@@ -557,12 +557,12 @@ public class Commands
         }
     }
 
-    protected static void postApply(SafeCommandStore safeStore, TxnId txnId, long t0)
+    protected static void postApply(SafeCommandStore safeStore, TxnId txnId, long t0, boolean forceApply)
     {
         SafeCommand safeCommand = safeStore.get(txnId);
         Command command = safeCommand.current();
         logger.trace("{} applied, setting status to Applied and notifying listeners", command);
-        if (command.hasBeen(Applied))
+        if (command.hasBeen(Applied) && !forceApply)
             return;
 
         safeCommand.applied(safeStore);
@@ -595,7 +595,7 @@ public class Commands
         return command.writes().apply(safeStore, executes, command.partialTxn())
                       // TODO (expected): once we guarantee execution order KeyHistory can be ASYNC
                .flatMap(unused -> unsafeStore.build(contextFor(txnId, executes, SYNC), ss -> {
-                   postApply(ss, txnId, t0);
+                   postApply(ss, txnId, t0, false);
                    return null;
                }));
     }
@@ -612,7 +612,7 @@ public class Commands
         TxnId txnId = command.txnId();
         return command.writes().apply(safeStore, executes, command.partialTxn())
                       .flatMap(unused -> unsafeStore.build(context, ss -> {
-                          postApply(ss, txnId, -1);
+                          postApply(ss, txnId, -1, true);
                           return null;
                       }));
     }
