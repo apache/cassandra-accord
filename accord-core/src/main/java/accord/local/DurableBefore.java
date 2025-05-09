@@ -18,6 +18,10 @@
 
 package accord.local;
 
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+import java.util.function.BiFunction;
+
 import accord.api.RoutingKey;
 import accord.primitives.AbstractRanges;
 import accord.primitives.Participants;
@@ -31,10 +35,6 @@ import accord.utils.ReducingIntervalMap;
 import accord.utils.ReducingRangeMap;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
-
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
-import java.util.function.BiFunction;
 
 import static accord.primitives.Status.Durability.MajorityOrInvalidated;
 import static accord.primitives.Status.Durability.NotDurable;
