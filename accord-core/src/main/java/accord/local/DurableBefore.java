@@ -19,8 +19,12 @@
 package accord.local;
 
 import accord.api.RoutingKey;
-import accord.primitives.*;
+import accord.primitives.AbstractRanges;
+import accord.primitives.Participants;
+import accord.primitives.Ranges;
 import accord.primitives.Status.Durability;
+import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
 import accord.utils.Invariants;
 import accord.utils.PersistentField;
 import accord.utils.ReducingIntervalMap;
@@ -32,7 +36,9 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.function.BiFunction;
 
-import static accord.primitives.Status.Durability.*;
+import static accord.primitives.Status.Durability.MajorityOrInvalidated;
+import static accord.primitives.Status.Durability.NotDurable;
+import static accord.primitives.Status.Durability.UniversalOrInvalidated;
 
 public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
 {
@@ -159,10 +165,7 @@ public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
         {
             if (values[i] != null &&
                 !other.foldlWithDefault(Ranges.of(starts[i].rangeFactory().newRange(starts[i], starts[i + 1])),
-                                        (v, a) -> {
-                                            System.out.println("v = " + v);
-                                            return a || v != null;
-                                        },
+                                        (v, a) -> a || v != null,
                                         null,
                                         false,
                                         a -> a))
