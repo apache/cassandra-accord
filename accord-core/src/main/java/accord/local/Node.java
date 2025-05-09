@@ -33,7 +33,6 @@ import java.util.function.Supplier;
 
 import javax.annotation.Nullable;
 
-import accord.primitives.*;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
 import org.slf4j.Logger;
@@ -66,8 +65,18 @@ import accord.messages.Reply;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
 import accord.messages.TxnRequest;
+import accord.primitives.Ballot;
+import accord.primitives.EpochSupplier;
+import accord.primitives.FullRoute;
+import accord.primitives.Ranges;
 import accord.primitives.Routable.Domain;
+import accord.primitives.Routables;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
 import accord.primitives.TxnId.Cardinality;
+import accord.primitives.Unseekables;
 import accord.topology.Shard;
 import accord.topology.Topology;
 import accord.topology.TopologyManager;
