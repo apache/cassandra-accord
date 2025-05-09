@@ -18,9 +18,9 @@
 
 package accord.local;
 
+import java.util.function.BiFunction;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
-import java.util.function.BiFunction;
 
 import accord.api.RoutingKey;
 import accord.primitives.AbstractRanges;
