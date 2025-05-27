@@ -736,6 +736,15 @@ public class Property
             runUnit(sut);
             return null;
         }
+
+        default void checkPostconditions(State state, SystemUnderTest sut) throws Throwable {}
+
+        @Override
+        default void checkPostconditions(State state, Void expected,
+                                         SystemUnderTest sut, Void actual) throws Throwable
+        {
+            checkPostconditions(state, sut);
+        }
     }
 
     public interface StateOnlyCommand<State> extends UnitCommand<State, Void>
