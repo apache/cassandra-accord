@@ -483,6 +483,14 @@ public abstract class CommandStores
         return current.local;
     }
 
+    public void forEach(BiConsumer<CommandStore, RangesForEpoch> forEach)
+    {
+        for (ShardHolder shard : current.shards)
+        {
+            forEach.accept(shard.store, shard.ranges);
+        }
+    }
+
     public DataStore dataStore()
     {
         return supplier.store;

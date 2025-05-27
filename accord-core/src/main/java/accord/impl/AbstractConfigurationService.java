@@ -258,6 +258,13 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
             return getOrCreate(epoch).acknowledged;
         }
 
+        public synchronized void unsafeMarkTruncated()
+        {
+            long minEpoch = minEpoch();
+            if (minEpoch > 0)
+                lastTruncated = minEpoch - 1;
+        }
+
         public synchronized void truncateUntil(long epoch)
         {
             Invariants.requireArgument(epoch <= maxEpoch(), "epoch %d > %d", epoch, maxEpoch());
@@ -374,6 +381,11 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
         for (Listener listener : listeners)
             listener.onTopologyUpdate(topology, isLoad, startSync);
         topologyUpdatePostListenerNotify(topology);
+    }
+
+    public void unsafeMarkTruncated()
+    {
+        epochs.unsafeMarkTruncated();
     }
 
     public void reportTopology(Topology topology)
