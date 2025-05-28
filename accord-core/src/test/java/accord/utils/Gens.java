@@ -482,10 +482,57 @@ public class Gens
         };
     }
 
+    /**
+     * Creates a generator that produces a subset of the input list.
+     * <p>
+     * Elements are selected randomly from the input list without modifying it; the subset returned may not reflect
+     * the original order.
+     *
+     * @param <T> the type of elements in the list
+     * @param input the source list to select elements from
+     * @return a generator that produces variable-sized random subsets of the input list
+     * @throws IndexOutOfBoundsException if sizeGen produces a value outside the list's range
+     */
     public static <T> Gen<List<T>> select(List<T> input)
     {
+        return select(input, rs -> rs.nextInt(0, input.size() + 1));
+    }
+
+    /**
+     * Creates a generator that produces a subset of the input list.
+     * <p>
+     * Elements are selected randomly from the input list without modifying it; the subset returned may not reflect
+     * the original order.
+     *
+     * @param <T> the type of elements in the list
+     * @param input the source list to select elements from
+     * @param size fixed length of how many elements to return
+     * @return a generator that produces fixed-sized random subsets of the input list
+     * @throws IndexOutOfBoundsException if sizeGen produces a value outside the list's range
+     */
+    public static <T> Gen<List<T>> select(List<T> input, int size)
+    {
+        return select(input, ignore -> size);
+    }
+
+    /**
+     * Creates a generator that produces a subset of the input list.
+     * <p>
+     * Elements are selected randomly from the input list without modifying it; the subset returned may not reflect
+     * the original order.
+     *
+     * @param <T> the type of elements in the list
+     * @param input the source list to select elements from
+     * @param sizeGen a generator that determines how many elements to select
+     * @return a generator that produces variable-sized random subsets of the input list
+     * @throws IndexOutOfBoundsException if sizeGen produces a value outside the list's range
+     */
+    public static <T> Gen<List<T>> select(List<T> input, Gen.IntGen sizeGen)
+    {
+        if (input.isEmpty()) return constant(input);
         return rs -> {
-            int size = rs.nextInt(0, input.size() + 1);
+            int size = sizeGen.nextInt(rs);
+            Invariants.requireIndexInBounds(input.size(), 0, size);
             List<T> remaining = new ArrayList<>(input);
             List<T> list = new ArrayList<>(size);
             for (int i = 0; i < size; i++)
