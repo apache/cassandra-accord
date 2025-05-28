@@ -45,6 +45,8 @@ public class Property
 {
     public static abstract class Common<T extends Common<T>>
     {
+        private static final StackTraceElement[] STACK_TRACE = new StackTraceElement[0];
+
         protected long seed = SeedProvider.instance.nextSeed();
         protected int examples = 1000;
 
@@ -62,12 +64,14 @@ public class Property
             this.timeout = other.timeout;
         }
 
+        @SuppressWarnings("unchecked")
         public T withSeed(long seed)
         {
             this.seed = seed;
             return (T) this;
         }
 
+        @SuppressWarnings("unchecked")
         public T withExamples(int examples)
         {
             if (examples <= 0)
@@ -76,12 +80,14 @@ public class Property
             return (T) this;
         }
 
+        @SuppressWarnings("unchecked")
         public T withPure(boolean pure)
         {
             this.pure = pure;
             return (T) this;
         }
 
+        @SuppressWarnings("unchecked")
         public T withTimeout(Duration timeout)
         {
             this.timeout = timeout;
@@ -91,6 +97,7 @@ public class Property
 
         protected void checkWithTimeout(Runnable fn)
         {
+            Invariants.nonNull(timeout);
             try
             {
                 TimeoutUtils.runBlocking(timeout, "property with timeout", fn::run);
@@ -106,7 +113,7 @@ public class Property
             catch (TimeoutException e)
             {
                 TimeoutException override = new TimeoutException("property test did not complete within " + this.timeout);
-                override.setStackTrace(new StackTraceElement[0]);
+                override.setStackTrace(STACK_TRACE);
                 throw new PropertyError(propertyError(this, override));
             }
         }
@@ -438,7 +445,7 @@ public class Property
             return this;
         }
 
-        @SuppressWarnings("rawtypes")
+        @SuppressWarnings({ "rawtypes", "unchecked" })
         public <State, SystemUnderTest> void check(Commands<State, SystemUnderTest> commands)
         {
             RandomSource rs = new DefaultRandom(seed);
@@ -530,6 +537,7 @@ public class Property
             return newHistory;
         }
 
+        @SuppressWarnings({ "rawtypes", "unchecked" })
         private <State, SystemUnderTest> void process(Command cmd, State state, SystemUnderTest sut, int id, @Nullable LongArrayList stepTiming) throws Throwable
         {
             if (stepTimeout == null)
@@ -544,7 +552,8 @@ public class Property
             }
             finally
             {
-                stepTiming.add(System.nanoTime() - startNanos);
+                if (stepTiming != null)
+                    stepTiming.add(System.nanoTime() - startNanos);
             }
         }
     }
@@ -617,11 +626,13 @@ public class Property
         }
     }
 
+    @SafeVarargs
     public static <State, SystemUnderTest> MultistepCommand<State, SystemUnderTest> multistep(Command<State, SystemUnderTest, ?>... cmds)
     {
         return multistep(Arrays.asList(cmds));
     }
 
+    @SuppressWarnings("unchecked")
     public static <State, SystemUnderTest> MultistepCommand<State, SystemUnderTest> multistep(List<Command<State, SystemUnderTest, ?>> cmds)
     {
         List<Command<State, SystemUnderTest, ?>> result = new ArrayList<>(cmds.size());
@@ -633,6 +644,7 @@ public class Property
         return result::iterator;
     }
 
+    @SuppressWarnings("unchecked")
     private static <State, SystemUnderTest> Collection<? extends Command<State, SystemUnderTest, ?>> flatten(MultistepCommand<State, SystemUnderTest> mc)
     {
         List<Command<State, SystemUnderTest, ?>> result = new ArrayList<>();
@@ -644,6 +656,7 @@ public class Property
         return result;
     }
 
+    @SuppressWarnings("RedundantThrows")
     public interface MultistepCommand<State, SystemUnderTest> extends Command<State, SystemUnderTest, Object>, Iterable<Command<State, SystemUnderTest, ?>>
     {
         @Override
@@ -688,6 +701,7 @@ public class Property
         }
     }
 
+    @SuppressWarnings("RedundantThrows")
     public static <State, SystemUnderTest, Result> Command<State, SystemUnderTest, Result> ignoreCommand()
     {
         return new Command<>()
@@ -718,6 +732,7 @@ public class Property
         };
     }
 
+    @SuppressWarnings("RedundantThrows")
     public interface UnitCommand<State, SystemUnderTest> extends Command<State, SystemUnderTest, Void>
     {
         void applyUnit(State state) throws Throwable;
@@ -737,6 +752,7 @@ public class Property
             return null;
         }
 
+        @SuppressWarnings("unused")
         default void checkPostconditions(State state, SystemUnderTest sut) throws Throwable {}
 
         @Override
@@ -747,6 +763,7 @@ public class Property
         }
     }
 
+    @SuppressWarnings("RedundantThrows")
     public interface StateOnlyCommand<State> extends UnitCommand<State, Void>
     {
         @Override
@@ -816,6 +833,7 @@ public class Property
         void onFailure(State state, SystemUnderTest sut, List<String> history, Throwable cause) throws Throwable;
     }
 
+    @SuppressWarnings("unused")
     public static class CommandsBuilder<State, SystemUnderTest>
     {
         public interface Setup<State, SystemUnderTest>
@@ -1127,13 +1145,13 @@ public class Property
             return new Commands<>()
             {
                 @Override
-                public Gen<State> genInitialState() throws Throwable
+                public Gen<State> genInitialState()
                 {
                     return stateGen.get();
                 }
 
                 @Override
-                public SystemUnderTest createSut(State state) throws Throwable
+                public SystemUnderTest createSut(State state)
                 {
                     return sutFactory.apply(state);
                 }
