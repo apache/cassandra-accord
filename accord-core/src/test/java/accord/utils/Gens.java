@@ -1014,6 +1014,20 @@ public class Gens
             return RandomSource::nextBoolean;
         }
 
+        /**
+         * Creates a generator that produces boolean values with a target ratio of true values,
+         * and with true values appearing in contiguous runs of random length.
+         * <p>
+         * This is a stateful generator (not thread safe) that maintains an approximate ratio of true values by
+         * tracking the counts of true and false values it has generated. It will produce runs of consecutive true
+         * values up to the specified maximum length to create a more realistic pattern than
+         * independent random choices.
+         *
+         * @param ratio the target ratio of true values (between 0 and 1)
+         * @param maxRuns the maximum length of consecutive true values in a run
+         * @return a generator that produces boolean values matching the specified distribution pattern
+         * @throws IllegalArgumentException if ratio is not between 0 and 1
+         */
         public Gen<Boolean> biasedRepeatingRuns(double ratio, int maxRuns)
         {
             Invariants.requireArgument(ratio > 0 && ratio <= 1, "Expected %d to be larger than 0 and <= 1", ratio);
