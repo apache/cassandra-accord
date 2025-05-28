@@ -44,6 +44,7 @@ import java.util.stream.Stream;
  *
  * @param <A> The type of values this generator produces
  */
+@SuppressWarnings("unused")
 public interface Gen<A>
 {
     /**
@@ -223,7 +224,7 @@ public interface Gen<A>
         @Override
         default Gen.IntGen filter(Predicate<Integer> fn)
         {
-            return filterAsInt(i -> fn.test(i));
+            return filterAsInt(fn::test);
         }
 
         default IntSupplier asIntSupplier(RandomSource rs)
@@ -273,7 +274,7 @@ public interface Gen<A>
         @Override
         default Gen.LongGen filter(Predicate<Long> fn)
         {
-            return filterAsLong(i -> fn.test(i));
+            return filterAsLong(fn::test);
         }
 
         default LongSupplier asLongSupplier(RandomSource rs)
