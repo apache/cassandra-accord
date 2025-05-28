@@ -34,6 +34,16 @@ import java.util.stream.IntStream;
 import java.util.stream.LongStream;
 import java.util.stream.Stream;
 
+/**
+ * A generator (gen for short) interface that produces values using a {@link RandomSource}.
+ * <p>
+ * This interface provides a way to generate random values of type {@code A} and transform them
+ * using various functional operators like {@link #map(Function)}, {@link #filter(Predicate)}, and {@link #flatMap(Function)}.
+ * <p>
+ * Specialized versions exist for primitive types ({@link IntGen}, {@link LongGen}) to avoid boxing/unboxing overhead.
+ *
+ * @param <A> The type of values this generator produces
+ */
 public interface Gen<A>
 {
     /**
@@ -45,6 +55,22 @@ public interface Gen<A>
         return fn;
     }
 
+    /**
+     * Core method of the {@link Gen} interface that produces a value of type {@code A} using the provided {@link RandomSource}.
+     * <p>
+     * The semantics of this method are implementation-specific. Some important considerations:
+     * <ul>
+     * <li>Some implementations may return null values</li>
+     * <li>Implementations may return duplicate or identical values across calls</li>
+     * <li>Values may contain or be backed by shared mutable state</li>
+     * </ul>
+     * <p>
+     * Due to these implementation-specific behaviors, callers should avoid storing references to returned
+     * values for extended periods unless the specific generator's safety guarantees are known.
+     *
+     * @param random The random source to use for generating values
+     * @return A generated value of type {@code A}
+     */
     A next(RandomSource random);
 
     default <B> Gen<B> map(Function<? super A, ? extends B> fn)
