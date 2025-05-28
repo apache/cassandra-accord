@@ -341,6 +341,21 @@ public class Gens
             throw new IllegalArgumentException(name + " requires a map with deterministic iteration; given " + values.getClass());
     }
 
+    /**
+     * Creates a generator that selects values from an array using a Zipfian distribution.
+     * <p>
+     * In a Zipfian distribution, the probability of selecting an element decreases as its index increases.
+     * The first element has the highest probability of being selected, the second element has the second-highest
+     * probability, and so on. This is useful for generating skewed data where some values are much more common than
+     * others.
+     * <p>
+     * The weights follow a power law where {@code weight = base / (i+1)}, creating a harmonic series.
+     *
+     * @see <a href="https://en.wikipedia.org/wiki/Zipf%27s_law">Wikipedia</a>
+     * @param array the array to select from
+     * @return a generator that produces values from the array following a Zipfian distribution
+     * @throws IllegalArgumentException if the array is null or empty
+     */
     public static Gen.IntGen pickZipf(int[] array)
     {
         if (array == null || array.length == 0)
@@ -366,6 +381,21 @@ public class Gens
         };
     }
 
+    /**
+     * Creates a generator that selects values from an array using a Zipfian distribution.
+     * <p>
+     * In a Zipfian distribution, the probability of selecting an element decreases as its index increases.
+     * The first element has the highest probability of being selected, the second element has the second-highest
+     * probability, and so on. This is useful for generating skewed data where some values are much more common than
+     * others.
+     * <p>
+     * The weights follow a power law where {@code weight = base / (i+1)}, creating a harmonic series.
+     *
+     * @see <a href="https://en.wikipedia.org/wiki/Zipf%27s_law">Wikipedia</a>
+     * @param array the array to select from
+     * @return a generator that produces values from the array following a Zipfian distribution
+     * @throws IllegalArgumentException if the array is null or empty
+     */
     public static Gen.LongGen pickZipf(long[] array)
     {
         if (array == null || array.length == 0)
@@ -391,12 +421,42 @@ public class Gens
         };
     }
 
+    /**
+     * Creates a generator that selects values from an array using a Zipfian distribution.
+     * <p>
+     * In a Zipfian distribution, the probability of selecting an element decreases as its index increases.
+     * The first element has the highest probability of being selected, the second element has the second-highest
+     * probability, and so on. This is useful for generating skewed data where some values are much more common than
+     * others.
+     * <p>
+     * The weights follow a power law where {@code weight = base / (i+1)}, creating a harmonic series.
+     *
+     * @see <a href="https://en.wikipedia.org/wiki/Zipf%27s_law">Wikipedia</a>
+     * @param array the array to select from
+     * @return a generator that produces values from the array following a Zipfian distribution
+     * @throws IllegalArgumentException if the array is null or empty
+     */
     @SafeVarargs
     public static <T> Gen<T> pickZipf(T... array)
     {
         return pickZipf(Arrays.asList(array));
     }
 
+    /**
+     * Creates a generator that selects values from a list using a Zipfian distribution.
+     * <p>
+     * In a Zipfian distribution, the probability of selecting an element decreases as its index increases.
+     * The first element has the highest probability of being selected, the second element has the second-highest
+     * probability, and so on. This is useful for generating skewed data where some values are much more common than
+     * others.
+     * <p>
+     * The weights follow a power law where {@code weight = base / (i+1)}, creating a harmonic series.
+     *
+     * @see <a href="https://en.wikipedia.org/wiki/Zipf%27s_law">Wikipedia</a>
+     * @param array the list to select from
+     * @return a generator that produces values from the list following a Zipfian distribution
+     * @throws IllegalArgumentException if the list is null or empty
+     */
     public static <T> Gen<T> pickZipf(List<T> array)
     {
         if (array == null || array.isEmpty())
