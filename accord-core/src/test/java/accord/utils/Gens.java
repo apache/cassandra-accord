@@ -1121,11 +1121,18 @@ public class Gens
             return r -> r.nextInt(min, max + 1);
         }
 
+
+        /**
+         * @see Gens#mixedDistribution(int, int)
+         */
         public Gen<Gen.IntGen> mixedDistribution(int minInclusive, int maxExclusive)
         {
             return Gens.mixedDistribution(minInclusive, maxExclusive);
         }
 
+        /**
+         * @see Gens#mixedDistribution(int, int, int)
+         */
         public Gen<Gen.IntGen> mixedDistribution(int minInclusive, int maxExclusive, int numBuckets)
         {
             return Gens.mixedDistribution(minInclusive, maxExclusive, numBuckets);
@@ -1161,11 +1168,21 @@ public class Gens
             return pick(klass.getEnumConstants());
         }
 
+        /**
+         * A mixedDistribution using the enum classes values as input to {@link Gens#mixedDistribution(Object[])}
+         *
+         * @see Gens#mixedDistribution(Object[])
+         */
         public <T extends Enum<T>> Gen<Gen<T>> allMixedDistribution(Class<T> klass)
         {
             return mixedDistribution(klass.getEnumConstants());
         }
 
+        /**
+         * Creates a generator that randomly selects one value from the enum values based off a set of weights
+         *
+         * @see #pick(Map)
+         */
         public <T extends Enum<T>> Gen<T> allWithWeights(Class<T> klass, int... weights)
         {
             T[] constants = klass.getEnumConstants();
