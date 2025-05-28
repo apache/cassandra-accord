@@ -412,11 +412,51 @@ public class Property
         }
     }
 
+    /**
+     * QuickCheck style testing framework for property based testing
+     * <p>
+     * Examples
+     * <pre>
+     * import static accord.utils.Property.qt;
+     *
+     * // Run a simple property test
+     * qt().check(random -> {
+     *     // Test with random values
+     *     int value = random.nextInt();
+     *     assert someInvariant(value);
+     * });
+     * </pre>
+     * <pre>
+     * import static accord.utils.Property.qt;
+     *
+     * // Run a property test with strings as input
+     * qt().forAll(Gens.strings().ofLengthBetween(0, 100))
+     *     .check(str -> {
+     *         // Property assertion goes here
+     *     });
+     * </pre>
+     */
     public static ForBuilder qt()
     {
         return new ForBuilder();
     }
 
+    /**
+     * QuickCheck style testing framework for stateful property testing
+     * <p>
+     * Examples
+     * <pre>
+     * import static accord.utils.Property.stateful;
+     * import static accord.utils.Property.commands;
+     *
+     * stateful().check(commands(() -> State::new)
+     * 		.add(create()) // add "create" command with random weight
+     * 		.add(read())   // add "read" command with random weight
+     * 		.add(update()) // add "update" command with random weight
+     * 		.add(delete()) // add "delete" command with random weight
+     *         .build());
+     * </pre>
+     */
     public static StatefulBuilder stateful()
     {
         return new StatefulBuilder();
