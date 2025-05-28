@@ -210,27 +210,27 @@ public class Gens
 
     public static Gen.IntGen pickInt(int... ts)
     {
-        Invariants.require(ts.length > 0, "Unable to pick from an empty array");
+        Invariants.requireArgument(ts.length > 0, "Unable to pick from an empty array");
         return rs -> ts[rs.nextInt(0, ts.length)];
     }
 
     @SafeVarargs
     public static <T> Gen<T> pick(T... ts)
     {
-        Invariants.require(ts.length > 0, "Unable to pick from an empty array");
+        Invariants.requireArgument(ts.length > 0, "Unable to pick from an empty array");
         return pick(Arrays.asList(ts));
     }
 
     public static <T> Gen<T> pick(List<T> ts)
     {
-        Invariants.require(!ts.isEmpty(), "Unable to pick from an empty collection");
+        Invariants.requireArgument(!ts.isEmpty(), "Unable to pick from an empty collection");
         Gen.IntGen offset = ints().between(0, ts.size() - 1);
         return rs -> ts.get(offset.nextInt(rs));
     }
 
     public static <T extends Comparable<T>> Gen<T> pick(Set<T> set)
     {
-        Invariants.require(!set.isEmpty(), "Unable to pick from an empty collection");
+        Invariants.requireArgument(!set.isEmpty(), "Unable to pick from an empty collection");
         List<T> list = new ArrayList<>(set);
         // Non-ordered sets may have different iteration order on different environments, which would make a seed produce different histories!
         // To avoid such a problem, make sure to apply a deterministic function (sort).
