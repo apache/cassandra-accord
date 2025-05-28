@@ -65,6 +65,17 @@ public class Gens {
         return ignore -> constant.get();
     }
 
+    /**
+     * Creates a generator that randomly selects one of the provided generators on each execution, then calls {@link Gen#next(RandomSource)} on that chosen generator.
+     * <p>
+     * This method distributes the selection with equal probability. For weighted selection,
+     * see {@link #oneOf(Map)}.
+     *
+     * @param <T> the type of values to generate
+     * @param gens the generators to select from
+     * @return a generator that uses one of the provided generators for each value
+     * @throws IllegalArgumentException if gens is empty
+     */
     public static <T> Gen<T> oneOf(Gen<? extends T>... gens)
     {
         switch (gens.length)
@@ -75,6 +86,17 @@ public class Gens {
         return oneOf(Arrays.asList(gens));
     }
 
+    /**
+     * Creates a generator that randomly selects one of the provided generators from a list on each execution, then calls {@link Gen#next(RandomSource)} on that chosen generator.
+     * <p>
+     * This method distributes the selection with equal probability. For weighted selection,
+     * see {@link #oneOf(Map)}.
+     *
+     * @param <T> the type of values to generate
+     * @param gens the list of generators to select from
+     * @return a generator that uses one of the provided generators for each value
+     * @throws IllegalArgumentException if gens is empty
+     */
     public static <T> Gen<T> oneOf(List<Gen<? extends T>> gens)
     {
         switch (gens.size())
