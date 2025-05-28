@@ -580,6 +580,27 @@ public class Gens
         return i;
     }
 
+    /**
+     * Creates a generator that uses different distribution strategies for selecting items from a range.  The range is
+     * broken up into {@code numBuckets} sub ranges, and the bucket will be selected using the distribution strategies.
+     * <p>
+     * When the top level generator is called it selects what distribution to use, and returns a generator of {@code int}
+     * that selects from the input using that distribution.
+     * <p>
+     * This method does not document what distributions it can select from, that way it is free to change (add/remove)
+     * over time; it only maintains the property that the distribution may change between calls to the top level generator.
+     * <p>
+     * Some sample distribution strategies:
+     * <ul>
+     *     <li>Uniform distribution - Each item has equal chance of selection</li>
+     *     <li>Zipfian distribution - Early items are heavily favored, with probability decreasing by index</li>
+     * </ul>
+     *
+     * @param minInclusive value inclusive
+     * @param maxExclusive value exclusive
+     * @param numBuckets how many sub-ranges to create for the top level range
+     * @return a generator of different distribution strategies
+     */
     public static Gen<Gen.IntGen> mixedDistribution(int minInclusive, int maxExclusive, int numBuckets)
     {
         int domainSize = (maxExclusive - minInclusive);
@@ -630,6 +651,25 @@ public class Gens
         };
     }
 
+    /**
+     * Creates a generator that uses different distribution strategies for selecting items from a range.
+     * <p>
+     * When the top level generator is called it selects what distribution to use, and returns a generator of {@code int}
+     * that selects from the input using that distribution.
+     * <p>
+     * This method does not document what distributions it can select from, that way it is free to change (add/remove)
+     * over time; it only maintains the property that the distribution may change between calls to the top level generator.
+     * <p>
+     * Some sample distribution strategies:
+     * <ul>
+     *     <li>Uniform distribution - Each item has equal chance of selection</li>
+     *     <li>Zipfian distribution - Early items are heavily favored, with probability decreasing by index</li>
+     * </ul>
+     *
+     * @param minInclusive value inclusive
+     * @param maxExclusive value exclusive
+     * @return a generator of different distribution strategies
+     */
     public static Gen<Gen.IntGen> mixedDistribution(int minInclusive, int maxExclusive)
     {
         int domainSize = (maxExclusive - minInclusive + 1);
@@ -692,6 +732,25 @@ public class Gens
         return array;
     }
 
+    /**
+     * Creates a generator that uses different distribution strategies for selecting items from a range.
+     * <p>
+     * When the top level generator is called it selects what distribution to use, and returns a generator of {@code int}
+     * that selects from the input using that distribution.
+     * <p>
+     * This method does not document what distributions it can select from, that way it is free to change (add/remove)
+     * over time; it only maintains the property that the distribution may change between calls to the top level generator.
+     * <p>
+     * Some sample distribution strategies:
+     * <ul>
+     *     <li>Uniform distribution - Each item has equal chance of selection</li>
+     *     <li>Zipfian distribution - Early items are heavily favored, with probability decreasing by index</li>
+     * </ul>
+     *
+     * @param minInclusive value inclusive
+     * @param maxExclusive value exclusive
+     * @return a generator of different distribution strategies
+     */
     public static Gen<Gen.LongGen> mixedDistribution(long minInclusive, long maxExclusive)
     {
         long domainSize = (maxExclusive - minInclusive + 1);
@@ -755,12 +814,50 @@ public class Gens
         return array;
     }
 
+    /**
+     * Creates a generator that uses different distribution strategies for selecting items from an array.
+     * <p>
+     * When the top level generator is called it selects what distribution to use, and returns a generator of {@code T}
+     * that selects from the input using that distribution.
+     * <p>
+     * This method does not document what distributions it can select from, that way it is free to change (add/remove)
+     * over time; it only maintains the property that the distribution may change between calls to the top level generator.
+     * <p>
+     * Some sample distribution strategies:
+     * <ul>
+     *     <li>Uniform distribution - Each item has equal chance of selection</li>
+     *     <li>Zipfian distribution - Early items are heavily favored, with probability decreasing by index</li>
+     * </ul>
+     *
+     * @param <T> the type of elements in the array
+     * @param list the array of values to select from
+     * @return a generator of different distribution strategies
+     */
     @SafeVarargs
     public static <T> Gen<Gen<T>> mixedDistribution(T... list)
     {
         return mixedDistribution(Arrays.asList(list));
     }
 
+    /**
+     * Creates a generator that uses different distribution strategies for selecting items from a list.
+     * <p>
+     * When the top level generator is called it selects what distribution to use, and returns a generator of {@code T}
+     * that selects from the input using that distribution.
+     * <p>
+     * This method does not document what distributions it can select from, that way it is free to change (add/remove)
+     * over time; it only maintains the property that the distribution may change between calls to the top level generator.
+     * <p>
+     * Some sample distribution strategies:
+     * <ul>
+     *     <li>Uniform distribution - Each item has equal chance of selection</li>
+     *     <li>Zipfian distribution - Early items are heavily favored, with probability decreasing by index</li>
+     * </ul>
+     *
+     * @param <T> the type of elements in the list
+     * @param list the list of values to select from
+     * @return a generator of different distribution strategies
+     */
     public static <T> Gen<Gen<T>> mixedDistribution(List<T> list)
     {
         return rs -> {
@@ -787,6 +884,24 @@ public class Gens
         };
     }
 
+    /**
+     * Creates a generator that uses different distribution strategies for selecting items from an array.
+     * <p>
+     * When the top level generator is called it selects what distribution to use, and returns a generator of {@code int}
+     * that selects from the input using that distribution.
+     * <p>
+     * This method does not document what distributions it can select from, that way it is free to change (add/remove)
+     * over time; it only maintains the property that the distribution may change between calls to the top level generator.
+     * <p>
+     * Some sample distribution strategies:
+     * <ul>
+     *     <li>Uniform distribution - Each item has equal chance of selection</li>
+     *     <li>Zipfian distribution - Early items are heavily favored, with probability decreasing by index</li>
+     * </ul>
+     *
+     * @param list the array of values to select from
+     * @return a generator of different distribution strategies
+     */
     public static Gen<Gen.IntGen> mixedDistribution(int[] list)
     {
         return rs -> {
