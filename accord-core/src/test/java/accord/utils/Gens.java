@@ -113,11 +113,33 @@ public class Gens {
         return rs -> gen.next(rs).next(rs);
     }
 
+    /**
+     * A builder for creating generators that randomly select from multiple generators with customizable weights.
+     *
+     * @see OneOfBuilder
+     * @return a oneOf builder to aid in creating a {@code Gen} of type {@code T}
+     * @param <T> the generator will return
+     */
     public static <T> OneOfBuilder<T> oneOf()
     {
         return new OneOfBuilder<>();
     }
 
+    /**
+     * A builder for creating generators that randomly select from multiple generators with customizable weights.
+     * <p>
+     * This builder allows constructing complex random selection logic with:
+     * <ul>
+     * <li>Weighted probabilities for different generators</li>
+     * <li>Dynamically determined weights at generation time (if {@link #build} is called, the weight will be {@code 1})</li>
+     * </ul>
+     * <p>
+     * The {@link #buildWithDynamicWeights()} method is particularly powerful as it creates
+     * a meta-generator that recalculates the weights for unweighted generators on each invocation,
+     * producing more varied randomization patterns than static weights.
+     *
+     * @param <T> the type of values the generators will produce
+     */
     public static class OneOfBuilder<T>
     {
         private final Map<Gen<T>, Integer> weighted = new LinkedHashMap<>();
