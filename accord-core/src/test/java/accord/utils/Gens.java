@@ -48,7 +48,9 @@ import com.google.common.collect.Iterables;
 
 import accord.utils.random.Picker;
 
-public class Gens {
+@SuppressWarnings("unused")
+public class Gens
+{
     private Gens() {
     }
 
@@ -78,6 +80,7 @@ public class Gens {
      * @return a generator that uses one of the provided generators for each value
      * @throws IllegalArgumentException if gens is empty
      */
+    @SuppressWarnings("unchecked")
     @SafeVarargs
     public static <T> Gen<T> oneOf(Gen<? extends T>... gens)
     {
@@ -100,6 +103,7 @@ public class Gens {
      * @return a generator that uses one of the provided generators for each value
      * @throws IllegalArgumentException if gens is empty
      */
+    @SuppressWarnings("unchecked")
     public static <T> Gen<T> oneOf(List<Gen<? extends T>> gens)
     {
         switch (gens.size())
@@ -186,8 +190,7 @@ public class Gens {
                 return i -> gen;
             }
             return rs -> {
-                Map<Gen<T>, Integer> commands = new LinkedHashMap<>();
-                commands.putAll(weighted);
+                Map<Gen<T>, Integer> commands = new LinkedHashMap<>(weighted);
                 for (var gen : unweighted)
                     commands.put(gen, unknownWeightGen.nextInt(rs));
                 var top = pick(commands);
@@ -197,8 +200,7 @@ public class Gens {
 
         public Gen<T> build()
         {
-            Map<Gen<T>, Integer> commands = new LinkedHashMap<>();
-            commands.putAll(weighted);
+            Map<Gen<T>, Integer> commands = new LinkedHashMap<>(weighted);
             for (var gen : unweighted)
                 commands.put(gen, 1);
             var top = pick(commands);
@@ -460,7 +462,7 @@ public class Gens {
                 }
                 case 1: // median biased
                 {
-                    int medians[] = new int[bucket.length];
+                    int[] medians = new int[bucket.length];
                     for (int i = 0; i < medians.length; i++)
                     {
                         int start = bucket[i];
@@ -638,7 +640,7 @@ public class Gens {
         };
     }
 
-    public static <T> Gen<Gen.IntGen> mixedDistribution(int[] list)
+    public static Gen<Gen.IntGen> mixedDistribution(int[] list)
     {
         return rs -> {
             switch (rs.nextInt(0, 4))
@@ -755,10 +757,12 @@ public class Gens {
             Invariants.requireArgument(ratio > 0 && ratio <= 1, "Expected %d to be larger than 0 and <= 1", ratio);
             double lower = ratio * .8;
             double upper = ratio * 1.2;
-            return new Gen<Boolean>() {
+            return new Gen<>()
+            {
                 // run represents how many consecutaive true values should be returned; -1 implies no active "run" exists
                 private int run = -1;
                 private long falseCount = 0, trueCount = 0;
+
                 @Override
                 public Boolean next(RandomSource rs)
                 {
@@ -801,7 +805,7 @@ public class Gens {
                 switch (selection)
                 {
                     case 0: // uniform 50/50
-                        return r -> r.nextBoolean();
+                        return RandomSource::nextBoolean;
                     case 1: // variable frequency
                         var freq = rs.nextFloat();
                         return r -> r.decide(freq);
@@ -1021,11 +1025,13 @@ public class Gens {
         }
     }
 
-    public static class ArrayDSL<T> implements BaseSequenceDSL<ArrayDSL<T>, T[]> {
+    public static class ArrayDSL<T> implements BaseSequenceDSL<ArrayDSL<T>, T[]>
+    {
         private final Class<T> type;
         private final Gen<T> fn;
 
-        public ArrayDSL(Class<T> type, Gen<T> fn) {
+        public ArrayDSL(Class<T> type, Gen<T> fn)
+        {
             this.type = Objects.requireNonNull(type);
             this.fn = Objects.requireNonNull(fn);
         }
@@ -1048,6 +1054,7 @@ public class Gens {
             {
                 Reset.tryReset(fn);
                 int size = sizeGen.nextInt(r);
+                //noinspection unchecked
                 T[] list = (T[]) Array.newInstance(type, size);
                 for (int i = 0; i < size; i++)
                     list[i] = fn.next(r);
@@ -1171,6 +1178,7 @@ public class Gens {
             {
                 T value = null;
                 int i;
+                //noinspection StatementWithEmptyBody
                 for (i = 0; i < 42 && !seen.add((value = fn.next(random))); i++) {}
                 if (i == 42) throw IgnoreGenResult.INSTANCE;
                 return value;
