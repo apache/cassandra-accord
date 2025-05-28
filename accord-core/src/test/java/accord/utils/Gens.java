@@ -208,12 +208,31 @@ public class Gens
         }
     }
 
+    /**
+     * Creates a generator that randomly selects one value from an array.
+     * <p>
+     * Each value has an equal probability of being selected.
+     *
+     * @param ts the array of values to select from
+     * @return a generator that produces random values from the given array
+     * @throws IllegalArgumentException if the array is empty
+     */
     public static Gen.IntGen pickInt(int... ts)
     {
         Invariants.requireArgument(ts.length > 0, "Unable to pick from an empty array");
         return rs -> ts[rs.nextInt(0, ts.length)];
     }
 
+    /**
+     * Creates a generator that randomly selects one value from an array.
+     * <p>
+     * Each value has an equal probability of being selected.
+     *
+     * @param <T> the type of values to generate
+     * @param ts the array of values to select from
+     * @return a generator that produces random values from the given array
+     * @throws IllegalArgumentException if the array is empty
+     */
     @SafeVarargs
     public static <T> Gen<T> pick(T... ts)
     {
@@ -221,6 +240,16 @@ public class Gens
         return pick(Arrays.asList(ts));
     }
 
+    /**
+     * Creates a generator that randomly selects one value from a list.
+     * <p>
+     * Each value has an equal probability of being selected.
+     *
+     * @param <T> the type of values to generate
+     * @param ts the list of values to select from
+     * @return a generator that produces random values from the given list
+     * @throws IllegalArgumentException if the list is empty
+     */
     public static <T> Gen<T> pick(List<T> ts)
     {
         Invariants.requireArgument(!ts.isEmpty(), "Unable to pick from an empty collection");
@@ -228,6 +257,17 @@ public class Gens
         return rs -> ts.get(offset.nextInt(rs));
     }
 
+    /**
+     * Creates a generator that randomly selects one value from a set. When the set does not have deterministic
+     * iteration ordering, then the values will be sorted based off their natural ordering first.
+     * <p>
+     * Each value has an equal probability of being selected.
+     *
+     * @param <T> the type of values to generate
+     * @param set the set of values to select from
+     * @return a generator that produces random values from the given set
+     * @throws IllegalArgumentException if the set is empty
+     */
     public static <T extends Comparable<T>> Gen<T> pick(Set<T> set)
     {
         Invariants.requireArgument(!set.isEmpty(), "Unable to pick from an empty collection");
