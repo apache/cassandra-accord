@@ -103,6 +103,18 @@ public interface Gen<A>
         return rs -> mapper.apply(rs, this.next(rs)).next(rs);
     }
 
+    /**
+     * Creates a new generator that only produces values matching the provided predicate.
+     * <p>
+     * <strong>Warning:</strong> This method is unbounded and will loop indefinitely if the predicate
+     * never returns true for any generated value. Use with caution, especially with rare conditions.
+     * <p>
+     * For a bounded alternative that will stop after a specified number of attempts,
+     * see {@link #filter(int, Object, Predicate)}.
+     *
+     * @param fn the predicate function that values must satisfy
+     * @return a new generator that only produces values matching the predicate
+     */
     default Gen<A> filter(Predicate<A> fn)
     {
         Gen<A> self = this;
@@ -116,6 +128,19 @@ public interface Gen<A>
         };
     }
 
+    /**
+     * Creates a new bounded generator that only produces values matching the provided predicate.
+     * <p>
+     * Unlike the unbounded {@link #filter(Predicate)}, this method will make at most {@code maxAttempts}
+     * attempts to generate a value that satisfies the predicate. If no matching value is found within
+     * the specified number of attempts, it returns the provided {@code defaultValue} instead.
+     *
+     * @param maxAttempts the maximum number of generation attempts before falling back to the default value
+     * @param defaultValue the value to return if no matching value is found within maxAttempts
+     * @param fn the predicate function that values must satisfy
+     * @return a new bounded generator that produces values matching the predicate or the default value
+     * @throws IllegalArgumentException if maxAttempts is not positive
+     */
     default Gen<A> filter(int maxAttempts, A defaultValue, Predicate<A> fn)
     {
         Invariants.requireArgument(maxAttempts > 0, "Max attempts must be positive; given %d", maxAttempts);
