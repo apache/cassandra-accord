@@ -35,6 +35,7 @@ import java.util.Map;
 import java.util.NavigableSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.SortedMap;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -107,6 +108,17 @@ public class Gens {
         return rs -> rs.pick(gens).next(rs);
     }
 
+    /**
+     * Creates a generator that randomly selects one of the provided generators based on weight, then calls {@link Gen#next(RandomSource)} on that chosen generator.
+     * <p>
+     * Each generator is selected with a probability proportional to its associated weight.
+     * Higher weights increase the likelihood of selection.
+     *
+     * @param <T> the type of values to generate
+     * @param values a map of generators to their respective weights
+     * @return a generator that uses one of the provided generators according to their weights
+     * @throws IllegalArgumentException if values is empty
+     */
     public static <T> Gen<T> oneOf(Map<Gen<T>, Integer> values)
     {
         Gen<Gen<T>> gen = pick(values);
@@ -218,14 +230,25 @@ public class Gens {
         return pick(list);
     }
 
+    /**
+     * Creates a generator that randomly selects one value from a weighted map.
+     * <p>
+     * Each value is selected with a probability proportional to its associated weight.
+     * Higher weights increase the likelihood of selection.
+     * <p>
+     * For deterministic behavior, this method requires maps with deterministic iteration order
+     * like {@link java.util.EnumMap} or {@link java.util.LinkedHashMap}.
+     *
+     * @param <T> the type of values to generate
+     * @param values a map of values to their respective weights
+     * @return a generator that produces values according to their weights
+     * @throws IllegalArgumentException if values is empty or doesn't have deterministic iteration order
+     */
     public static <T> Gen<T> pick(Map<T, Integer> values)
     {
         if (values == null || values.isEmpty())
             throw new IllegalArgumentException("values is empty");
-        // if 2 values have the same weight we need some way to tie-break, but that isn't always possible...
-        // this method relies on the map having some order and will reject any map that doesn't define a deterministic order
-        if (!(values instanceof EnumMap || values instanceof LinkedHashMap))
-            throw new IllegalArgumentException("pick(Map) requires a map with deterministic iteration; given " + values.getClass());
+        checkIterationSafe("pick(Map)", values);
         if (values.size() == 1)
             return constant(Objects.requireNonNull(Iterables.getFirst(values.keySet(), null)));
         double totalWeight = values.values().stream().mapToDouble(Integer::intValue).sum();
@@ -247,6 +270,14 @@ public class Gens {
             }
             return list.get(list.size() - 1).value;
         };
+    }
+
+    private static void checkIterationSafe(String name, Map<?, ?> values)
+    {
+        if (!(values instanceof EnumMap
+              || values instanceof LinkedHashMap
+              || values instanceof SortedMap))
+            throw new IllegalArgumentException(name + " requires a map with deterministic iteration; given " + values.getClass());
     }
 
     public static Gen.IntGen pickZipf(int[] array)
