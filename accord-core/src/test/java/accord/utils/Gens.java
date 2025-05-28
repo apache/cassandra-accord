@@ -26,16 +26,17 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.NavigableSet;
 import java.util.Objects;
 import java.util.Set;
 import java.util.SortedMap;
+import java.util.SortedSet;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -77,6 +78,7 @@ public class Gens {
      * @return a generator that uses one of the provided generators for each value
      * @throws IllegalArgumentException if gens is empty
      */
+    @SafeVarargs
     public static <T> Gen<T> oneOf(Gen<? extends T>... gens)
     {
         switch (gens.length)
@@ -206,26 +208,31 @@ public class Gens {
 
     public static Gen.IntGen pickInt(int... ts)
     {
+        Invariants.require(ts.length > 0, "Unable to pick from an empty array");
         return rs -> ts[rs.nextInt(0, ts.length)];
     }
 
+    @SafeVarargs
     public static <T> Gen<T> pick(T... ts)
     {
+        Invariants.require(ts.length > 0, "Unable to pick from an empty array");
         return pick(Arrays.asList(ts));
     }
 
     public static <T> Gen<T> pick(List<T> ts)
     {
+        Invariants.require(!ts.isEmpty(), "Unable to pick from an empty collection");
         Gen.IntGen offset = ints().between(0, ts.size() - 1);
         return rs -> ts.get(offset.nextInt(rs));
     }
 
     public static <T extends Comparable<T>> Gen<T> pick(Set<T> set)
     {
+        Invariants.require(!set.isEmpty(), "Unable to pick from an empty collection");
         List<T> list = new ArrayList<>(set);
         // Non-ordered sets may have different iteration order on different environments, which would make a seed produce different histories!
         // To avoid such a problem, make sure to apply a deterministic function (sort).
-        if (!(set instanceof NavigableSet))
+        if (!isIterationSafe(set))
             list.sort(Comparator.naturalOrder());
         return pick(list);
     }
@@ -272,11 +279,23 @@ public class Gens {
         };
     }
 
+    private static boolean isIterationSafe(Map<?, ?> values)
+    {
+        return values instanceof EnumMap
+                || values instanceof LinkedHashMap
+                || values instanceof SortedMap;
+    }
+
+    private static boolean isIterationSafe(Set<?> values)
+    {
+        return values instanceof EnumSet
+               || values instanceof LinkedHashSet
+               || values instanceof SortedSet;
+    }
+
     private static void checkIterationSafe(String name, Map<?, ?> values)
     {
-        if (!(values instanceof EnumMap
-              || values instanceof LinkedHashMap
-              || values instanceof SortedMap))
+        if (!isIterationSafe(values))
             throw new IllegalArgumentException(name + " requires a map with deterministic iteration; given " + values.getClass());
     }
 
@@ -330,6 +349,7 @@ public class Gens {
         };
     }
 
+    @SafeVarargs
     public static <T> Gen<T> pickZipf(T... array)
     {
         return pickZipf(Arrays.asList(array));
@@ -586,6 +606,7 @@ public class Gens {
         return array;
     }
 
+    @SafeVarargs
     public static <T> Gen<Gen<T>> mixedDistribution(T... list)
     {
         return mixedDistribution(Arrays.asList(list));
