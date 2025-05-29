@@ -1,4 +1,4 @@
-# Fuzz Testing
+# Property Testing
 
 There are multiple ways to do fuzz testing, and this package provides different utilities to aid in writing tests.
 
