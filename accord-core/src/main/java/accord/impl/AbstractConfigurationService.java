@@ -19,6 +19,7 @@
 package accord.impl;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import javax.annotation.concurrent.GuardedBy;
@@ -348,39 +349,118 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
 
     protected void topologyUpdatePostListenerNotify(Topology topology) {}
 
+    private final List<TopologyTask> pendingEpochs = new ArrayList<>();
+
     public void reportTopology(Topology topology, boolean isLoad, boolean startSync)
     {
         long lastReceived = epochs.lastReceived();
         if (topology.epoch() <= lastReceived)
             return;
 
+        long lastAcked = epochs.lastAcknowledged();
+
         if (lastReceived > 0 && topology.epoch() > lastReceived + 1)
         {
             logger.debug("Epoch {} received; waiting to receive {} before reporting", topology.epoch(), lastReceived + 1);
-            epochs.receiveFuture(lastReceived + 1).invokeIfSuccess(() -> reportTopology(topology, isLoad, startSync));
+            pending(topology, isLoad, startSync);
+            epochs.receiveFuture(lastReceived + 1).invokeIfSuccess(this::processAllPending);
             fetchTopologyForEpoch(lastReceived + 1);
-            return;
         }
-
-        long lastAcked = epochs.lastAcknowledged();
-        if (lastAcked == 0 && lastReceived > 0)
+        else if (lastAcked == 0 && lastReceived > 0)
         {
             logger.debug("Epoch {} received; waiting for {} to ack before reporting", topology.epoch(), epochs.minEpoch());
-            epochs.acknowledgeFuture(epochs.minEpoch()).invokeIfSuccess(() -> reportTopology(topology, isLoad, startSync));
-            return;
+            pending(topology, isLoad, startSync);
+            epochs.acknowledgeFuture(epochs.minEpoch()).invokeIfSuccess(this::processAllPending);
         }
-
-        if (lastAcked > 0 && topology.epoch() > lastAcked + 1)
+        else if (lastAcked > 0 && topology.epoch() > lastAcked + 1)
         {
             logger.debug("Epoch {} received; waiting for {} to ack before reporting", topology.epoch(), lastAcked + 1);
-            epochs.acknowledgeFuture(lastAcked + 1).invokeIfSuccess(() -> reportTopology(topology, isLoad, startSync));
-            return;
+            pending(topology, isLoad, startSync);
+            epochs.acknowledgeFuture(lastAcked + 1).invokeIfSuccess(this::processAllPending);
+        }
+        else
+            receiveOne(topology, isLoad, startSync);
+    }
+
+    private void pending(Topology topology, boolean isLoad, boolean startSync)
+    {
+        synchronized (pendingEpochs)
+        {
+            pendingEpochs.add(new TopologyTask(topology, isLoad, startSync));
+            pendingEpochs.sort(TopologyTask::compareTo);
+        }
+    }
+
+    private void processAllPending()
+    {
+        TopologyTask toReceive = null;
+        synchronized (pendingEpochs)
+        {
+            Iterator<TopologyTask> iter = pendingEpochs.iterator();
+            while (iter.hasNext())
+            {
+                long lastReceived = epochs.lastReceived();
+                long lastAcked = epochs.lastAcknowledged();
+                TopologyTask task = iter.next();
+                if (task.topology.epoch() <= lastReceived)
+                {
+                    iter.remove();
+                    continue;
+                }
+
+                if (lastReceived == lastAcked && task.topology.epoch() == lastReceived + 1)
+                {
+                    iter.remove();
+                    toReceive = task;
+                }
+                break;
+            }
         }
 
+        if (toReceive != null)
+        {
+            epochs.receiveFuture(toReceive.topology.epoch()).invokeIfSuccess(this::processAllPending);
+            epochs.acknowledgeFuture(toReceive.topology.epoch()).invokeIfSuccess(this::processAllPending);
+            receiveOne(toReceive.topology, toReceive.isLoad, toReceive.startSync);
+        }
+    }
+
+    private void receiveOne(Topology topology, boolean isLoad, boolean startSync)
+    {
         epochs.receive(topology);
         for (Listener listener : listeners)
             listener.onTopologyUpdate(topology, isLoad, startSync);
         topologyUpdatePostListenerNotify(topology);
+    }
+
+    private static class TopologyTask implements Comparable<TopologyTask>
+    {
+        final boolean isLoad;
+        final boolean startSync;
+        final Topology topology;
+
+        private TopologyTask(Topology topology, boolean isLoad, boolean startSync)
+        {
+            this.isLoad = isLoad;
+            this.startSync = startSync;
+            this.topology = topology;
+        }
+
+        @Override
+        public int compareTo(TopologyTask o)
+        {
+            return Long.compare(topology.epoch(), o.topology.epoch());
+        }
+
+        @Override
+        public String toString()
+        {
+            return "TopologyTask{" +
+                   "isLoad=" + isLoad +
+                   ", startSync=" + startSync +
+                   ", topology=" + topology +
+                   '}';
+        }
     }
 
     public void unsafeMarkTruncated()
