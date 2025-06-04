@@ -381,7 +381,6 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
     public void onEpochRetired(Ranges ranges, long epoch)
     {
         topology.onEpochRetired(ranges, epoch);
-        durabilityService.onEpochRetired(ranges, epoch);
     }
 
     // TODO (required): audit error handling, as the refactor to provide epoch timeouts appears to have broken a number of coordination
