@@ -688,7 +688,7 @@ public class StoreParticipants
 
     private static long computeCoveringEpoch(SafeCommandStore safeStore, long txnIdEpoch, Participants<?> participants)
     {
-        long lowEpoch = safeStore.ranges().latestEarlierEpochThatFullyCovers(txnIdEpoch, participants);
+        long lowEpoch = safeStore.ranges().latestEarlierEpochThatFullyCovers(safeStore, txnIdEpoch, participants);
         return Math.min(lowEpoch, txnIdEpoch);
     }
 }

@@ -314,14 +314,11 @@ public class TopologyManager
             else
             {
                 this.epochs = Arrays.copyOf(epochs, truncateFrom);
-                if (logger.isDebugEnabled())
+                for (int i = truncateFrom; i < epochs.length; i++)
                 {
-                    for (int i = truncateFrom; i < epochs.length; i++)
-                    {
-                        EpochState state = epochs[i];
-                        Invariants.require(epochs[i].syncComplete());
-                        logger.debug("Retired epoch {} with added/removed ranges {}/{}. Topology: {}. Closed: {}", state.epoch(), state.addedRanges, state.removedRanges, state.global.ranges, state.closed);
-                    }
+                    EpochState state = epochs[i];
+                    Invariants.require(epochs[i].syncComplete());
+                    logger.info("Retired epoch {} with added/removed ranges {}/{}. Topology: {}. Closed: {}", state.epoch(), state.addedRanges, state.removedRanges, state.global.ranges, state.closed);
                 }
                 if (logger.isTraceEnabled())
                 {

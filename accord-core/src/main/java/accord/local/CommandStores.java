@@ -360,17 +360,22 @@ public abstract class CommandStores
             return Math.max(sinceEpoch, epochs[0]);
         }
 
-        public long latestEarlierEpochThatFullyCovers(long beforeEpoch, Unseekables<?> keysOrRanges)
+        public long latestEarlierEpochThatFullyCovers(SafeCommandStore safeStore, long beforeEpoch, Unseekables<?> keysOrRanges)
         {
             int i = ceilIndex(beforeEpoch);
+            if (i == 0)
+                return beforeEpoch;
             long latest = beforeEpoch;
             Ranges existing = i >= ranges.length ? Ranges.EMPTY : ranges[i];
-            while (--i >= 0)
+            long minEpoch = safeStore.node().topology().minEpoch();
+            while (--i >= 0 && minEpoch < epochs[i])
             {
                 if (ranges[i].without(existing).intersects(keysOrRanges))
-                    latest = epochs[i];
+                    latest = epochs[i + 1] - 1;
                 existing = existing.with(ranges[i]);
             }
+            if (latest < beforeEpoch)
+                latest = Math.max(latest, safeStore.node().topology().minEpoch());
             return latest;
         }
 

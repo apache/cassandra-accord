@@ -240,7 +240,7 @@ abstract class WaitingState extends BaseTxnState
         if (offset >= 3)
         {
             offset = 3;
-            lowEpoch = safeStore.ranges().latestEarlierEpochThatFullyCovers(lowEpoch, command.maxContactable());
+            lowEpoch = safeStore.ranges().latestEarlierEpochThatFullyCovers(safeStore, lowEpoch, command.maxContactable());
         }
         encodedState = encodedState & ~(0x3L << AWAIT_EPOCH_SHIFT);
         encodedState |= ((long)offset) << AWAIT_EPOCH_SHIFT;
@@ -255,11 +255,15 @@ abstract class WaitingState extends BaseTxnState
     long readLowEpoch(SafeCommandStore safeStore, TxnId txnId, Route<?> route)
     {
         int offset = (int) ((encodedState >>> AWAIT_EPOCH_SHIFT) & 0x3);
+        if (offset == 0)
+            return txnId.epoch();
+
         RangesForEpoch ranges = safeStore.ranges();
-        long epoch = ranges.epochAtIndex(Math.max(0, ranges.floorIndex(txnId.epoch())) - offset);
+        int i = ranges.floorIndex(txnId.epoch()) - (offset - 1);
+        long epoch = ranges.epochAtIndex(Math.max(0, i)) - 1;
         if (offset < 3)
             return epoch;
-        return safeStore.ranges().latestEarlierEpochThatFullyCovers(epoch, route);
+        return safeStore.ranges().latestEarlierEpochThatFullyCovers(safeStore, epoch, route);
     }
 
     boolean hasNewLowEpoch(SafeCommandStore safeStore, TxnId txnId, long prevLowEpoch, long newLowEpoch)
