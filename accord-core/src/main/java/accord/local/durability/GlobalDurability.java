@@ -174,7 +174,9 @@ public class GlobalDurability implements Callback<Object>
 
     synchronized void updateTopology(Topology latestGlobal)
     {
-        Invariants.require(currentGlobalTopology == null || latestGlobal.epoch() > currentGlobalTopology.epoch());
+        if (currentGlobalTopology != null && latestGlobal.epoch() <= currentGlobalTopology.epoch())
+            return;
+
         currentGlobalTopology = latestGlobal;
         List<Node.Id> ids = new ArrayList<>(latestGlobal.nodes());
         Collections.sort(ids);
