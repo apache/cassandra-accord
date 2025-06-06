@@ -21,6 +21,7 @@ package accord.impl;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executor;
 import javax.annotation.concurrent.GuardedBy;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -348,6 +349,11 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
 
     protected void topologyUpdatePostListenerNotify(Topology topology) {}
 
+    protected Executor executor()
+    {
+        return Runnable::run;
+    }
+
     public void reportTopology(Topology topology, boolean isLoad, boolean startSync)
     {
         long lastReceived = epochs.lastReceived();
@@ -357,7 +363,8 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
         if (lastReceived > 0 && topology.epoch() > lastReceived + 1)
         {
             logger.debug("Epoch {} received; waiting to receive {} before reporting", topology.epoch(), lastReceived + 1);
-            epochs.receiveFuture(lastReceived + 1).invokeIfSuccess(() -> reportTopology(topology, isLoad, startSync));
+            epochs.receiveFuture(lastReceived + 1).invokeIfSuccess(() -> reportTopology(topology, isLoad, startSync), executor());
+
             fetchTopologyForEpoch(lastReceived + 1);
             return;
         }
@@ -365,7 +372,7 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
         long lastAcked = epochs.lastAcknowledged();
         if (lastAcked == 0 && lastReceived > 0)
         {
-            logger.debug("Epoch {} received; waiting for {} to ack before reporting", topology.epoch(), epochs.minEpoch());
+            logger.debug("Epoch {} received; waiting for {} to ack before reporting", topology.epoch(), epochs.minEpoch(), executor());
             epochs.acknowledgeFuture(epochs.minEpoch()).invokeIfSuccess(() -> reportTopology(topology, isLoad, startSync));
             return;
         }
@@ -373,7 +380,7 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
         if (lastAcked > 0 && topology.epoch() > lastAcked + 1)
         {
             logger.debug("Epoch {} received; waiting for {} to ack before reporting", topology.epoch(), lastAcked + 1);
-            epochs.acknowledgeFuture(lastAcked + 1).invokeIfSuccess(() -> reportTopology(topology, isLoad, startSync));
+            epochs.acknowledgeFuture(lastAcked + 1).invokeIfSuccess(() -> reportTopology(topology, isLoad, startSync), executor());
             return;
         }
 

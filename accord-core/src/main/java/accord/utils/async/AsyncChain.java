@@ -78,6 +78,14 @@ public interface AsyncChain<V>
         });
     }
 
+    default AsyncChain<V> invokeIfSuccess(Runnable runnable, Executor executor)
+    {
+        return map(r -> {
+            runnable.run();
+            return r;
+        }, executor);
+    }
+
     default AsyncChain<V> invokeIfSuccess(Consumer<? super V> action, Executor executor)
     {
         return map(r -> {
