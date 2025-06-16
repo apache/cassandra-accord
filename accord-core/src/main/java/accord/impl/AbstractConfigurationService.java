@@ -429,6 +429,27 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
             listener.onEpochRetired(ranges, epoch);
     }
 
+    public String getDebugStr()
+    {
+        StringBuilder sb = new StringBuilder();
+        synchronized (this)
+        {
+            for (long i = epochs.minEpoch(); i <= epochs.maxEpoch(); i++)
+            {
+                if (i > epochs.minEpoch())
+                    sb.append(", ");
+                sb.append(i).append(": ")
+                  .append(" received ")
+                  .append(epochs.getOrCreate(i).received)
+                  .append(" acknowledged ")
+                  .append(epochs.getOrCreate(i).acknowledged)
+                  .append(" reads ")
+                  .append(epochs.getOrCreate(i).reads);
+            }
+        }
+        return sb.toString();
+    }
+
     // synchronized because state.reads is written
     public AsyncChain<Void> epochReady(long epoch)
     {
