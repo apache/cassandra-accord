@@ -25,13 +25,18 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
+
+import accord.local.Node;
+import accord.utils.SortedArrays.SortedArrayList;
 
 import static accord.utils.ArrayBuffers.uncached;
 import static accord.utils.Property.qt;
@@ -313,6 +318,46 @@ class SortedArraysTest
             Collections.sort(expected);
             assertArrayEquals(expected.toArray(new Integer[0]), array);
         });
+    }
+
+    @Test
+    public void bitsetSerde()
+    {
+        qt().forAll(simpleIntList(), Gens.random()).check((expected, rs) -> {
+            testSerde(expected, expected);
+
+            if (expected.isEmpty()) return;
+            Gen<SortedArrayList<Integer>> subsetGen = Gens.select(expected).map(l -> {
+                l = new ArrayList<>(l); // its immutable; make it mutable
+                l.sort(Comparator.naturalOrder());
+                return new SortedArrayList<>(l.toArray(Integer[]::new));
+            });
+            for (int i = 0; i < 10; i++)
+            {
+                var subset = subsetGen.next(rs);
+                testSerde(expected, subset);
+            }
+        });
+    }
+
+    private static void testSerde(SortedArrayList<Integer> expected, SortedArrayList<Integer> subset)
+    {
+        BitSet serialize = SortedArrays.toBitSet(expected, subset);
+        Assertions.assertEquals(subset.size(), serialize.cardinality());
+        SortedArrayList<Integer> read = SortedArrays.fromBitSet(expected, serialize, Integer[]::new);
+        Assertions.assertEquals(subset, read);
+    }
+
+    private static Gen<SortedArrayList<Integer>> simpleIntList()
+    {
+        return Gens.arrays(Integer.class, Gens.ints().all())
+                   .unique()
+                   .ofSizeBetween(0, 1 << 8)
+                   .map(a -> {
+                       Arrays.sort(a);
+                       return a;
+                   })
+                   .map(SortedArrayList::new);
     }
 
     private static int indexOfNth(String original, String search, int n)
