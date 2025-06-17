@@ -25,6 +25,7 @@ import java.util.BitSet;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.Executor;
@@ -935,6 +936,20 @@ public class TopologyManager
                                    "Min epoch: %d. Range: %s", minEpoch, this);
                 forEach.accept(topology);
             }
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (o == null || getClass() != o.getClass()) return false;
+            TopologyRange that = (TopologyRange) o;
+            return min == that.min && current == that.current && firstNonEmpty == that.firstNonEmpty && Objects.equals(topologies, that.topologies);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(min, current, firstNonEmpty, topologies);
         }
 
         @Override

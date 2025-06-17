@@ -182,6 +182,12 @@ public class Topology
         this.supersetIndexes = supersetIndexes;
     }
 
+    @VisibleForTesting
+    public Topology withEpoch(long epoch)
+    {
+        return new Topology(global, epoch, shards, ranges, staleNodes, nodeIds, nodeLookup, subsetOfRanges, supersetIndexes);
+    }
+
     public Topology global()
     {
         return global == null ? this : global;
