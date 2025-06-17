@@ -35,7 +35,6 @@ import java.util.Set;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
-import accord.local.Node;
 import accord.utils.SortedArrays.SortedArrayList;
 
 import static accord.utils.ArrayBuffers.uncached;

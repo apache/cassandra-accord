@@ -1798,7 +1798,6 @@ public class SortedArrays
     public static <T extends Comparable<? super T>> BitSet toBitSet(SortedArrays.SortedArrayList<T> src,
                                                                     SortedArrays.SortedArrayList<T> subset)
     {
-        //TODO (now): create unit test
         BitSet bitSet = new BitSet(src.size());
         for (int i = 0; i < src.size(); i++)
         {
