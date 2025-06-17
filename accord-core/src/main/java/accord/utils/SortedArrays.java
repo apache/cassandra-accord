@@ -21,6 +21,7 @@ package accord.utils;
 import java.lang.reflect.Array;
 import java.util.AbstractList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.Iterator;
@@ -1792,5 +1793,31 @@ public class SortedArrays
         int t = values[i];
         values[i] = values[j];
         values[j] = t;
+    }
+
+    public static <T extends Comparable<? super T>> BitSet toBitSet(SortedArrays.SortedArrayList<T> src,
+                                                                    SortedArrays.SortedArrayList<T> subset)
+    {
+        //TODO (now): create unit test
+        BitSet bitSet = new BitSet(src.size());
+        for (int i = 0; i < src.size(); i++)
+        {
+            if (subset.contains(src.get(i)))
+                bitSet.set(i);
+        }
+        return bitSet;
+    }
+
+    public static <T extends Comparable<? super T>> SortedArrays.SortedArrayList<T> fromBitSet(SortedArrays.SortedArrayList<T> src,
+                                                                                               BitSet bitSet,
+                                                                                               IntFunction<T[]> alloc)
+    {
+        SortedArrays.SortedArrayList.Builder<T> builder = new SortedArrays.SortedArrayList.Builder<>(alloc.apply(bitSet.cardinality()));
+        for (int i = 0; i < src.size(); i++)
+        {
+            if (bitSet.get(i))
+                builder.add(src.get(i));
+        }
+        return builder.build();
     }
 }
