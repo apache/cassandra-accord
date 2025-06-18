@@ -194,6 +194,27 @@ public class Topology
         return "Topology{" + "epoch=" + epoch + ", " + shards() + '}';
     }
 
+    public boolean isEquivalent(Topology topology)
+    {
+        if (!staleNodes.equals(topology.staleNodes))
+            return false;
+
+        if (shards.length != topology.shards.length)
+            return false;
+        for (int i = 0; i < shards.length; i++)
+        {
+            if (!shards[i].equals(topology.shards[i]))
+                return false;
+        }
+
+        return true;
+    }
+
+    public Topology cloneEquivalentWithEpoch(long epoch)
+    {
+        return new Topology(epoch, staleNodes, shards);
+    }
+
     @Override
     public boolean equals(Object o)
     {

@@ -34,6 +34,7 @@ import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topology;
+import accord.utils.Invariants;
 import accord.utils.PersistentField.Persister;
 import accord.utils.async.AsyncChain;
 import org.agrona.collections.Int2ObjectHashMap;
@@ -77,6 +78,21 @@ public interface Journal
             this.commandStores = commandStores;
             this.local = local;
             this.global = global;
+        }
+
+        public boolean isEquivalent(TopologyUpdate other)
+        {
+            boolean equivalent = global.isEquivalent(other.global);
+            if (!equivalent)
+                return false;
+            Invariants.require(commandStores.equals(other.commandStores));
+            Invariants.require(local.isEquivalent(other.local));
+            return true;
+        }
+
+        public TopologyUpdate cloneWithEquivalentEpoch(long epoch)
+        {
+            return new TopologyUpdate(commandStores, local.cloneEquivalentWithEpoch(epoch), global.cloneEquivalentWithEpoch(epoch));
         }
 
         @Override
