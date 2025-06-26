@@ -27,9 +27,24 @@ public interface Tracing
 
     default void trace(CommandStore store, String fmt, Object ... args)
     {
-        String message;
-        try { message = String.format(fmt, args); }
-        catch (Throwable t) { message = "Could not format \"" + fmt + "\" with " + Arrays.toString(args) + " (" + t.getLocalizedMessage() + ")"; }
-        trace(store, message);
+        trace(store, safeFormat(fmt, args));
     }
+
+    static String safeFormat(String fmt, Object... args)
+    {
+        try { return String.format(fmt, args); }
+        catch (Throwable t) { return "Could not format \"" + fmt + "\" with " + Arrays.toString(args) + " (" + t.getLocalizedMessage() + ")"; }
+    }
+
+    class PrintlnTracing implements Tracing
+    {
+        public final static Tracing INSTANCE = new PrintlnTracing();
+
+        @Override
+        public void trace(CommandStore store, String message)
+        {
+            System.out.println("[TRACE:" + (store != null ? store.id() : "null") + "] " + message);
+        }
+    }
+
 }

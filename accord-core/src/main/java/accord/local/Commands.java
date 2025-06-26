@@ -28,7 +28,9 @@ import org.slf4j.LoggerFactory;
 
 import accord.api.Result;
 import accord.api.RoutingKey;
+import accord.api.Tracing;
 import accord.api.VisibleForImplementation;
+import accord.impl.InMemoryCommandStore;
 import accord.local.Command.WaitingOn;
 import accord.local.Command.WaitingOn.Update;
 import accord.local.CommandStores.RangesForEpochSupplier;
@@ -921,7 +923,7 @@ public class Commands
     }
 
     /**
-     * Purge all or part of the metadata for a Commmand
+     * Purge all or part of the metadata for a Command
      */
     public static Command purge(SafeCommandStore safeStore, SafeCommand safeCommand, Command command, @Nonnull StoreParticipants participants, Cleanup cleanup, boolean notifyListeners)
     {
@@ -1432,12 +1434,20 @@ public class Commands
     private static Validated validate(@Nullable Ballot ballot, SaveStatus newStatus, Command cur, StoreParticipants participants,
                                       Route<?> addRoute, @Nullable Txn addPartialTxn, @Nullable Deps partialDeps)
     {
-        return validate(ballot, newStatus, cur, participants, addRoute, addPartialTxn, partialDeps, null, null);
+        return validate(ballot, newStatus, cur, participants, addRoute, addPartialTxn, partialDeps, null, null, null);
     }
 
     private static Validated validate(@Nullable Ballot ballot, SaveStatus newStatus, Command cur, StoreParticipants participants,
                                       Route<?> addRoute, @Nullable Txn addPartialTxn, @Nullable Deps partialDeps,
                                       @Nullable Commit.Kind commitKind, @Nullable Timestamp executeAt)
+    {
+        return validate(ballot, newStatus, cur, participants, addRoute, addPartialTxn, partialDeps, commitKind, executeAt, null);
+    }
+
+    private static Validated validate(@Nullable Ballot ballot, SaveStatus newStatus, Command cur, StoreParticipants participants,
+                                      Route<?> addRoute, @Nullable Txn addPartialTxn, @Nullable Deps partialDeps,
+                                      @Nullable Commit.Kind commitKind, @Nullable Timestamp executeAt,
+                                      Tracing tracing)
     {
         Known haveKnown = cur.known();
         Known expectKnown = newStatus.known;
@@ -1446,14 +1456,20 @@ public class Commands
         //   but it might be nice to impose this earlier, or with some clearer semantics
         Invariants.require(addRoute == participants.route());
         if (expectKnown.has(FullRoute) && !isFullRoute(cur.route()) && !isFullRoute(addRoute))
+        {
+            if (tracing != null) tracing.trace(null, "Insufficient because of route. expectKnown = %s, route = %s, addRoute = %s", expectKnown, cur.route(), addRoute);
             return INSUFFICIENT;
+        }
 
         if (expectKnown.definition().isKnown())
         {
             if (cur.txnId().isSystemTxn())
             {
                 if (cur.partialTxn() == null && addPartialTxn == null)
+                {
+                    if (tracing != null) tracing.trace(null, "Definition for system transactions are known, but not participants");
                     return INSUFFICIENT;
+                }
             }
             else if (haveKnown.definition().isKnown())
             {
@@ -1463,12 +1479,18 @@ public class Commands
                 if (partialTxn != null)
                     extraScope = extraScope.without(partialTxn.keys().toParticipants());
                 if (!containsAll(addPartialTxn, extraScope))
+                {
+                    if (tracing != null) tracing.trace(null, "Insufficient because partial txn doesn't contain all extra scope. addPartialTxn = %s, extraScope = %s", addPartialTxn, extraScope);
                     return INSUFFICIENT;
+                }
             }
             else
             {
                 if (!containsAll(addPartialTxn, participants.stillOwns()))
+                {
+                    if (tracing != null) tracing.trace(null, "Insufficient because partial txn doesn't contain all still owns. addPartialTxn = %s, stillOwns = %s", addPartialTxn, participants.stillOwns());
                     return INSUFFICIENT;
+                }
             }
         }
 
@@ -1479,6 +1501,7 @@ public class Commands
         {
             if (haveKnown.is(DepsProposedFixed) && expectKnown.is(DepsKnown) && ballot != null && ballot.equals(Ballot.ZERO) && participants.stillTouches().equals(cur.participants().touches()))
                 return UPDATE_TXN_MERGE_DEPS;
+            if (tracing != null) tracing.trace(null, "Insufficient because commit kind is StableMediumPath but conditions not met. haveKnown = %s, expectKnown = %s, ballot = %s, participants.stillTouches = %s, cur.participants.touches = %s", haveKnown, expectKnown, ballot, participants.stillTouches(), cur.participants().touches());
             return INSUFFICIENT;
         }
 
@@ -1486,7 +1509,10 @@ public class Commands
             return UPDATE_TXN_KEEP_DEPS;
 
         if (!containsAll(partialDeps, participants.stillTouches()))
+        {
+            if (tracing != null) tracing.trace(null, "Insufficient because partial deps doesn't contain all still touches. partialDeps = %s, stillTouches = %s", partialDeps, participants.stillTouches());
             return INSUFFICIENT;
+        }
 
         if (executeAt != null && expectKnown.is(DepsKnown) && haveKnown.compareTo(DepsFromCoordinator) > 0 && executeAt.equals(cur.txnId()) && !cur.acceptedOrCommitted().equals(Ballot.ZERO))
             return UPDATE_TXN_AND_DEPS_INTERSECT_STABLE;
@@ -1499,7 +1525,7 @@ public class Commands
         return adding == null ? required.isEmpty() : adding.covers(required);
     }
 
-    private static <V> boolean containsAll(Deps adding, Participants<?> required)
+    private static boolean containsAll(Deps adding, Participants<?> required)
     {
         return adding == null ? required.isEmpty() : adding.covers(required);
     }

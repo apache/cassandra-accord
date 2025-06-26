@@ -83,6 +83,7 @@ import org.agrona.collections.Int2ObjectHashMap;
 import static accord.api.ConfigurationService.EpochReady.done;
 import static accord.local.PreLoadContext.empty;
 import static accord.primitives.Routables.Slice.Minimal;
+import static accord.utils.Invariants.createIllegalState;
 import static accord.utils.Invariants.illegalState;
 import static java.util.stream.Collectors.toList;
 
@@ -699,6 +700,18 @@ public abstract class CommandStores implements AsyncExecutorFactory
         return newLocalTopology.epoch() != 1;
     }
 
+    public AsyncChain<Void> rebootstrap(Node node)
+    {
+        List<EpochReady> results = new ArrayList<>();
+        Snapshot snapshot = current;
+        for (ShardHolder shard : snapshot.shards)
+            results.add(shard.store.rebootstrap(node, shard.ranges.all(), snapshot.global.epoch()));
+        return AsyncChains.reduce(results.stream()
+                                         .map(b -> b.reads.beginAsResult())
+                                         .collect(Collectors.toList()),
+                                  Reduce.toNull());
+    }
+
     private synchronized TopologyUpdate updateTopology(Node node, Snapshot prev, Topology newTopology, boolean startSync)
     {
         Invariants.requireArgument(!newTopology.isSubset(), "Use full topology for CommandStores.updateTopology");
@@ -1042,6 +1055,30 @@ public abstract class CommandStores implements AsyncExecutorFactory
 
         nextId = maxId + 1;
         loadSnapshot(new Snapshot(shards, update.local, update.global));
+    }
+
+    public synchronized void resetTopology(Journal.TopologyUpdate update)
+    {
+        // TODO: assert
+        Snapshot current = this.current;
+        Invariants.require(update.global.epoch() == current.local.epoch());
+        ShardHolder[] shards = new ShardHolder[current.commandStores.size()];
+        int i = 0;
+        int maxId = -1;
+        for (Map.Entry<Integer, RangesForEpoch> e : current.commandStores.entrySet())
+        {
+            int storeId = e.getKey();
+            RangesForEpoch ranges = e.getValue();
+            Invariants.require(ranges != null);
+            ShardHolder store = current.shards[current.byId.get(storeId)];
+            EpochUpdateHolder holder = store.store.epochUpdateHolder;
+            holder.add(1, ranges, ranges.all());
+            shards[storeId] = store;
+            maxId = Math.max(maxId, storeId);
+        }
+
+        nextId = maxId + 1;
+        loadSnapshot(new Snapshot(shards, current.local, current.global));
     }
 
     public synchronized Supplier<EpochReady> updateTopology(Node node, Topology newTopology, boolean startSync)

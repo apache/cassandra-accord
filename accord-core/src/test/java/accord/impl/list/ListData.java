@@ -65,7 +65,8 @@ public class ListData extends TreeMap<Key, Timestamped<int[]>> implements Data
         {
             if (v.timestamp.compareTo(executeAt) >= 0)
             {
-                Invariants.require(futureReadPossible);
+                Invariants.require(futureReadPossible, "For %s, read a timestamp (%s) from future (execute at is %s)",
+                                   txnId, v.timestamp, executeAt);
                 return false;
             }
             Invariants.require(!futureReadPossible || v.timestamp.hlc() < executeAt.hlc());

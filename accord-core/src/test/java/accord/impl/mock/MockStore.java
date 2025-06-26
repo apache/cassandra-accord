@@ -151,7 +151,7 @@ public class MockStore implements DataStore
     }
 
     @Override
-    public FetchResult fetch(Node node, SafeCommandStore safeStore, Ranges ranges, SyncPoint syncPoint, FetchRanges callback)
+    public FetchResult fetch(Node node, SafeCommandStore safeStore, Ranges ranges, SyncPoint syncPoint, FetchRanges callback, RequestKind kind)
     {
         callback.starting(ranges).started(Timestamp.NONE);
         callback.fetched(ranges);

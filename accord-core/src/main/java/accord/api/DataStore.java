@@ -116,8 +116,11 @@ public interface DataStore
     /**
      * Initiate a bulk fetch of the requested ranges from the queried node, ensuring that the snapshot reflects
      * data at least as of the provided SyncPoint.
+     *
+     * If RequestKind#Sync is used, fetches only a minimal subset of data, assuming there has been some data locally
+     * (it is to up store's implementer to know how to achieve this)
      */
-    FetchResult fetch(Node node, SafeCommandStore safeStore, Ranges ranges, SyncPoint syncPoint, FetchRanges callback);
+    FetchResult fetch(Node node, SafeCommandStore safeStore, Ranges ranges, SyncPoint syncPoint, FetchRanges callback, RequestKind kind);
 
     /**
      * Logical fsync-like operation: anything written to the store prior to the invocation of this method
@@ -125,4 +128,9 @@ public interface DataStore
      * restore the DataStore to a state on or after the point at which snapshot was invoked.
      */
     AsyncResult<Void> snapshot(Ranges ranges, TxnId before);
+
+    enum RequestKind
+    {
+        Fetch, Sync
+    }
 }

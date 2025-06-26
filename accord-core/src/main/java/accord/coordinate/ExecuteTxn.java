@@ -330,6 +330,24 @@ public class ExecuteTxn extends ReadCoordinator<ReadReply>
         }
 
         @Override
+        protected void onFailure(CommitOrReadNack failReply, Throwable throwable)
+        {
+            if (!super.cancel())
+                return;
+
+            if (throwable != null)
+            {
+                reply(null, throwable);
+                node.agent().onUncaughtException(throwable);
+            }
+            else
+            {
+                reply(failReply, null);
+            }
+        }
+
+
+        @Override
         protected void reply(ReadReply reply, Throwable fail)
         {
             if (slowTimeout != null)

@@ -37,6 +37,7 @@ import accord.api.TraceEventType;
 import accord.api.Tracing;
 import accord.coordinate.CoordinationFailed;
 import accord.coordinate.ExecuteSyncPoint;
+import accord.impl.InMemoryCommandStore;
 import accord.impl.basic.NodeSink;
 import accord.impl.basic.Packet;
 import accord.impl.basic.SimulatedFault;
@@ -124,7 +125,7 @@ public class ListAgent implements Agent
     @Override
     public void onInconsistentTimestamp(Command command, Timestamp prev, Timestamp next)
     {
-        throw new AssertionError("Inconsistent execution timestamp detected for command " + command + ": " + prev + " != " + next);
+        throw new AssertionError(String.format("Inconsistent execution timestamp detected for command %s: %s != %s", command, prev, next));
     }
 
     @Override
@@ -139,11 +140,15 @@ public class ListAgent implements Agent
         onStale.accept(staleSince, ranges);
     }
 
-    private static final Set<Class<?>> expectedExceptions = new HashSet<>(Arrays.asList(SimulatedFault.class, ExecuteSyncPoint.SyncPointErased.class, CancellationException.class, TopologyManager.TopologyRetiredException.class));
+    private static final Set<Class<?>> expectedExceptions = new HashSet<>(Arrays.asList(InMemoryCommandStore.NotReadyException.class, SimulatedFault.class, ExecuteSyncPoint.SyncPointErased.class, CancellationException.class, TopologyManager.TopologyRetiredException.class));
+
     @Override
     public void onUncaughtException(Throwable t)
     {
-        if (expectedExceptions.contains(t.getClass()))
+        if (expectedExceptions.contains(t.getClass()) ||
+            (t.getCause() != null && expectedExceptions.contains(t.getCause().getClass())) ||
+            (expectedExceptions.contains(getCauseRecursive(t).getClass()))
+            )
             return;
 
         // TODO (required): why are we now seeing SnapshotAborted? Nothing inherently wrong with it, but should find out what has changed.
@@ -151,6 +156,13 @@ public class ListAgent implements Agent
             && !(t.getCause() instanceof CancellationException)
             && !(t instanceof ListStore.SnapshotAborted))
             onFailure.accept(t);
+    }
+
+    private static Throwable getCauseRecursive(Throwable t)
+    {
+        if (t.getCause() == null || t.getCause() == t)
+            return t;
+        return getCauseRecursive(t.getCause());
     }
 
     @Override

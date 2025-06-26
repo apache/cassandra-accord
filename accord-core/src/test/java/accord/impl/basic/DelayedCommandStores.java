@@ -30,6 +30,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSortedMap;
 
 import accord.api.Agent;
@@ -38,6 +39,7 @@ import accord.api.Journal;
 import accord.api.LocalListeners;
 import accord.api.ProgressLog;
 import accord.api.RoutingKey;
+import accord.impl.DefaultLocalListeners;
 import accord.impl.InMemoryCommandStore;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.InMemorySafeCommand;
@@ -195,6 +197,10 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
                 {
                     super.run();
                 }
+                catch (Throwable t)
+                {
+                    throw new IllegalStateException("Caught exception on node " + node.id(), t);
+                }
                 finally
                 {
                     Invariants.require(active == this);
@@ -224,6 +230,13 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
             this.cacheLoading = cacheLoading;
             this.journal = journal;
             restore();
+        }
+
+        @VisibleForTesting
+        public void unsafeClearForTesting()
+        {
+            super.unsafeClearForTesting();
+            ((DefaultLocalListeners) listeners).clearUnsafe();
         }
 
         protected void loadRedundantBefore(RedundantBefore redundantBefore)
@@ -330,7 +343,16 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
             Pending origin = Pending.Global.activeOrigin();
             if (RecurringPendingRunnable.isRecurring(origin) && context.primaryTxnId() != null && !context.primaryTxnId().isSystemTxn())
                 origin = null;
-            return new DelayedTask<>(() -> executeInContext(this, context, function), origin);
+            return new DelayedTask<>(() -> {
+                try
+                {
+                    return executeInContext(this, context, function);
+                }
+                catch (Throwable t)
+                {
+                    throw new IllegalStateException("Caught an exception on node " + node.id(), t);
+                }
+            }, origin);
         }
 
         private <T> AsyncChain<T> submit(DelayedTask<T> task)

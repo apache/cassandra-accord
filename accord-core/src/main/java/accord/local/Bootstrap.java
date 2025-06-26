@@ -111,12 +111,12 @@ class Bootstrap
             this.attempt = attempt;
         }
 
-        void start(SafeCommandStore safeStore)
+        TxnId start(SafeCommandStore safeStore)
         {
             if (valid.isEmpty())
             {
                 maybeComplete();
-                return;
+                return globalSyncId;
             }
 
             globalSyncId = node.nextTxnId(ExclusiveSyncPoint, Routable.Domain.Range);
@@ -129,7 +129,7 @@ class Bootstrap
                     if (failure2 != null)
                         node.agent().acceptAndWrap(null, failure2);
                 }));
-                return;
+                return globalSyncId;
             }
 
             // we fix here the ranges we use for the synthetic command, even though we may end up only finishing a subset
@@ -146,10 +146,11 @@ class Bootstrap
                      .flatMap(syncPoint -> node.withEpochAtLeast(epoch, null, () -> store.build(empty(), safeStore1 -> {
                          if (valid.isEmpty()) // we've lost ownership of the range
                              return AsyncResults.success(Ranges.EMPTY);
-                         return fetch = safeStore1.dataStore().fetch(node, safeStore1, valid, syncPoint, this);
+                         return fetch = safeStore1.dataStore().fetch(node, safeStore1, valid, syncPoint, this, kind);
                      })))
                      .flatMap(i -> i)
                      .begin(this);
+            return globalSyncId;
         }
 
         // we no longer want to fetch these ranges (perhaps we no longer own them)
@@ -357,6 +358,7 @@ class Bootstrap
         }
     }
 
+    final DataStore.RequestKind kind;
     final Node node;
     final CommandStore store;
     final long epoch;
@@ -370,6 +372,12 @@ class Bootstrap
 
     public Bootstrap(Node node, CommandStore store, long epoch, Ranges ranges)
     {
+        this(node, store, epoch, ranges, DataStore.RequestKind.Fetch);
+    }
+
+    public Bootstrap(Node node, CommandStore store, long epoch, Ranges ranges, DataStore.RequestKind kind)
+    {
+        this.kind = kind;
         this.node = node;
         this.store = store;
         this.epoch = epoch;
@@ -377,23 +385,23 @@ class Bootstrap
         this.remaining = ranges;
     }
 
-    void start(SafeCommandStore safeStore0)
+    TxnId start(SafeCommandStore safeStore0)
     {
-        restart(safeStore0, allValid, 0);
+        return restart(safeStore0, allValid, 0);
     }
 
-    private synchronized void restart(SafeCommandStore safeStore, Ranges ranges, int count)
+    private synchronized TxnId restart(SafeCommandStore safeStore, Ranges ranges, int count)
     {
         ranges = ranges.slice(allValid);
         if (ranges.isEmpty())
-            return;
+            return null;
 
         for (Attempt attempt : inProgress)
             Invariants.requireArgument(!ranges.intersects(attempt.valid));
 
         Attempt attempt = new Attempt(ranges, count);
         inProgress.add(attempt);
-        attempt.start(safeStore);
+        return attempt.start(safeStore);
     }
 
     synchronized void complete(Attempt attempt)

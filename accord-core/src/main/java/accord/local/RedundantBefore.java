@@ -68,6 +68,7 @@ import static accord.local.RedundantStatus.Property.LOCALLY_WITNESSED;
 import static accord.local.RedundantStatus.Property.PRE_BOOTSTRAP;
 import static accord.local.RedundantStatus.Property.PRE_BOOTSTRAP_OR_STALE;
 import static accord.local.RedundantStatus.Property.SHARD_APPLIED;
+import static accord.local.RedundantStatus.Property.UNSAFE_BEFORE;
 import static accord.local.RedundantStatus.WAS_OWNED_SYNCED;
 import static accord.local.RedundantStatus.WAS_OWNED_ONLY;
 import static accord.local.RedundantStatus.WAS_OWNED_RETIRED;
@@ -352,6 +353,11 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Bounds>
         static @Nonnull Boolean isShardOnlyApplied(Bounds bounds, @Nonnull Boolean prev, TxnId txnId)
         {
             return is(bounds, prev, txnId, SHARD_APPLIED);
+        }
+
+        static @Nonnull Boolean isUnsafeBefore(Bounds bounds, @Nonnull Boolean prev, TxnId txnId)
+        {
+            return is(bounds, prev, txnId, UNSAFE_BEFORE);
         }
 
         static @Nonnull Boolean is(Bounds bounds, @Nonnull Boolean prev, TxnId txnId, Property property)
@@ -788,14 +794,14 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Bounds>
     public static RedundantBefore EMPTY = new RedundantBefore();
 
     private final Ranges staleRanges, locallyRetiredRanges;
-    private final TxnId maxBootstrap, maxShardAppliedBefore, maxGcBefore;
+    private final TxnId maxBootstrap, maxShardAppliedBefore, maxGcBefore, maxUnsafeBefore;
     private final TxnId minShardAndLocallyAppliedBefore, minGcBefore;
     private final long maxStartEpoch, minLocallyRetiredEpoch;
 
     private RedundantBefore()
     {
         staleRanges = locallyRetiredRanges = Ranges.EMPTY;
-        maxBootstrap = maxShardAppliedBefore = maxGcBefore = TxnId.NONE;
+        maxBootstrap = maxShardAppliedBefore = maxGcBefore = maxUnsafeBefore = TxnId.NONE;
         minShardAndLocallyAppliedBefore = minGcBefore = TxnId.MAX;
         maxStartEpoch = 0;
         minLocallyRetiredEpoch = Long.MAX_VALUE;
@@ -806,7 +812,7 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Bounds>
         super(inclusiveEnds, starts, values);
         staleRanges = extractRanges(values, b -> b.staleUntilAtLeast != null);
         locallyRetiredRanges = extractRanges(values, Bounds::isLocallyRetired);
-        TxnId maxBootstrap = TxnId.NONE, maxGcBefore = TxnId.NONE, maxShardAppliedBefore = TxnId.NONE;
+        TxnId maxBootstrap = TxnId.NONE, maxGcBefore = TxnId.NONE, maxShardAppliedBefore = TxnId.NONE, maxUnsafeBefore = TxnId.NONE;
         TxnId minShardAndLocallyRedundantBefore = TxnId.MAX, minGcBefore = TxnId.MAX;
         long minLocallyRetiredEpoch = Long.MAX_VALUE, maxStartEpoch = 0;
         boolean hasLocallyRetired = !locallyRetiredRanges.isEmpty();
@@ -819,6 +825,11 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Bounds>
                 TxnId bootstrappedAt = bounds.maxBound(PRE_BOOTSTRAP_OR_STALE);
                 if (bootstrappedAt.compareTo(maxBootstrap) > 0)
                     maxBootstrap = bootstrappedAt;
+            }
+            {
+                TxnId unsafeBefore = bounds.maxBound(UNSAFE_BEFORE);
+                if (unsafeBefore.compareTo(maxUnsafeBefore) > 0)
+                    maxUnsafeBefore = unsafeBefore;
             }
             {
                 TxnId gcBefore = bounds.maxBound(GC_BEFORE);
@@ -843,6 +854,7 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Bounds>
         this.maxBootstrap = maxBootstrap;
         this.maxShardAppliedBefore = maxShardAppliedBefore;
         this.maxGcBefore = maxGcBefore;
+        this.maxUnsafeBefore = maxUnsafeBefore;
         this.minShardAndLocallyAppliedBefore = minShardAndLocallyRedundantBefore;
         this.minGcBefore = minGcBefore;
         this.maxStartEpoch = maxStartEpoch;
@@ -922,6 +934,22 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Bounds>
     public boolean isShardOnlyApplied(TxnId txnId, Unseekables<?> participants)
     {
         return foldl(participants, Bounds::isShardOnlyApplied, false, txnId);
+    }
+
+    public boolean isUnsafeBefore(TxnId txnId, Unseekables<?> participants)
+    {
+        // Definitely safe
+        if (maxUnsafeBefore == TxnId.NONE)
+            return false;
+
+        // TODO: Problem is that, logically, we do know that transactions after maxUnsafeBefore (txnId.compareTo(maxUnsafeBefore) > 0)
+        //  should be safe, but somehow they are not
+
+        // Maybe unsafe
+        if (participants == null)
+            return true;
+
+        return foldl(participants, Bounds::isUnsafeBefore, false, txnId);
     }
 
     /**
@@ -1253,7 +1281,7 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Bounds>
     @Override
     public String toString()
     {
-        return "gc:" + toString(GC_BEFORE) + "\nlocal:" + toString(LOCALLY_APPLIED) + "\nbootstrap:" + toString(PRE_BOOTSTRAP);
+        return "gc:" + toString(GC_BEFORE) + "\nlocal:" + toString(LOCALLY_APPLIED) + "\nbootstrap:" + toString(PRE_BOOTSTRAP) + "\nunsafeBefore:" + toString(UNSAFE_BEFORE);
     }
 
     private String toString(Property property)

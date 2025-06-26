@@ -60,7 +60,12 @@ public interface Journal
     void saveTopology(TopologyUpdate topologyUpdate, Runnable onFlush);
 
     void purge(CommandStores commandStores, EpochSupplier minEpoch);
-    void replay(CommandStores commandStores);
+
+    /**
+     * Repays all messages from journal to rehydrate CommandStores state. Returns whether it has seen (and ignored)
+     * any exceptions during replay.
+     */
+    boolean replay(CommandStores commandStores);
 
     RedundantBefore loadRedundantBefore(int store);
     NavigableMap<TxnId, Ranges> loadBootstrapBeganAt(int store);

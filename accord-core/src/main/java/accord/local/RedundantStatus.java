@@ -26,6 +26,8 @@ import static accord.local.RedundantStatus.Cmp.LT;
 import static accord.local.RedundantStatus.Cmp.LE;
 import static accord.local.RedundantStatus.Coverage.ALL;
 import static accord.local.RedundantStatus.Coverage.SOME;
+import static accord.local.RedundantStatus.Property.*;
+import static accord.local.RedundantStatus.Property.*;
 import static accord.local.RedundantStatus.Property.GC_BEFORE;
 import static accord.local.RedundantStatus.Property.LOCALLY_APPLIED;
 import static accord.local.RedundantStatus.Property.LOCALLY_SYNCED;
@@ -98,7 +100,7 @@ public class RedundantStatus
          * We have fully executed until across all a majority of replicas for the range in question,
          * but not necessarily ourselves.
          */
-        MAJORITY_APPLIED                 (false,  true,  LE),
+        MAJORITY_APPLIED                   (false,  true,  LE),
 
         /**
          * We have fully executed until across all healthy non-bootstrapping replicas for the range in question,
@@ -112,6 +114,11 @@ public class RedundantStatus
         // not persisted
         WAS_OWNED                          (false,  false, LT, LOCALLY_DEFUNCT),
         NOT_OWNED                          (false, false, LT),
+
+        /**
+         * TODO
+         */
+        UNSAFE_BEFORE                      (false, false, LT),
         ;
 
 
@@ -159,6 +166,7 @@ public class RedundantStatus
         public static final SomeStatus MAJORITY_APPLIED_ONLY = oneSlow(MAJORITY_APPLIED);
         public static final SomeStatus SHARD_APPLIED_ONLY = oneSlow(SHARD_APPLIED);
         public static final SomeStatus GC_BEFORE_AND_LOCALLY_APPLIED = multi(GC_BEFORE, LOCALLY_APPLIED);
+        public static final SomeStatus SHARD_UNSAFE_BEFORE = oneSlow(UNSAFE_BEFORE);
 
         final short encoded;
         public SomeStatus(short encoded)

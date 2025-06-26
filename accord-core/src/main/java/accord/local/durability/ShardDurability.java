@@ -487,7 +487,6 @@ public class ShardDurability
      */
     public synchronized void start()
     {
-        Invariants.require(!stop); // cannot currently restart safely
         scheduled = node.scheduler().recurring(this::tick, shardCycleTimeMicros / targetShardSplits, MICROSECONDS);
     }
 

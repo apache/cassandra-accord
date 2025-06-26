@@ -432,7 +432,7 @@ public class ListStore implements DataStore, ConfigurationService.Listener
     private final Int2ObjectHashMap<Ranges> pendingFetches = new Int2ObjectHashMap<>();
 
     @Override
-    public FetchResult fetch(Node node, SafeCommandStore safeStore, Ranges ranges, SyncPoint syncPoint, FetchRanges delegate)
+    public FetchResult fetch(Node node, SafeCommandStore safeStore, Ranges ranges, SyncPoint syncPoint, FetchRanges delegate, RequestKind kind)
     {
         int storeId = safeStore.commandStore().id();
         synchronized (this)

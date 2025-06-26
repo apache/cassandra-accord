@@ -111,7 +111,6 @@ public class GlobalDurability implements Callback<Object>
      */
     synchronized void start()
     {
-        Invariants.require(!stop); // cannot currently restart safely
         long nowMicros = node.elapsed(MICROSECONDS);
         long scheduleAt = computeNextGlobalSyncTime(nowMicros);
         scheduled = node.scheduler().selfRecurring(this::run, scheduleAt - nowMicros, MICROSECONDS);

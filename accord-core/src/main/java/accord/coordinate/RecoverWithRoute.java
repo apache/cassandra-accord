@@ -152,7 +152,7 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                 else if (!known.definition().isOrWasKnown())
                 {
                     if (witnessedByInvalidation != null && witnessedByInvalidation.compareTo(Status.PreAccepted) > 0)
-                        throw illegalState("We previously invalidated, finding a status that should be recoverable");
+                        throw illegalState("We previously invalidated %s, finding a status %s that should be recoverable", txnId, witnessedByInvalidation);
                     Invalidate.invalidate(node, txnId, query, witnessedByInvalidation != null, reportTo, callback);
                 }
                 else

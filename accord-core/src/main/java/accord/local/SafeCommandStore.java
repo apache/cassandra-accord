@@ -170,6 +170,8 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
     {
         Command command = safeCommand.current();
         StoreParticipants participants = command.participants().supplementOrMerge(command.saveStatus(), supplemental);
+        if (!commandStore().safeToRespond(command.txnId(), command.route()))
+            throw new CommandStore.NotReadyException();
         Commands.maybeCleanup(this, safeCommand, command, participants);
         return safeCommand;
     }

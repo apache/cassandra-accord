@@ -23,6 +23,8 @@ import java.util.EnumMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiFunction;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import accord.api.LocalListeners;
 import accord.api.RemoteListeners;
 import accord.local.Command;
@@ -500,5 +502,11 @@ public class DefaultLocalListeners implements LocalListeners
             }, commandStore.agent());
             txnListeners = BTreeRemoval.remove(txnListeners, TxnListeners::compareListeners, entry);
         }
+    }
+
+    @VisibleForTesting
+    public void clearUnsafe()
+    {
+        txnListeners = BTree.empty();
     }
 }

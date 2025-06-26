@@ -179,7 +179,7 @@ public enum Cleanup
         FullRoute<?> route = Route.castToFullRoute(participants.route());
         // we must not use executeAt here if input == PARTIAL because with partial compaction we might be merging the combination of some old executeAt with a later partial status
         RedundantStatus redundant = redundantBefore.status(txnId, input == FULL && saveStatus.known.is(ApplyAtKnown) ? executeAt : null, route);
-        Invariants.require(redundant.none(NOT_OWNED),"Command %s that is being loaded is not owned by this shard on route %s", txnId, route);
+        Invariants.require(redundant.none(NOT_OWNED), "Command %s that is being loaded is not owned by this shard on route %s", txnId, route);
 
         if (redundant.none(LOCALLY_REDUNDANT))
             return NO;

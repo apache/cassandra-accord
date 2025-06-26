@@ -42,6 +42,7 @@ import accord.utils.async.AsyncResult;
 
 import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Set;
@@ -73,6 +74,7 @@ import static accord.local.RedundantStatus.SomeStatus.LOCALLY_WITNESSED_ONLY;
 import static accord.local.RedundantStatus.SomeStatus.MAJORITY_APPLIED_ONLY;
 import static accord.local.RedundantStatus.SomeStatus.PRE_BOOTSTRAP_ONLY;
 import static accord.local.RedundantStatus.SomeStatus.SHARD_APPLIED_ONLY;
+import static accord.local.RedundantStatus.SomeStatus.SHARD_UNSAFE_BEFORE;
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_ADJACENT;
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.primitives.Timestamp.Flag.HLC_BOUND;
@@ -169,6 +171,18 @@ public abstract class CommandStore implements SequentialAsyncExecutor
     private final Set<Bootstrap> bootstraps = Collections.synchronizedSet(new DeterministicIdentitySet<>());
     @Nullable private RejectBefore rejectBefore;
 
+    public void unsafeClearForTesting()
+    {
+        progressLog.clear();
+        bootstraps.clear();
+        rangesForEpoch = null;
+        bootstrapBeganAt = emptyBootstrapBeganAt();
+        redundantBefore = RedundantBefore.EMPTY;
+        maxConflicts = MaxConflicts.EMPTY;
+        maxDecidedRX = MaxDecidedRX.EMPTY;
+        safeToRead = emptySafeToRead();
+    }
+
     static class WaitingOnSync
     {
         final AsyncResults.SettableResult<Void> whenDone;
@@ -252,7 +266,8 @@ public abstract class CommandStore implements SequentialAsyncExecutor
         return maxDecidedRX;
     }
 
-    final void unsafeSetRangesForEpoch(RangesForEpoch newRangesForEpoch)
+    @VisibleForTesting
+    public final void unsafeSetRangesForEpoch(RangesForEpoch newRangesForEpoch)
     {
         rangesForEpoch = nonNull(newRangesForEpoch);
     }
@@ -546,6 +561,34 @@ public abstract class CommandStore implements SequentialAsyncExecutor
                 metadata.flatMap(e -> e.data).beginAsResult(),
                 metadata.flatMap(e -> e.reads).beginAsResult());
         };
+    }
+
+    public boolean safeToRespond(TxnId txnId, Unseekables<?> participants)
+    {
+        return !unsafeGetRedundantBefore().isUnsafeBefore(txnId, participants);
+    }
+
+    protected EpochReady rebootstrap(Node node, Ranges ranges, long epoch)
+    {
+        AsyncResult<EpochReady> metadata = submit(empty(), safeStore -> {
+            Bootstrap bootstrap = new Bootstrap(node, this, epoch, ranges, DataStore.RequestKind.Sync);
+            bootstraps.add(bootstrap);
+            // If rebootstrap can grab a later timestamp for subsequent attempts, but this timestamp is enough for us
+            // to establish what's safe to read
+            TxnId unsafeBefore = bootstrap.start(safeStore);
+            logger.debug("Rebootstrap timestamp on {}@{}: {}", id, node.id(), unsafeBefore);
+            unsafeUpsertRedundantBefore(RedundantBefore.create(ranges, unsafeBefore, SHARD_UNSAFE_BEFORE));
+            return new EpochReady(epoch, null, null,
+                                  bootstrap.data,
+                                  bootstrap.reads);
+        });
+
+        AsyncResult<Void> readyToCoordinate = readyToCoordinate(ranges, epoch);
+        return new EpochReady(epoch,
+                              metadata.<Void>map(ignore -> null).beginAsResult(),
+                              readyToCoordinate.beginAsResult(),
+                              metadata.flatMap(e -> e.data).beginAsResult(),
+                              metadata.flatMap(e -> e.reads).beginAsResult());
     }
 
     /**
@@ -894,5 +937,12 @@ public abstract class CommandStore implements SequentialAsyncExecutor
     public NodeCommandStoreService node()
     {
         return node;
+    }
+
+    /**
+     * Thrown when command store is not ready to serve the request for a given range.
+     */
+    public static class NotReadyException extends RuntimeException
+    {
     }
 }

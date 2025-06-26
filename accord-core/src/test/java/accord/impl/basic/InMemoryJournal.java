@@ -132,6 +132,12 @@ public class InMemoryJournal implements Journal
         this.node = node;
     }
 
+    public void dropAll()
+    {
+        diffsPerCommandStore.clear();
+        fieldStates.clear();
+    }
+
     @Override
     public Command loadCommand(int commandStoreId, TxnId txnId, RedundantBefore redundantBefore, DurableBefore durableBefore)
     {
@@ -595,7 +601,7 @@ public class InMemoryJournal implements Journal
     }
 
     @Override
-    public void replay(CommandStores commandStores)
+    public boolean replay(CommandStores commandStores)
     {
         for (Map.Entry<Integer, NavigableMap<TxnId, Diffs>> diffEntry : diffsPerCommandStore.entrySet())
         {
@@ -618,6 +624,7 @@ public class InMemoryJournal implements Journal
                 AsyncChains.getUnchecked(res);
             }
         }
+        return true;
     }
 
     static class TruncatedList extends ArrayList<Diff>

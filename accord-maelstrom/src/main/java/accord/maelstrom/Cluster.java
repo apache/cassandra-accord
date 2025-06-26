@@ -394,7 +394,7 @@ public class Cluster implements Scheduler
         @Override public Iterator<TopologyUpdate> replayTopologies() { throw new IllegalStateException("Not impelemented"); }
         @Override public void saveTopology(TopologyUpdate topologyUpdate, Runnable onFlush)  { throw new IllegalStateException("Not impelemented"); }
         @Override public void purge(CommandStores commandStores, EpochSupplier minEpoch)  { throw new IllegalStateException("Not impelemented"); }
-        @Override public void replay(CommandStores commandStores)  { throw new IllegalStateException("Not impelemented"); }
+        @Override public boolean replay(CommandStores commandStores)  { throw new IllegalStateException("Not impelemented"); }
         @Override public RedundantBefore loadRedundantBefore(int store) { throw new IllegalStateException("Not impelemented"); }
         @Override public NavigableMap<TxnId, Ranges> loadBootstrapBeganAt(int store) { throw new IllegalStateException("Not impelemented"); }
         @Override public NavigableMap<Timestamp, Ranges> loadSafeToRead(int store) { throw new IllegalStateException("Not impelemented"); }

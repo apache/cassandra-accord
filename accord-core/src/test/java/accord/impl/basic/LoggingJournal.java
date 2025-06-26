@@ -124,9 +124,9 @@ public class LoggingJournal implements Journal
     }
 
     @Override
-    public void replay(CommandStores commandStores)
+    public boolean replay(CommandStores commandStores)
     {
-        delegate.replay(commandStores);
+        return delegate.replay(commandStores);
     }
 
     @Override

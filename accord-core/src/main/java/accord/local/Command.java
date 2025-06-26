@@ -1655,7 +1655,7 @@ public abstract class Command implements ICommand
                 case DepsUnknown:
                 case DepsErased:
                 case NoDeps:
-                    Invariants.require(deps == null);
+                    Invariants.require(deps == null, "Deps should have been null, but were %s", deps);
                     break;
                 case DepsFromCoordinator:
                 case DepsProposedFixed:

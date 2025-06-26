@@ -90,7 +90,6 @@ import org.agrona.collections.ObjectHashSet;
 import static accord.local.Cleanup.Input.FULL;
 import static accord.local.KeyHistory.ASYNC;
 import static accord.local.KeyHistory.NONE;
-import static accord.local.KeyHistory.SYNC;
 import static accord.local.RedundantStatus.Coverage.ALL;
 import static accord.local.StoreParticipants.Filter.LOAD;
 import static accord.primitives.Known.KnownRoute.MaybeRoute;
@@ -832,7 +831,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                     }
                     if (isShadowedByPreBootstrap) continue;
                 }
-                illegalState();
+                illegalState(String.format("Prev: %s, updated: %s, command: %s", prev, updated, command));
             }
         }
     }
@@ -1124,11 +1123,10 @@ public abstract class InMemoryCommandStore extends CommandStore
      * Replay and loading logic
      */
 
-    // redundantBefore, durableBefore, newBootstrapBeganAt, safeToRead, rangesForEpoch are
-    // not replayed here. It is assumed that persistence on the application side will ensure
-    // they are brought up to latest values _before_ replay.
-    public void clearForTesting()
+    @Override
+    public void unsafeClearForTesting()
     {
+        super.unsafeClearForTesting();
         Invariants.require(current == null);
         progressLog.clear();
         commands.clear();
