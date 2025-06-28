@@ -606,22 +606,27 @@ public class CommandChange
 
         public String toString()
         {
-            return "Builder {" +
-                   "txnId=" + txnId
-                   + safeToString(PARTICIPANTS, flags, participants)
-                   + safeToString(SAVE_STATUS, flags, saveStatus)
-                   + safeToString(DURABILITY, flags, durability)
-                   + safeToString(EXECUTE_AT, flags, executeAt)
-                   + safeToString(PROMISED, flags, promised)
-                   + safeToString(ACCEPTED, flags, acceptedOrCommitted)
-                   + safeToString(PARTIAL_TXN, flags, partialTxn)
-                   + safeToString(PARTIAL_DEPS, flags, partialDeps)
-                   + safeToString(WAITING_ON, flags, waitingOn)
-                   + safeToString(MIN_UNIQUE_HLC, flags, minUniqueHlc)
-                   + safeToString(EXECUTES_AT_LEAST, flags, executesAtLeast)
-                   + safeToString(WRITES, flags, writes)
-                   + safeToString(RESULT, flags, result)
-                   + safeToString(CLEANUP, flags, cleanup)
+            return toString("");
+        }
+
+        public String toString(String separator)
+        {
+            return "Builder {"
+                   + separator + "txnId=" + txnId
+                   + separator + safeToString(PARTICIPANTS, flags, participants)
+                   + separator + safeToString(SAVE_STATUS, flags, saveStatus)
+                   + separator + safeToString(DURABILITY, flags, durability)
+                   + separator + safeToString(EXECUTE_AT, flags, executeAt)
+                   + separator + safeToString(PROMISED, flags, promised)
+                   + separator + safeToString(ACCEPTED, flags, acceptedOrCommitted)
+                   + separator + safeToString(PARTIAL_TXN, flags, partialTxn)
+                   + separator + safeToString(PARTIAL_DEPS, flags, partialDeps)
+                   + separator + safeToString(WAITING_ON, flags, waitingOn)
+                   + separator + safeToString(MIN_UNIQUE_HLC, flags, minUniqueHlc)
+                   + separator + safeToString(EXECUTES_AT_LEAST, flags, executesAtLeast)
+                   + separator + safeToString(WRITES, flags, writes)
+                   + separator + safeToString(RESULT, flags, result)
+                   + separator + safeToString(CLEANUP, flags, cleanup)
                    + '}';
         }
 
