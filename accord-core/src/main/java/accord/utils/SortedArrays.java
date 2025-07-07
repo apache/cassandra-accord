@@ -1794,27 +1794,27 @@ public class SortedArrays
         values[j] = t;
     }
 
-    public static <T extends Comparable<? super T>> SimpleBitSet toSimpleBitSet(SortedArrays.SortedArrayList<T> src,
+    public static <T extends Comparable<? super T>> SimpleBitSet toSimpleBitSet(SortedArrays.SortedArrayList<T> superset,
                                                                                 SortedArrays.SortedArrayList<T> subset)
     {
-        SimpleBitSet bitSet = new SimpleBitSet(src.size());
-        for (int i = 0; i < src.size(); i++)
+        SimpleBitSet bitSet = new SimpleBitSet(superset.size());
+        for (int i = 0; i < superset.size(); i++)
         {
-            if (subset.contains(src.get(i)))
+            if (subset.contains(superset.get(i)))
                 bitSet.set(i);
         }
         return bitSet;
     }
 
-    public static <T extends Comparable<? super T>> SortedArrays.SortedArrayList<T> fromSimpleBitSet(SortedArrays.SortedArrayList<T> src,
+    public static <T extends Comparable<? super T>> SortedArrays.SortedArrayList<T> fromSimpleBitSet(SortedArrays.SortedArrayList<T> superset,
                                                                                                      SimpleBitSet bitSet,
                                                                                                      IntFunction<T[]> alloc)
     {
         SortedArrays.SortedArrayList.Builder<T> builder = new SortedArrays.SortedArrayList.Builder<>(alloc.apply(bitSet.getSetBitCount()));
-        for (int i = 0; i < src.size(); i++)
+        for (int i = 0; i < superset.size(); i++)
         {
             if (bitSet.get(i))
-                builder.add(src.get(i));
+                builder.add(superset.get(i));
         }
         return builder.build();
     }
