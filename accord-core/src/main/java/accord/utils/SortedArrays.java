@@ -21,7 +21,6 @@ package accord.utils;
 import java.lang.reflect.Array;
 import java.util.AbstractList;
 import java.util.Arrays;
-import java.util.BitSet;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.Iterator;
@@ -1795,10 +1794,10 @@ public class SortedArrays
         values[j] = t;
     }
 
-    public static <T extends Comparable<? super T>> BitSet toBitSet(SortedArrays.SortedArrayList<T> src,
-                                                                    SortedArrays.SortedArrayList<T> subset)
+    public static <T extends Comparable<? super T>> SimpleBitSet toSimpleBitSet(SortedArrays.SortedArrayList<T> src,
+                                                                                SortedArrays.SortedArrayList<T> subset)
     {
-        BitSet bitSet = new BitSet(src.size());
+        SimpleBitSet bitSet = new SimpleBitSet(src.size());
         for (int i = 0; i < src.size(); i++)
         {
             if (subset.contains(src.get(i)))
@@ -1807,11 +1806,11 @@ public class SortedArrays
         return bitSet;
     }
 
-    public static <T extends Comparable<? super T>> SortedArrays.SortedArrayList<T> fromBitSet(SortedArrays.SortedArrayList<T> src,
-                                                                                               BitSet bitSet,
-                                                                                               IntFunction<T[]> alloc)
+    public static <T extends Comparable<? super T>> SortedArrays.SortedArrayList<T> fromSimpleBitSet(SortedArrays.SortedArrayList<T> src,
+                                                                                                     SimpleBitSet bitSet,
+                                                                                                     IntFunction<T[]> alloc)
     {
-        SortedArrays.SortedArrayList.Builder<T> builder = new SortedArrays.SortedArrayList.Builder<>(alloc.apply(bitSet.cardinality()));
+        SortedArrays.SortedArrayList.Builder<T> builder = new SortedArrays.SortedArrayList.Builder<>(alloc.apply(bitSet.getSetBitCount()));
         for (int i = 0; i < src.size(); i++)
         {
             if (bitSet.get(i))

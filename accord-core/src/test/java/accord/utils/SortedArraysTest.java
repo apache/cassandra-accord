@@ -341,9 +341,9 @@ class SortedArraysTest
 
     private static void testSerde(SortedArrayList<Integer> expected, SortedArrayList<Integer> subset)
     {
-        BitSet serialize = SortedArrays.toBitSet(expected, subset);
-        Assertions.assertEquals(subset.size(), serialize.cardinality());
-        SortedArrayList<Integer> read = SortedArrays.fromBitSet(expected, serialize, Integer[]::new);
+        var serialize = SortedArrays.toSimpleBitSet(expected, subset);
+        Assertions.assertEquals(subset.size(), serialize.getSetBitCount());
+        SortedArrayList<Integer> read = SortedArrays.fromSimpleBitSet(expected, serialize, Integer[]::new);
         Assertions.assertEquals(subset, read);
     }
 
@@ -351,7 +351,7 @@ class SortedArraysTest
     {
         return Gens.arrays(Integer.class, Gens.ints().all())
                    .unique()
-                   .ofSizeBetween(0, 1 << 8)
+                   .ofSizeBetween(0, 1 << 9)
                    .map(a -> {
                        Arrays.sort(a);
                        return a;
