@@ -1798,11 +1798,18 @@ public class SortedArrays
                                                                                 SortedArrays.SortedArrayList<T> subset)
     {
         SimpleBitSet bitSet = new SimpleBitSet(superset.size());
+        int subsetIndex = 0;
         for (int i = 0; i < superset.size(); i++)
         {
-            if (subset.contains(superset.get(i)))
-                bitSet.set(i);
+            long ri = SortedArrays.findNextIntersection(superset.array, i, subset.array, subsetIndex);
+            if (ri < 0)
+                break;
+            i = (int) (ri);
+            subsetIndex = (int) (ri >>> 32);
+
+            bitSet.set(i);
         }
+        Invariants.require(bitSet.getSetBitCount() <= subset.size(), "Generated bit set is larger than the subset!");
         return bitSet;
     }
 
