@@ -665,30 +665,30 @@ public class CommandChange
         public String toString(String separator)
         {
             return "Builder {"
-                   + separator + "txnId=" + txnId
-                   + separator + safeToString(PARTICIPANTS, flags, participants)
-                   + separator + safeToString(SAVE_STATUS, flags, saveStatus)
-                   + separator + safeToString(DURABILITY, flags, durability)
-                   + separator + safeToString(EXECUTE_AT, flags, executeAt)
-                   + separator + safeToString(PROMISED, flags, promised)
-                   + separator + safeToString(ACCEPTED, flags, acceptedOrCommitted)
-                   + separator + safeToString(PARTIAL_TXN, flags, partialTxn)
-                   + separator + safeToString(PARTIAL_DEPS, flags, partialDeps)
-                   + separator + safeToString(WAITING_ON, flags, waitingOn)
-                   + separator + safeToString(MIN_UNIQUE_HLC, flags, minUniqueHlc)
-                   + separator + safeToString(EXECUTES_AT_LEAST, flags, executesAtLeast)
-                   + separator + safeToString(WRITES, flags, writes)
-                   + separator + safeToString(RESULT, flags, result)
-                   + separator + safeToString(CLEANUP, flags, cleanup)
+                   + "txnId=" + txnId
+                   + safeToString(PARTICIPANTS, flags, separator, participants)
+                   + safeToString(SAVE_STATUS, flags, separator, saveStatus)
+                   + safeToString(DURABILITY, flags, separator, durability)
+                   + safeToString(EXECUTE_AT, flags, separator, executeAt)
+                   + safeToString(PROMISED, flags, separator, promised)
+                   + safeToString(ACCEPTED, flags, separator, acceptedOrCommitted)
+                   + safeToString(PARTIAL_TXN, flags, separator, partialTxn)
+                   + safeToString(PARTIAL_DEPS, flags, separator, partialDeps)
+                   + safeToString(WAITING_ON, flags, separator, waitingOn)
+                   + safeToString(MIN_UNIQUE_HLC, flags, separator, minUniqueHlc)
+                   + safeToString(EXECUTES_AT_LEAST, flags, separator, executesAtLeast)
+                   + safeToString(WRITES, flags, separator, writes)
+                   + safeToString(RESULT, flags, separator, result)
+                   + safeToString(CLEANUP, flags, separator, cleanup)
                    + '}';
         }
 
-        private static Object safeToString(Field field, int flags, Object obj)
+        private static Object safeToString(Field field, int flags, String separator, Object obj)
         {
             if (!isChanged(field, flags))
                 return "";
 
-            return ", " + field.name().toLowerCase() + '=' + safeToString(isNull(field, flags), obj);
+            return separator + field.name().toLowerCase() + '=' + safeToString(isNull(field, flags), obj);
         }
 
         private static Object safeToString(boolean isNull, Object obj)
