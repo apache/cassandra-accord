@@ -1818,7 +1818,7 @@ public class SortedArrays
                                                                                                      IntFunction<T[]> alloc)
     {
         SortedArrays.SortedArrayList.Builder<T> builder = new SortedArrays.SortedArrayList.Builder<>(alloc.apply(bitSet.getSetBitCount()));
-        for (int i = 0; i < superset.size(); i++)
+        for (int i = bitSet.firstSetBit(); i >= 0 ; i = bitSet.nextSetBit(i + 1))
         {
             if (bitSet.get(i))
                 builder.add(superset.get(i));
