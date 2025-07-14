@@ -309,6 +309,8 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
                 Invariants.require(addValue.maxEpoch() <= epoch());
                 return wrap.persist(addValue, newValue);
             }
+
+            @Override public boolean shouldPersist(DurableBefore addValue, DurableBefore newValue) { return wrap.shouldPersist(addValue, newValue); }
             @Override public DurableBefore load() { return wrap.load(); }
         };
     }
