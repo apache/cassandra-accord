@@ -632,8 +632,10 @@ public class Cluster
             RandomSource random = randomSupplier.get();
             Cluster sinks = new Cluster(randomSupplier.get(), messageListener, queueSupplier, checkFailures, nodeMap::get, journalMap::get, () -> topologyFactory.rf, responseSink);
             for (Node node : nodeMap.values())
-                node.configService().registerListener((ListStore)node.commandStores().dataStore());
-
+            {
+                node.configService().registerListener((ListStore) node.commandStores().dataStore());
+                node.configService().registerListener(node.durability());
+            }
             TopologyUpdates topologyUpdates = new TopologyUpdates(executorMap::get);
             TopologyRandomizer.Listener schemaApply = t -> {
                 for (Node node : nodeMap.values())

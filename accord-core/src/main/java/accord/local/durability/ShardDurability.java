@@ -482,6 +482,13 @@ public class ShardDurability
         scheduled = node.scheduler().recurring(this::tick, shardCycleTimeMicros / targetShardSplits, MICROSECONDS);
     }
 
+    public synchronized void reconfigure(int targetShardSplits, long newShardCycleTime, TimeUnit units)
+    {
+        this.targetShardSplits = BitUtil.findNextPositivePowerOfTwo(targetShardSplits);
+        this.shardCycleTimeMicros = units.toMicros(newShardCycleTime);
+        Invariants.require(scheduled == null);
+    }
+
     /**
      * Schedule regular invocations of CoordinateShardDurable and CoordinateGloballyDurable
      */

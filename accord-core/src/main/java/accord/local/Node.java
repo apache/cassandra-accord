@@ -226,7 +226,6 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
         scheduler.recurring(() -> commandStores.forEachCommandStore(store -> store.progressLog.maybeNotify()), 1, SECONDS);
         scheduler.recurring(timeouts::maybeNotify, 100, MILLISECONDS);
         configService.registerListener(this);
-        configService.registerListener(durabilityService);
     }
 
     public Map<TxnId, AsyncResult<? extends Outcome>> coordinating()
