@@ -23,7 +23,6 @@ import java.util.TreeSet;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
@@ -37,6 +36,7 @@ public class PersistentField<Input, Saved>
     public interface Persister<Input, Saved>
     {
         AsyncResult<?> persist(Input addValue, Saved newValue);
+        default boolean shouldPersist(Input addValue, Saved newValue) { return true; }
         Saved load();
     }
 
@@ -92,7 +92,6 @@ public class PersistentField<Input, Saved>
     private AsyncResult<?> mergeAndUpdate(@Nullable Input inputValue, @Nonnull BiFunction<Input, Saved, Saved> merge)
     {
         Invariants.nonNull(merge, "merge cannot be null");
-        AsyncResult.Settable<Void> result = AsyncResults.settable();
         Saved startingValue = latestPending;
         if (startingValue == null)
         {
@@ -100,28 +99,36 @@ public class PersistentField<Input, Saved>
             startingValue = currentValue.get();
         }
         Saved newValue = merge.apply(inputValue, startingValue);
-        this.latestPending = newValue;
-        int id = ++nextId;
-        pending.add(new Pending<>(id, newValue));
 
-        AsyncResult<?> pendingWrite = persister.persist(inputValue, newValue);
-        pendingWrite.invoke((success, fail) -> {
-            synchronized (this)
-            {
-                complete.add(id);
-                boolean upd = false;
-                Saved latest = null;
-                while (!complete.isEmpty() && pending.peek().id == complete.first())
+        if (persister.shouldPersist(inputValue, newValue))
+        {
+            this.latestPending = newValue;
+            int id = ++nextId;
+            pending.add(new Pending<>(id, newValue));
+
+            AsyncResult.Settable<Void> result = AsyncResults.settable();
+            AsyncResult<?> pendingWrite = persister.persist(inputValue, newValue);
+            pendingWrite.invoke((success, fail) -> {
+                synchronized (this)
                 {
-                    latest = pending.poll().saving;
-                    complete.pollFirst();
-                    upd = true;
+                    complete.add(id);
+                    boolean upd = false;
+                    Saved latest = null;
+                    while (!complete.isEmpty() && pending.peek().id == complete.first())
+                    {
+                        latest = pending.poll().saving;
+                        complete.pollFirst();
+                        upd = true;
+                    }
+                    if (upd) set.accept(latest);
                 }
-                if (upd) set.accept(latest);
                 result.setSuccess(null);
-            }
-        });
-
-        return result;
+            });
+            return result;
+        }
+        else
+        {
+            return AsyncResults.success(null);
+        }
     }
 }
