@@ -271,6 +271,16 @@ public class BTreeReducingIntervalMap<K extends Comparable<? super K>, V>
         {
             return this.start.compareTo(that.start);
         }
+
+        @Override
+        public String toString()
+        {
+            return "e{" +
+                   "start=" + start +
+                   ", value=" + value +
+                   ", hasValue=" + hasValue +
+                   '}';
+        }
     }
 
     protected static <K extends Comparable<? super K>, V, M extends BTreeReducingIntervalMap<K, V>> M mergeIntervals(
