@@ -92,7 +92,6 @@ public class PersistentField<Input, Saved>
     private AsyncResult<?> mergeAndUpdate(@Nullable Input inputValue, @Nonnull BiFunction<Input, Saved, Saved> merge)
     {
         Invariants.nonNull(merge, "merge cannot be null");
-        AsyncResult.Settable<Void> result = AsyncResults.settable();
         Saved startingValue = latestPending;
         if (startingValue == null)
         {
@@ -100,10 +99,13 @@ public class PersistentField<Input, Saved>
             startingValue = currentValue.get();
         }
         Saved newValue = merge.apply(inputValue, startingValue);
+        if (newValue == startingValue)
+            return AsyncResults.success(null);
         this.latestPending = newValue;
         int id = ++nextId;
         pending.add(new Pending<>(id, newValue));
 
+        AsyncResult.Settable<Void> result = AsyncResults.settable();
         AsyncResult<?> pendingWrite = persister.persist(inputValue, newValue);
         pendingWrite.invoke((success, fail) -> {
             synchronized (this)

@@ -219,7 +219,14 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
         this.listeners = remoteListenersFactory.apply(this);
         this.agent = agent;
         this.random = random;
-        this.persistDurableBefore = new PersistentField<>(() -> durableBefore, DurableBefore::merge, safeDurableBeforePersister(durableBeforePersister), this::setPersistedDurableBefore);
+        this.persistDurableBefore = new PersistentField<>(() -> durableBefore,
+                                                          (input, prev) -> {
+                                                              if (input.fullyContainedIn(prev))
+                                                                  return prev;
+                                                              return DurableBefore.merge(input, prev);
+                                                          },
+                                                          safeDurableBeforePersister(durableBeforePersister),
+                                                          this::setPersistedDurableBefore);
         this.commandStores = factory.create(this, agent, dataSupplier.get(), random.fork(), journal, shardDistributor, progressLogFactory.apply(this), localListenersFactory.apply(this));
         this.durabilityService = new DurabilityService(this);
         // TODO (desired): make frequency configurable
