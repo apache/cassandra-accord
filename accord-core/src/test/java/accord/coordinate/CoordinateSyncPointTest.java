@@ -25,6 +25,7 @@ import accord.coordinate.ExecuteFlag.ExecuteFlags;
 import accord.impl.IntKey;
 import accord.impl.TestAgent;
 import accord.impl.mock.MockCluster;
+import accord.local.CommandStore;
 import accord.local.Node;
 import accord.messages.Accept;
 import accord.messages.Apply;
@@ -103,11 +104,14 @@ class CoordinateSyncPointTest
         var await = CoordinateSyncPoint.exclusive(node, new TxnId(1, node.now(), 0, Txn.Kind.ExclusiveSyncPoint, Routable.Domain.Range, node.id()), Ranges.single(removed))
                                        .flatMap(syncPoint ->
                                                         // the test uses an executor that runs everything right away, so this gets called outside the CommandStore
-                                                        node.commandStores().forId(0).build(() -> {
-                                                            ExecuteSyncPoint execute = new ExecuteSyncPoint(node, syncPoint, emptySet(), null, 1);
-                                                            execute.start();
-                                                            return execute;
-                                                        })
+                                               {
+                                                   CommandStore store = node.commandStores().forId(0);
+                                                   return store.build(() -> {
+                                                       ExecuteSyncPoint execute = new ExecuteSyncPoint(node, syncPoint, emptySet(), store, 1);
+                                                       execute.start();
+                                                       return execute;
+                                                   });
+                                               }
                                                ).flatMap(Function.identity()).beginAsResult();
 
         return AsyncChains.getUnchecked(await).syncPoint;
