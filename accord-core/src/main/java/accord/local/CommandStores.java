@@ -644,7 +644,7 @@ public abstract class CommandStores implements AsyncExecutorFactory
         }
     }
 
-    protected final StoreSupplier supplier;
+    final StoreSupplier supplier;
     final ShardDistributor shardDistributor;
     final Journal journal;
     volatile Snapshot current;
