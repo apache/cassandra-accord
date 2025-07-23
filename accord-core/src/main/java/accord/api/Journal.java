@@ -81,13 +81,11 @@ public interface Journal
     class TopologyUpdate
     {
         public final Int2ObjectHashMap<CommandStores.RangesForEpoch> commandStores;
-        public final Topology local;
         public final Topology global;
 
-        public TopologyUpdate(@Nonnull Int2ObjectHashMap<CommandStores.RangesForEpoch> commandStores, @Nonnull Topology local, @Nonnull Topology global)
+        public TopologyUpdate(@Nonnull Int2ObjectHashMap<CommandStores.RangesForEpoch> commandStores, @Nonnull Topology global)
         {
             this.commandStores = commandStores;
-            this.local = local;
             this.global = global;
         }
 
@@ -97,13 +95,12 @@ public interface Journal
             if (!equivalent)
                 return false;
             Invariants.require(commandStores.equals(other.commandStores));
-            Invariants.require(local.isEquivalent(other.local));
             return true;
         }
 
         public TopologyUpdate cloneWithEquivalentEpoch(long epoch)
         {
-            return new TopologyUpdate(commandStores, local.cloneEquivalentWithEpoch(epoch), global.cloneEquivalentWithEpoch(epoch));
+            return new TopologyUpdate(commandStores, global.cloneEquivalentWithEpoch(epoch));
         }
 
         @Override
@@ -112,21 +109,20 @@ public interface Journal
             if (this == object) return true;
             if (object == null || getClass() != object.getClass()) return false;
             TopologyUpdate update = (TopologyUpdate) object;
-            return Objects.equals(commandStores, update.commandStores) && Objects.equals(local, update.local) && Objects.equals(global, update.global);
+            return Objects.equals(commandStores, update.commandStores) && Objects.equals(global, update.global);
         }
 
         @Override
         public int hashCode()
         {
-            return Objects.hash(commandStores, local, global);
+            return Objects.hash(commandStores, global);
         }
 
         @Override
         public String toString()
         {
             return "TopologyUpdate{" +
-                   "local=" + local +
-                   ", commandStores=" + commandStores +
+                   "commandStores=" + commandStores +
                    ", global=" + global +
                    '}';
         }

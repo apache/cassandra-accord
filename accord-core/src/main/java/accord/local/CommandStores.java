@@ -567,6 +567,7 @@ public abstract class CommandStores implements AsyncExecutorFactory
 
     public static class Snapshot extends Journal.TopologyUpdate implements Iterable<ShardHolder>
     {
+        public final Topology local;
         final ShardHolder[] shards;
         final Int2IntHashMap byId;
         private final int[] indexForRange;
@@ -574,7 +575,8 @@ public abstract class CommandStores implements AsyncExecutorFactory
 
         public Snapshot(ShardHolder[] shards, Topology local, Topology global)
         {
-            super(asMap(shards), local, global);
+            super(asMap(shards), global);
+            this.local = local;
             this.shards = shards;
             this.byId = new Int2IntHashMap(shards.length, Hashing.DEFAULT_LOAD_FACTOR, -1);
             int count = 0;
@@ -619,7 +621,7 @@ public abstract class CommandStores implements AsyncExecutorFactory
         // This method exists to ensure we do not hold references to command stores
         public Journal.TopologyUpdate asTopologyUpdate()
         {
-            return new Journal.TopologyUpdate(commandStores, local, global);
+            return new Journal.TopologyUpdate(commandStores, global);
         }
 
         private static Int2ObjectHashMap<CommandStores.RangesForEpoch> asMap(ShardHolder[] shards)
@@ -642,7 +644,7 @@ public abstract class CommandStores implements AsyncExecutorFactory
         }
     }
 
-    final StoreSupplier supplier;
+    protected final StoreSupplier supplier;
     final ShardDistributor shardDistributor;
     final Journal journal;
     volatile Snapshot current;
@@ -661,6 +663,11 @@ public abstract class CommandStores implements AsyncExecutorFactory
                          ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, CommandStore.Factory shardFactory)
     {
         this(new StoreSupplier(time, agent, store, random, progressLogFactory, listenersFactory, shardFactory, journal), shardDistributor, journal);
+    }
+
+    public Node.Id nodeId()
+    {
+        return supplier.node.id();
     }
 
     public Topology local()
@@ -1035,7 +1042,7 @@ public abstract class CommandStores implements AsyncExecutorFactory
         }
 
         nextId = maxId + 1;
-        loadSnapshot(new Snapshot(shards, update.local, update.global));
+        loadSnapshot(new Snapshot(shards, update.global.forNode(supplier.node.id()).trim(), update.global));
     }
 
     public synchronized Supplier<EpochReady> updateTopology(Node node, Topology newTopology, boolean startSync)

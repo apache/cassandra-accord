@@ -115,7 +115,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
             shards[i++] = shard;
         }
 
-        loadSnapshot(new Snapshot(shards, lastUpdate.local, lastUpdate.global));
+        loadSnapshot(new Snapshot(shards, lastUpdate.global.forNode(nodeId()), lastUpdate.global));
     }
 
     protected void loadSnapshot(Snapshot nextSnapshot)
