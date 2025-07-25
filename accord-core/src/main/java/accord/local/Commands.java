@@ -28,7 +28,6 @@ import org.slf4j.LoggerFactory;
 
 import accord.api.Result;
 import accord.api.RoutingKey;
-import accord.api.Tracing;
 import accord.api.VisibleForImplementation;
 import accord.local.Command.WaitingOn;
 import accord.local.Command.WaitingOn.Update;
@@ -1438,20 +1437,12 @@ public class Commands
     private static Validated validate(@Nullable Ballot ballot, SaveStatus newStatus, Command cur, StoreParticipants participants,
                                       Route<?> addRoute, @Nullable Txn addPartialTxn, @Nullable Deps partialDeps)
     {
-        return validate(ballot, newStatus, cur, participants, addRoute, addPartialTxn, partialDeps, null, null, null);
+        return validate(ballot, newStatus, cur, participants, addRoute, addPartialTxn, partialDeps, null, null);
     }
 
     private static Validated validate(@Nullable Ballot ballot, SaveStatus newStatus, Command cur, StoreParticipants participants,
                                       Route<?> addRoute, @Nullable Txn addPartialTxn, @Nullable Deps partialDeps,
                                       @Nullable Commit.Kind commitKind, @Nullable Timestamp executeAt)
-    {
-        return validate(ballot, newStatus, cur, participants, addRoute, addPartialTxn, partialDeps, commitKind, executeAt, null);
-    }
-
-    private static Validated validate(@Nullable Ballot ballot, SaveStatus newStatus, Command cur, StoreParticipants participants,
-                                      Route<?> addRoute, @Nullable Txn addPartialTxn, @Nullable Deps partialDeps,
-                                      @Nullable Commit.Kind commitKind, @Nullable Timestamp executeAt,
-                                      Tracing tracing)
     {
         Known haveKnown = cur.known();
         Known expectKnown = newStatus.known;
@@ -1461,7 +1452,6 @@ public class Commands
         Invariants.require(addRoute == participants.route());
         if (expectKnown.has(FullRoute) && !isFullRoute(cur.route()) && !isFullRoute(addRoute))
         {
-            if (tracing != null) tracing.trace(null, "Insufficient because of route. expectKnown = %s, route = %s, addRoute = %s", expectKnown, cur.route(), addRoute);
             return INSUFFICIENT;
         }
 
@@ -1470,10 +1460,7 @@ public class Commands
             if (cur.txnId().isSystemTxn())
             {
                 if (cur.partialTxn() == null && addPartialTxn == null)
-                {
-                    if (tracing != null) tracing.trace(null, "Definition for system transactions are known, but not participants");
                     return INSUFFICIENT;
-                }
             }
             else if (haveKnown.definition().isKnown())
             {
@@ -1483,18 +1470,12 @@ public class Commands
                 if (partialTxn != null)
                     extraScope = extraScope.without(partialTxn.keys().toParticipants());
                 if (!containsAll(addPartialTxn, extraScope))
-                {
-                    if (tracing != null) tracing.trace(null, "Insufficient because partial txn doesn't contain all extra scope. addPartialTxn = %s, extraScope = %s", addPartialTxn, extraScope);
                     return INSUFFICIENT;
-                }
             }
             else
             {
                 if (!containsAll(addPartialTxn, participants.stillOwns()))
-                {
-                    if (tracing != null) tracing.trace(null, "Insufficient because partial txn doesn't contain all still owns. addPartialTxn = %s, stillOwns = %s", addPartialTxn, participants.stillOwns());
                     return INSUFFICIENT;
-                }
             }
         }
 
@@ -1505,7 +1486,6 @@ public class Commands
         {
             if (haveKnown.is(DepsProposedFixed) && expectKnown.is(DepsKnown) && ballot != null && ballot.equals(Ballot.ZERO) && participants.stillTouches().equals(cur.participants().touches()))
                 return UPDATE_TXN_MERGE_DEPS;
-            if (tracing != null) tracing.trace(null, "Insufficient because commit kind is StableMediumPath but conditions not met. haveKnown = %s, expectKnown = %s, ballot = %s, participants.stillTouches = %s, cur.participants.touches = %s", haveKnown, expectKnown, ballot, participants.stillTouches(), cur.participants().touches());
             return INSUFFICIENT;
         }
 
@@ -1514,7 +1494,6 @@ public class Commands
 
         if (!containsAll(partialDeps, participants.stillTouches()))
         {
-            if (tracing != null) tracing.trace(null, "Insufficient because partial deps doesn't contain all still touches. partialDeps = %s, stillTouches = %s", partialDeps, participants.stillTouches());
             return INSUFFICIENT;
         }
 
