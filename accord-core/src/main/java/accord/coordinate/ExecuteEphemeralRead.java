@@ -223,31 +223,12 @@ public class ExecuteEphemeralRead extends ReadCoordinator<ReadReply>
         }
 
         @Override
-        protected boolean cancel()
+        public void timeout()
         {
-            if (!super.cancel())
-                return false;
+            super.timeout();
 
             // TODO (desired): if we fail to commit locally we can submit a slow/medium path request
             callback.failure(node.id(), new Timeout(txnId, route.homeKey(), "Could not promptly read from local coordinator"));
-            return true;
-        }
-
-        @Override
-        protected void onFailure(CommitOrReadNack failReply, Throwable throwable)
-        {
-            if (!super.cancel())
-                return;
-
-            if (throwable != null)
-            {
-                reply(null, throwable);
-                node.agent().onUncaughtException(throwable);
-            }
-            else
-            {
-                reply(failReply, null);
-            }
         }
 
         @Override
