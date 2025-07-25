@@ -111,7 +111,7 @@ public class BeginRecovery extends TxnRequest.WithUnsynced<BeginRecovery.Recover
     {
         StoreParticipants participants = StoreParticipants.update(safeStore, route, minEpoch, txnId, executeAtOrTxnIdEpoch);
         if (!safeStore.safeToCoordinate(txnId, participants.touches()))
-            throw new CommandStore.TransactionLostException();
+            throw new CommandStore.NotReadyException();
 
         SafeCommand safeCommand = safeStore.get(txnId, participants);
         Commands.AcceptOutcome outcome = Commands.recover(safeStore, safeCommand, participants, txnId, partialTxn, ballot);

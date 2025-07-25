@@ -537,14 +537,9 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
         return commandStore().unsafeGetRedundantBefore();
     }
 
-    public boolean isRebootstrapping()
-    {
-        return commandStore().unsafeGetRebootstrapping();
-    }
-
     public boolean safeToCoordinate(TxnId txnId, Unseekables<?> participants)
     {
-        return !isRebootstrapping() || safeToReadAt(txnId).intersects(participants);
+        return !commandStore().unsafeGetRebootstrapping() || safeToReadAt(txnId).intersects(participants);
     }
 
     public DurableBefore durableBefore()

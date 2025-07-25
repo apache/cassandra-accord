@@ -574,11 +574,17 @@ public abstract class CommandStore implements SequentialAsyncExecutor
         };
     }
 
-    public boolean safeToRespond(TxnId txnId, Unseekables<?> participants)
-    {
-        return !unsafeGetRedundantBefore().isUnsafeBefore(txnId, participants);
-    }
-
+    /**
+     * Rebootstraps some of the ranges for the command store. It follows steps similar to what
+     * bootstrap would go through, with two differences:
+     *
+     *   * Marks pre-rebootstrap transactions with LOCALLY_LOST status, which means the node can not
+     *     safely participate in pre-rebootstrap transactions, _even_ if they're coming after the node is
+     *     done bootstrapping.
+     *   * Marks the store as rebootstrapping, which will preclude rebootstrapping node from responding
+     *     to PreAccept, Accept, and BeginRecovery and computing dependencies while node is being rebootstrapped,
+     *     and ranges aren't ready to coordinate.
+     */
     protected EpochReady rebootstrap(Node node, Ranges ranges, long epoch)
     {
         AsyncResult<EpochReady> metadata = submit(empty(), safeStore -> {
@@ -589,7 +595,7 @@ public abstract class CommandStore implements SequentialAsyncExecutor
             Bootstrap bootstrap = new Bootstrap(node, this, epoch, ranges, DataStore.RequestKind.Sync);
             bootstraps.add(bootstrap);
             // If rebootstrap can grab a later timestamp for subsequent attempts, but this timestamp is enough for us
-            // to establish what's safe to read
+            // to establish which transactions, for which ranges the node can safely participate in).
             TxnId unsafeBefore = bootstrap.start(safeStore);
             logger.debug("Rebootstrap timestamp on {}@{}: {}", id, node.id(), unsafeBefore);
             safeStore.unsafeUpsertRedundantBefore(RedundantBefore.create(ranges, unsafeBefore, LOCALLY_INCOMPLETE_ONLY));

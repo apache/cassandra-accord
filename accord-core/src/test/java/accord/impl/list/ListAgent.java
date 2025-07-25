@@ -141,15 +141,19 @@ public class ListAgent implements Agent
         onStale.accept(staleSince, ranges);
     }
 
-    private static final Set<Class<?>> expectedExceptions = new HashSet<>(Arrays.asList(CommandStore.TransactionLostException.class, SimulatedFault.class, ExecuteSyncPoint.SyncPointErased.class, CancellationException.class, TopologyManager.TopologyRetiredException.class));
+    private static final Set<Class<?>> expectedExceptions = new HashSet<>(Arrays.asList(CommandStore.TransactionLostException.class,
+                                                                                        CommandStore.NotReadyException.class,
+                                                                                        SimulatedFault.class,
+                                                                                        ExecuteSyncPoint.SyncPointErased.class,
+                                                                                        CancellationException.class,
+                                                                                        TopologyManager.TopologyRetiredException.class));
 
     @Override
     public void onUncaughtException(Throwable t)
     {
         if (expectedExceptions.contains(t.getClass()) ||
             (t.getCause() != null && expectedExceptions.contains(t.getCause().getClass())) ||
-            (expectedExceptions.contains(getCauseRecursive(t).getClass()))
-            )
+            (expectedExceptions.contains(getCauseRecursive(t).getClass())))
             return;
 
         // TODO (required): why are we now seeing SnapshotAborted? Nothing inherently wrong with it, but should find out what has changed.

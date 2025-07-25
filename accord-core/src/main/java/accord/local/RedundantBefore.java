@@ -936,19 +936,6 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Bounds>
         return foldl(participants, Bounds::isShardOnlyApplied, false, txnId);
     }
 
-    public boolean isUnsafeBefore(TxnId txnId, Unseekables<?> participants)
-    {
-        // Definitely safe
-        if (maxLocallyIncomplete == TxnId.NONE)
-            return false;
-
-        // Maybe unsafe
-        if (participants == null)
-            return txnId.compareTo(maxLocallyIncomplete) <= 0;
-
-        return foldl(participants, Bounds::isLocallyIncomplete, false, txnId);
-    }
-
     /**
      * RedundantStatus.REDUNDANT overrides PRE_BOOTSTRAP; to avoid complicating that state machine,
      * for cases where we care independently about the overall pre-bootstrap state we have a separate mechanism

@@ -103,7 +103,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     {
         StoreParticipants participants = StoreParticipants.update(safeStore, scope, minEpoch, txnId, txnId.epoch(), executeAt.epoch());
         if (!safeStore.safeToCoordinate(txnId, participants.touches()))
-            throw new CommandStore.TransactionLostException();
+            throw new CommandStore.NotReadyException();
 
         SafeCommand safeCommand = safeStore.get(txnId, participants);
         AcceptOutcome outcome = Commands.accept(safeStore, safeCommand, participants, txnId, kind, ballot, scope, executeAt, partialDeps);
