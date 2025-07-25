@@ -781,9 +781,13 @@ public class Cluster
                     for (CommandStore store : stores.all())
                     {
                         DelayedCommandStore store1 = ((DelayedCommandStore) store);
+                        CommandStores.RangesForEpoch beforeRestore = store1.unsafeGetRangesForEpoch();
                         store1.unsafeClearForTesting();
                         if (lastUpdate != null)
                             store1.unsafeSetRangesForEpoch(lastUpdate.commandStores.get(store.id()));
+                        CommandStores.RangesForEpoch afterRestore = store1.unsafeGetRangesForEpoch();
+                        if (!beforeRestore.equals(afterRestore))
+                            Invariants.require(beforeRestore.equals(afterRestore));
                     }
 
                     if (lastUpdate != null)
@@ -948,7 +952,7 @@ public class Cluster
             int i = random.nextInt(remaining.size());
             Id id = remaining.get(i);
             CommandStore[] stores = nodeMap.get(id).commandStores().all();
-            if (!Stream.of(stores).anyMatch(CommandStore::isBootstrapping))
+            if (!Stream.of(stores).anyMatch(cs -> cs.isBootstrapping() || cs.isRebootstrapping()))
                 return id;
 
             remaining.set(i, remaining.get(remaining.size() - 1));
@@ -1078,51 +1082,6 @@ public class Cluster
         void start();
         @Override
         void close();
-    }
-
-    private static abstract class AbstractService implements Service, Runnable
-    {
-        protected final Node node;
-        protected final RandomSource rs;
-        private Scheduled scheduled;
-
-        protected AbstractService(Node node, RandomSource rs)
-        {
-            this.node = node;
-            this.rs = rs;
-        }
-
-        @Override
-        public void start()
-        {
-            Invariants.require(scheduled == null, "Start already called...");
-            this.scheduled = node.scheduler().recurring(this, 1, SECONDS);
-        }
-
-        protected abstract void doRun() throws Exception;
-
-        @Override
-        public final void run()
-        {
-            try
-            {
-                doRun();
-            }
-            catch (Throwable t)
-            {
-                node.agent().onUncaughtException(t);
-            }
-        }
-
-        @Override
-        public void close()
-        {
-            if (scheduled != null)
-            {
-                scheduled.cancel();
-                scheduled = null;
-            }
-        }
     }
 
     private static BiFunction<Id, Id, Link> partition(List<Id> nodes, RandomSource random, int rf, BiFunction<Id, Id, Link> up)

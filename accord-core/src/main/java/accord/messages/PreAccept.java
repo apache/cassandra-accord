@@ -26,6 +26,7 @@ import org.slf4j.LoggerFactory;
 
 import accord.coordinate.ExecuteFlag.ExecuteFlags;
 import accord.local.Command;
+import accord.local.CommandStore;
 import accord.local.Commands;
 import accord.local.DepsCalculator;
 import accord.local.KeyHistory;
@@ -110,6 +111,9 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
     public PreAcceptReply apply(SafeCommandStore safeStore)
     {
         StoreParticipants participants = StoreParticipants.update(safeStore, route, minEpoch, txnId, acceptEpoch);
+        if (!safeStore.safeToCoordinate(txnId, participants.touches()))
+            throw new CommandStore.TransactionLostException();
+
         SafeCommand safeCommand = safeStore.get(txnId, participants);
         Commands.AcceptOutcome outcome = Commands.preaccept(safeStore, safeCommand, participants, txnId, partialTxn, partialDeps, hasCoordinatorVote);
         Command command = safeCommand.current();

@@ -456,9 +456,9 @@ public class TopologyRandomizer
             state.shards = newShards;
             Shard[] testShards = type.apply(state, random);
             Arrays.sort(testShards, (a, b) -> a.range.compareTo(b.range));
-            if (!everyShardHasOverlaps(oldShards, testShards)
-                || reassignsRanges(current, testShards, previouslyReplicated)
-            )
+            if (anyWaitingForRebootstrap(nodeLookup, testShards) &&
+                !everyShardHasOverlaps(oldShards, testShards)
+                || reassignsRanges(current, testShards, previouslyReplicated))
             {
                 ++rejectedMutations;
             }
@@ -473,7 +473,6 @@ public class TopologyRandomizer
             return null;
 
         Topology nextTopology = new Topology(current.epoch + 1, newShards);
-
         Map<Id, Ranges> nextAdditions = getAdditions(current, nextTopology);
         for (Map.Entry<Id, Ranges> entry : nextAdditions.entrySet())
         {
@@ -496,6 +495,21 @@ public class TopologyRandomizer
         return nextTopology;
     }
 
+    private boolean anyWaitingForRebootstrap(Function<Id, Node> nodeLookup, Shard[] out)
+    {
+        for (Shard shard : out)
+        {
+            for (Id node : shard.nodes)
+            {
+                for (CommandStore store : nodeLookup.apply(node).commandStores().all())
+                {
+                    if (store.isRebootstrapping())
+                        return true;
+                }
+            }
+        }
+        return false;
+    }
     private boolean everyShardHasOverlaps(Shard[] in, Shard[] out)
     {
         int i = 0, o = 0;

@@ -42,7 +42,6 @@ import accord.utils.async.AsyncResult;
 
 import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Set;
@@ -74,7 +73,7 @@ import static accord.local.RedundantStatus.SomeStatus.LOCALLY_WITNESSED_ONLY;
 import static accord.local.RedundantStatus.SomeStatus.MAJORITY_APPLIED_ONLY;
 import static accord.local.RedundantStatus.SomeStatus.PRE_BOOTSTRAP_ONLY;
 import static accord.local.RedundantStatus.SomeStatus.SHARD_APPLIED_ONLY;
-import static accord.local.RedundantStatus.SomeStatus.SHARD_UNSAFE_BEFORE;
+import static accord.local.RedundantStatus.SomeStatus.LOCALLY_INCOMPLETE_ONLY;
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_ADJACENT;
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.primitives.Timestamp.Flag.HLC_BOUND;
@@ -152,6 +151,7 @@ public abstract class CommandStore implements SequentialAsyncExecutor
     private MaxDecidedRX maxDecidedRX = MaxDecidedRX.EMPTY;
     private int maxConflictsUpdates = 0;
     protected RangesForEpoch rangesForEpoch;
+    private boolean rebootstrapping = false;
 
     /**
      * safeToRead is related to RedundantBefore, but a distinct concept.
@@ -363,6 +363,17 @@ public abstract class CommandStore implements SequentialAsyncExecutor
         redundantBefore = RedundantBefore.merge(redundantBefore, addRedundantBefore);
     }
 
+    protected void unsafeSetRebootstrapping(boolean val)
+    {
+        rebootstrapping = val;
+    }
+
+    protected boolean unsafeGetRebootstrapping()
+    {
+        return rebootstrapping;
+    }
+
+
     /**
      * This method may be invoked on a non-CommandStore thread
      */
@@ -571,13 +582,17 @@ public abstract class CommandStore implements SequentialAsyncExecutor
     protected EpochReady rebootstrap(Node node, Ranges ranges, long epoch)
     {
         AsyncResult<EpochReady> metadata = submit(empty(), safeStore -> {
+            safeStore.unsafeSetRebootstrapping(true);
+            // Mark unsafe to read first
+            safeStore.setSafeToRead(purgeHistory(safeToRead, ranges));
+
             Bootstrap bootstrap = new Bootstrap(node, this, epoch, ranges, DataStore.RequestKind.Sync);
             bootstraps.add(bootstrap);
             // If rebootstrap can grab a later timestamp for subsequent attempts, but this timestamp is enough for us
             // to establish what's safe to read
             TxnId unsafeBefore = bootstrap.start(safeStore);
             logger.debug("Rebootstrap timestamp on {}@{}: {}", id, node.id(), unsafeBefore);
-            unsafeUpsertRedundantBefore(RedundantBefore.create(ranges, unsafeBefore, SHARD_UNSAFE_BEFORE));
+            safeStore.unsafeUpsertRedundantBefore(RedundantBefore.create(ranges, unsafeBefore, LOCALLY_INCOMPLETE_ONLY));
             return new EpochReady(epoch, null, null,
                                   bootstrap.data,
                                   bootstrap.reads);
@@ -586,7 +601,13 @@ public abstract class CommandStore implements SequentialAsyncExecutor
         AsyncResult<Void> readyToCoordinate = readyToCoordinate(ranges, epoch);
         return new EpochReady(epoch,
                               metadata.<Void>map(ignore -> null).beginAsResult(),
-                              readyToCoordinate.beginAsResult(),
+                              readyToCoordinate.flatMap(ignore -> {
+                                  return this.<Void>submit(empty(), safeStore -> {
+                                      logger.debug("Finished rebootstrap timestamp on {}@{}, marking safe", id, node.id());
+                                      safeStore.unsafeSetRebootstrapping(false);
+                                      return null;
+                                  });
+                              }).beginAsResult(),
                               metadata.flatMap(e -> e.data).beginAsResult(),
                               metadata.flatMap(e -> e.reads).beginAsResult());
     }
@@ -924,6 +945,11 @@ public abstract class CommandStore implements SequentialAsyncExecutor
         return !bootstraps.isEmpty();
     }
 
+    public boolean isRebootstrapping()
+    {
+        return rebootstrapping;
+    }
+
     public static NavigableMap<TxnId, Ranges> emptyBootstrapBeganAt()
     {
         return ImmutableSortedMap.of(TxnId.NONE, Ranges.EMPTY);
@@ -940,7 +966,14 @@ public abstract class CommandStore implements SequentialAsyncExecutor
     }
 
     /**
-     * Thrown when command store is not ready to serve the request for a given range.
+     * Command store has lost information about this transaction and can not respond to queries related to it.
+     */
+    public static class TransactionLostException extends RuntimeException
+    {
+    }
+
+    /**
+     * Exception indicating that the node is not ready to compute dependencies due to rebootstrap
      */
     public static class NotReadyException extends RuntimeException
     {

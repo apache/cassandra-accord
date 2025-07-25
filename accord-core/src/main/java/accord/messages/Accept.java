@@ -23,6 +23,7 @@ import javax.annotation.Nullable;
 
 import accord.coordinate.ExecuteFlag.ExecuteFlags;
 import accord.local.Command;
+import accord.local.CommandStore;
 import accord.local.Commands;
 import accord.local.Commands.AcceptOutcome;
 import accord.local.DepsCalculator;
@@ -42,6 +43,7 @@ import accord.primitives.Status;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
+import accord.utils.IndexedTriFold;
 import accord.utils.Invariants;
 import accord.utils.UnhandledEnum;
 import accord.utils.async.Cancellable;
@@ -100,6 +102,9 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     public AcceptReply apply(SafeCommandStore safeStore)
     {
         StoreParticipants participants = StoreParticipants.update(safeStore, scope, minEpoch, txnId, txnId.epoch(), executeAt.epoch());
+        if (!safeStore.safeToCoordinate(txnId, participants.touches()))
+            throw new CommandStore.TransactionLostException();
+
         SafeCommand safeCommand = safeStore.get(txnId, participants);
         AcceptOutcome outcome = Commands.accept(safeStore, safeCommand, participants, txnId, kind, ballot, scope, executeAt, partialDeps);
         switch (outcome)

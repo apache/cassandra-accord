@@ -170,8 +170,6 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
     {
         Command command = safeCommand.current();
         StoreParticipants participants = command.participants().supplementOrMerge(command.saveStatus(), supplemental);
-        if (!commandStore().safeToRespond(command.txnId(), command.route()))
-            throw new CommandStore.NotReadyException();
         Commands.maybeCleanup(this, safeCommand, command, participants);
         return safeCommand;
     }
@@ -341,6 +339,11 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
     protected void unsafeUpsertRedundantBefore(RedundantBefore addRedundantBefore)
     {
         commandStore().unsafeUpsertRedundantBefore(addRedundantBefore);
+    }
+
+    protected void unsafeSetRebootstrapping(boolean val)
+    {
+        commandStore().unsafeSetRebootstrapping(val);
     }
 
     public void setBootstrapBeganAt(NavigableMap<TxnId, Ranges> newBootstrapBeganAt)
@@ -532,6 +535,16 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
     public RedundantBefore redundantBefore()
     {
         return commandStore().unsafeGetRedundantBefore();
+    }
+
+    public boolean isRebootstrapping()
+    {
+        return commandStore().unsafeGetRebootstrapping();
+    }
+
+    public boolean safeToCoordinate(TxnId txnId, Unseekables<?> participants)
+    {
+        return !isRebootstrapping() || safeToReadAt(txnId).intersects(participants);
     }
 
     public DurableBefore durableBefore()

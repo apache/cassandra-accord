@@ -71,6 +71,7 @@ import accord.utils.async.Cancellable;
 import static accord.api.Journal.CommandUpdate;
 import static accord.utils.Invariants.Paranoia.LINEAR;
 import static accord.utils.Invariants.ParanoiaCostFactor.HIGH;
+import static accord.utils.Invariants.illegalArgument;
 
 public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
 {
@@ -350,7 +351,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
                 }
                 catch (Throwable t)
                 {
-                    throw new IllegalStateException("Caught an exception on node " + node.id(), t);
+                    throw illegalArgument(t, "Caught an exception on %d@%d", id, node.id().id);
                 }
             }, origin);
         }

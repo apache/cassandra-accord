@@ -37,12 +37,12 @@ import accord.api.TraceEventType;
 import accord.api.Tracing;
 import accord.coordinate.CoordinationFailed;
 import accord.coordinate.ExecuteSyncPoint;
-import accord.impl.InMemoryCommandStore;
 import accord.impl.basic.NodeSink;
 import accord.impl.basic.Packet;
 import accord.impl.basic.SimulatedFault;
 import accord.impl.mock.Network;
 import accord.local.Command;
+import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.SafeCommandStore;
 import accord.local.TimeService;
@@ -63,6 +63,7 @@ import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
 import static accord.local.Node.Id.NONE;
+import static accord.utils.Invariants.illegalState;
 import static com.google.common.base.Functions.identity;
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -125,7 +126,7 @@ public class ListAgent implements Agent
     @Override
     public void onInconsistentTimestamp(Command command, Timestamp prev, Timestamp next)
     {
-        throw new AssertionError(String.format("Inconsistent execution timestamp detected for command %s: %s != %s", command, prev, next));
+        illegalState("Inconsistent execution timestamp detected for command %s: %s != %s", command, prev, next);
     }
 
     @Override
@@ -140,7 +141,7 @@ public class ListAgent implements Agent
         onStale.accept(staleSince, ranges);
     }
 
-    private static final Set<Class<?>> expectedExceptions = new HashSet<>(Arrays.asList(InMemoryCommandStore.NotReadyException.class, SimulatedFault.class, ExecuteSyncPoint.SyncPointErased.class, CancellationException.class, TopologyManager.TopologyRetiredException.class));
+    private static final Set<Class<?>> expectedExceptions = new HashSet<>(Arrays.asList(CommandStore.TransactionLostException.class, SimulatedFault.class, ExecuteSyncPoint.SyncPointErased.class, CancellationException.class, TopologyManager.TopologyRetiredException.class));
 
     @Override
     public void onUncaughtException(Throwable t)

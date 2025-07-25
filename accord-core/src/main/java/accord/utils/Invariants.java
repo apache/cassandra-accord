@@ -79,7 +79,7 @@ public class Invariants
 
     public static IllegalStateException illegalState(String msg)
     {
-         throw createIllegalState(msg);
+        throw createIllegalState(msg);
     }
 
     public static IllegalStateException illegalState(String fmt, Object... args)
@@ -100,6 +100,11 @@ public class Invariants
     public static IllegalArgumentException illegalArgument(String fmt, Object ... args)
     {
         throw new IllegalArgumentException(String.format(fmt, args));
+    }
+
+    public static IllegalArgumentException illegalArgument(Throwable cause, String fmt, Object ... args)
+    {
+        throw new IllegalArgumentException(String.format(fmt, args), cause);
     }
 
     private static IllegalArgumentException illegalArgument()
