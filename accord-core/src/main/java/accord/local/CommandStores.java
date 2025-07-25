@@ -1065,15 +1065,42 @@ public abstract class CommandStores implements AsyncExecutorFactory
         ShardHolder[] shards = new ShardHolder[current.commandStores.size()];
         int i = 0;
         int maxId = -1;
-        for (Map.Entry<Integer, RangesForEpoch> e : current.commandStores.entrySet())
+        for (Map.Entry<Integer, RangesForEpoch> e : update.commandStores.entrySet())
         {
             int storeId = e.getKey();
             RangesForEpoch ranges = e.getValue();
             Invariants.require(ranges != null);
-            ShardHolder store = current.shards[current.byId.get(storeId)];
-            EpochUpdateHolder holder = store.store.epochUpdateHolder;
-            holder.add(1, ranges, ranges.all());
-            shards[storeId] = store;
+            ShardHolder shard = new ShardHolder(current.byId(storeId), ranges);
+            EpochUpdateHolder holder = shard.store.epochUpdateHolder;
+            ranges.forEach(new BiConsumer<Long, Ranges>()
+            {
+                RangesForEpoch accumulator = null;
+                Ranges prev = null;
+                public void accept(Long epoch, Ranges ranges)
+                {
+                    if (accumulator == null)
+                        accumulator = new RangesForEpoch(epoch, ranges);
+                    else
+                        accumulator = accumulator.withRanges(epoch, ranges);
+
+                    Ranges additions = Ranges.EMPTY;
+                    Ranges removals = Ranges.EMPTY;
+                    if (prev != null)
+                    {
+                        additions = ranges.without(prev);
+                        removals = prev.without(ranges);
+                    }
+
+                    if (!additions.isEmpty())
+                        holder.add(epoch, accumulator, additions);
+                    if (!removals.isEmpty())
+                        holder.remove(epoch, accumulator, removals);
+                    shard.store.unsafeUpdateRangesForEpoch();
+                    prev = ranges;
+                }
+            });
+
+            shards[storeId] = shard;
             maxId = Math.max(maxId, storeId);
         }
 
