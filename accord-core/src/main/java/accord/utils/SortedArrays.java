@@ -1299,6 +1299,42 @@ public class SortedArrays
         return found >= 0 ? found : -1 - to;
     }
 
+    public static <T1, T2> int binarySearch(List<T2> in, int from, int to, T1 find, AsymmetricComparator<T1, T2> comparator, Search op)
+    {
+        int found = -1;
+        while (from < to)
+        {
+            int i = (from + to) >>> 1;
+            int c = comparator.compare(find, in.get(i));
+            if (c < 0)
+            {
+                to = i;
+            }
+            else if (c > 0)
+            {
+                from = i + 1;
+            }
+            else
+            {
+                switch (op)
+                {
+                    default: throw new IllegalStateException();
+                    case FAST:
+                        return i;
+
+                    case CEIL:
+                        to = found = i;
+                        break;
+
+                    case FLOOR:
+                        found = i;
+                        from = i + 1;
+                }
+            }
+        }
+        return found >= 0 ? found : -1 - to;
+    }
+
     public interface IndirectComparator<T1, T2>
     {
         int compare(T1 t1, T2 t2, int t2Index);
