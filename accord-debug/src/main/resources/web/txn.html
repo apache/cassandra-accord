@@ -1,0 +1,615 @@
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transaction Search - Multi-Host Query</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .header {
+            background: white;
+            padding: 1rem;
+            margin-bottom: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .search-info {
+            margin-bottom: 1rem;
+            padding: 1rem;
+            background: #e7f3ff;
+            border-radius: 4px;
+            border-left: 4px solid #007bff;
+        }
+        
+        .txn-id-display {
+            font-family: monospace;
+            background: #f8f9fa;
+            padding: 0.5rem;
+            border-radius: 4px;
+            margin: 0.5rem 0;
+            font-size: 1.1em;
+        }
+        
+        .loading, .error {
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+            text-align: center;
+        }
+        
+        .loading {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #b8daff;
+        }
+        
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .hosts-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        
+        .host-section {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            width: 400px;
+            flex-shrink: 0;
+        }
+        
+        .host-header {
+            background: #495057;
+            color: white;
+            padding: 1rem;
+            border-radius: 8px 8px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .host-name {
+            font-weight: 500;
+        }
+        
+        .host-status {
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            font-size: 0.8em;
+            font-weight: 500;
+        }
+        
+        .host-status.success {
+            background: #28a745;
+            color: white;
+        }
+        
+        .host-status.error {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .host-status.loading {
+            background: #ffc107;
+            color: #212529;
+        }
+        
+        .host-content {
+            padding: 1rem;
+        }
+        
+        .transaction-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        
+        .transaction-entry {
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border-left: 4px solid #007bff;
+        }
+        
+        .transaction-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .command-store-id {
+            background: #6c757d;
+            color: white;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            font-size: 0.8em;
+            font-weight: 500;
+        }
+        
+        .save-status {
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            font-size: 0.8em;
+            font-weight: 500;
+        }
+        
+        .save-status.applied {
+            background: #28a745;
+            color: white;
+        }
+        
+        .save-status.committed {
+            background: #17a2b8;
+            color: white;
+        }
+        
+        .save-status.accepted {
+            background: #ffc107;
+            color: #212529;
+        }
+        
+        .field-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 0.25rem;
+        }
+        
+        .field-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.25rem 0;
+            border-bottom: 1px solid #f1f3f4;
+            font-size: 0.85em;
+        }
+        
+        .field-item:last-child {
+            border-bottom: none;
+        }
+        
+        .field-label {
+            font-weight: 500;
+            color: #495057;
+            flex-shrink: 0;
+            margin-right: 1rem;
+        }
+        
+        .field-value {
+            font-family: monospace;
+            color: #212529;
+            word-break: break-all;
+            text-align: right;
+        }
+        
+        .field-value.timestamp {
+            cursor: help;
+            text-decoration: underline dotted;
+        }
+        
+        .no-data {
+            text-align: center;
+            color: #6c757d;
+            padding: 2rem;
+            font-style: italic;
+        }
+        
+        .summary-stats {
+            margin-bottom: 2rem;
+            padding: 1rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .stat-item {
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #007bff;
+        }
+        
+        .stat-label {
+            font-size: 0.9em;
+            color: #6c757d;
+        }
+        
+        .blocked-by-section {
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 2px solid #dc3545;
+        }
+        
+        .blocked-by-header {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 0.5rem;
+            border-radius: 4px;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            font-size: 0.9em;
+        }
+        
+        .blocked-by-entry {
+            background: #fff5f5;
+            border: 1px solid #f5c6cb;
+            border-radius: 4px;
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .blocking-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+            padding-bottom: 0.25rem;
+            border-bottom: 1px solid #f5c6cb;
+        }
+        
+        .blocking-txn {
+            font-family: monospace;
+            background: #f1f3f4;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            font-size: 0.8em;
+        }
+        
+        .blocking-depth {
+            background: #6c757d;
+            color: white;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            font-size: 0.7em;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div v-if="loading" class="loading">
+            Searching across all hosts...
+        </div>
+
+        <div v-if="error" class="error">
+            {{ error }}
+        </div>
+
+        <div v-if="!loading" class="summary-stats">
+            <div class="stat-item">
+                <div class="stat-value">{{ totalHosts }}</div>
+                <div class="stat-label">Total Hosts</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value">{{ hostsWithData }}</div>
+                <div class="stat-label">Hosts with Data</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value">{{ totalTransactions }}</div>
+                <div class="stat-label">Total Transactions</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value">{{ hostsWithErrors }}</div>
+                <div class="stat-label">Hosts with Errors</div>
+            </div>
+        </div>
+
+        <div class="hosts-container">
+            <div v-for="hostResult in hostResults" :key="hostResult.hostname" class="host-section">
+                <div class="host-header">
+                    <span class="host-name">{{ hostResult.hostname }}</span>
+                    <span class="host-status" :class="hostResult.status">
+                        {{ hostResult.statusText }}
+                    </span>
+                </div>
+                
+                <div class="host-content">
+                    <div v-if="hostResult.status === 'loading'" class="loading">
+                        Querying host...
+                    </div>
+                    
+                    <div v-else-if="hostResult.status === 'error'" class="error">
+                        {{ hostResult.errorMessage }}
+                    </div>
+                    
+                    <div v-else-if="hostResult.transactions && hostResult.transactions.length > 0" class="transaction-list">
+                        <div v-for="transaction in hostResult.transactions" :key="transaction.commandStoreId" class="transaction-entry">
+                            <div class="transaction-header">
+                                <span class="command-store-id">Store {{ transaction.commandStoreId }}</span>
+                                <span class="save-status" :class="getStatusClass(transaction.saveStatus)">
+                                    {{ transaction.saveStatus || 'Unknown' }}
+                                </span>
+                            </div>
+                            
+                            <div class="field-grid">
+                                <div class="field-item" v-if="transaction.route">
+                                    <span class="field-label">Route:</span>
+                                    <span class="field-value">{{ transaction.route }}</span>
+                                </div>
+                                <div class="field-item" v-if="transaction.durability">
+                                    <span class="field-label">Durability:</span>
+                                    <span class="field-value">{{ transaction.durability }}</span>
+                                </div>
+                                <div class="field-item" v-if="transaction.executeAt">
+                                    <span class="field-label">Execute At:</span>
+                                    <span class="field-value timestamp" :title="formatTimestamp(transaction.executeAt)">{{ transaction.executeAt }}</span>
+                                </div>
+                                <div class="field-item" v-if="transaction.executesAtLeast">
+                                    <span class="field-label">Executes At Least:</span>
+                                    <span class="field-value timestamp" :title="formatTimestamp(transaction.executesAtLeast)">{{ transaction.executesAtLeast }}</span>
+                                </div>
+                                <div class="field-item" v-if="transaction.txn">
+                                    <span class="field-label">Txn:</span>
+                                    <span class="field-value">{{ transaction.txn }}</span>
+                                </div>
+                                <div class="field-item" v-if="transaction.deps">
+                                    <span class="field-label">Deps:</span>
+                                    <span class="field-value">{{ transaction.deps }}</span>
+                                </div>
+                                <div class="field-item" v-if="transaction.waitingOn">
+                                    <span class="field-label">Waiting On:</span>
+                                    <span class="field-value">{{ transaction.waitingOn }}</span>
+                                </div>
+                                <div class="field-item" v-if="transaction.writes">
+                                    <span class="field-label">Writes:</span>
+                                    <span class="field-value">{{ transaction.writes }}</span>
+                                </div>
+                                <div class="field-item" v-if="transaction.result">
+                                    <span class="field-label">Result:</span>
+                                    <span class="field-value">{{ transaction.result }}</span>
+                                </div>
+                            </div>
+                            
+                            <!-- Blocked By Section -->
+                            <div v-if="transaction.blockedBy && transaction.blockedBy.length > 0" class="blocked-by-section">
+                                <div class="blocked-by-header">
+                                    🚫 Transaction Blocked By ({{ transaction.blockedBy.length }} dependencies)
+                                </div>
+                                <div v-for="blocking in transaction.blockedBy" :key="blocking.blockedBy + '.' + blocking.depth" class="blocked-by-entry">
+                                    <div class="blocking-info">
+                                        <span class="blocking-txn">{{ blocking.blockedBy }}</span>
+                                        <span class="blocking-depth">Depth {{ blocking.depth }}</span>
+                                    </div>
+                                    <div class="field-grid">
+                                        <div class="field-item" v-if="blocking.reason">
+                                            <span class="field-label">Reason:</span>
+                                            <span class="field-value">{{ blocking.reason }}</span>
+                                        </div>
+                                        <div class="field-item" v-if="blocking.keyspaceName">
+                                            <span class="field-label">Keyspace:</span>
+                                            <span class="field-value">{{ blocking.keyspaceName }}</span>
+                                        </div>
+                                        <div class="field-item" v-if="blocking.tableName">
+                                            <span class="field-label">Table:</span>
+                                            <span class="field-value">{{ blocking.tableName }}</span>
+                                        </div>
+                                        <div class="field-item" v-if="blocking.key">
+                                            <span class="field-label">Key:</span>
+                                            <span class="field-value">{{ blocking.key }}</span>
+                                        </div>
+                                        <div class="field-item" v-if="blocking.saveStatus">
+                                            <span class="field-label">Blocking Status:</span>
+                                            <span class="field-value">{{ blocking.saveStatus }}</span>
+                                        </div>
+                                        <div class="field-item" v-if="blocking.executeAt">
+                                            <span class="field-label">Blocking Execute At:</span>
+                                            <span class="field-value timestamp" :title="formatTimestamp(blocking.executeAt)">{{ blocking.executeAt }}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div v-else class="no-data">
+                        No transaction data found
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    txnId: new URLSearchParams(window.location.search).get('txn_id') || '',
+                    hostResults: [],
+                    loading: true,
+                    error: null
+                };
+            },
+            computed: {
+                totalHosts() {
+                    return this.hostResults.length;
+                },
+                hostsWithData() {
+                    return this.hostResults.filter(h => h.transactions && h.transactions.length > 0).length;
+                },
+                totalTransactions() {
+                    return this.hostResults.reduce((sum, h) => sum + (h.transactions ? h.transactions.length : 0), 0);
+                },
+                hostsWithErrors() {
+                    return this.hostResults.filter(h => h.status === 'error').length;
+                }
+            },
+            mounted() {
+                if (!this.txnId) {
+                    this.error = 'No transaction ID provided';
+                    this.loading = false;
+                    return;
+                }
+                this.searchAllHosts();
+            },
+            methods: {
+                async searchAllHosts() {
+                    try {
+                        // First get the list of available hosts
+                        const hostsResponse = await fetch('/hosts');
+                        if (!hostsResponse.ok) {
+                            throw new Error('Failed to fetch hosts');
+                        }
+                        
+                        const hosts = await hostsResponse.json();
+                        const hostList = hosts.data || [];
+                        
+                        // Initialize host results
+                        this.hostResults = hostList.map(host => ({
+                            hostname: `${host.id}`,
+                            status: 'loading',
+                            statusText: 'Loading...',
+                            transactions: [],
+                            errorMessage: null
+                        }));
+
+                        console.log(this.hostResults);
+                        // Query each host in parallel for both transactions and blocked by data
+                        const promises = this.hostResults.map(async (hostResult) => {
+                            try {
+                                // Fetch transaction data
+                                const [txnResponse, blockedByResponse] = await Promise.all([
+                                    fetch(`/hosts/${hostResult.hostname}/transactions/${encodeURIComponent(this.txnId)}`),
+                                    fetch(`/hosts/${hostResult.hostname}/blocked_by/${encodeURIComponent(this.txnId)}`)
+                                ]);
+                                
+                                if (txnResponse.ok) {
+                                    const txnResult = await txnResponse.json();
+                                    hostResult.transactions = txnResult.data || [];
+                                    
+                                    // Fetch blocked by data if available
+                                    if (blockedByResponse.ok) {
+                                        const blockedByResult = await blockedByResponse.json();
+                                        const blockedByMap = new Map();
+                                        
+                                        // Group blocked by data by command store ID
+                                        (blockedByResult.data || []).forEach(blocking => {
+                                            if (!blockedByMap.has(blocking.commandStoreId)) {
+                                                blockedByMap.set(blocking.commandStoreId, []);
+                                            }
+                                            blockedByMap.get(blocking.commandStoreId).push(blocking);
+                                        });
+                                        
+                                        // Attach blocked by data to corresponding transactions
+                                        hostResult.transactions.forEach(txn => {
+                                            txn.blockedBy = blockedByMap.get(txn.commandStoreId) || [];
+                                        });
+                                    } else {
+                                        // If blocked by query fails, just set empty arrays
+                                        hostResult.transactions.forEach(txn => {
+                                            txn.blockedBy = [];
+                                        });
+                                    }
+                                    
+                                    hostResult.status = 'success';
+                                    hostResult.statusText = hostResult.transactions.length > 0 ?
+                                        `${hostResult.transactions.length} found` :
+                                        'No data';
+                                } else {
+                                    hostResult.status = 'error';
+                                    hostResult.statusText = 'Error';
+                                    hostResult.errorMessage = `HTTP ${txnResponse.status}: ${txnResponse.statusText}`;
+                                }
+                            } catch (error) {
+                                hostResult.status = 'error';
+                                hostResult.statusText = 'Error';
+                                hostResult.errorMessage = error.message;
+                            }
+                        });
+                        
+                        await Promise.all(promises);
+                        
+                    } catch (error) {
+                        this.error = `Failed to search hosts: ${error.message}`;
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+                
+                getStatusClass(saveStatus) {
+                    if (!saveStatus) return '';
+                    const status = saveStatus.toLowerCase();
+                    if (status.includes('applied')) return 'applied';
+                    if (status.includes('committed')) return 'committed';
+                    if (status.includes('accepted')) return 'accepted';
+                    return '';
+                },
+                
+                formatTimestamp(timestampStr) {
+                    if (!timestampStr || timestampStr === 'N/A') {
+                        return 'No timestamp available';
+                    }
+                    
+                    try {
+                        // Parse timestamp format: [18,1756144112990011,130(KW),1]
+                        const match = timestampStr.match(/\[(\d+),(\d+),(\d+).*\]/);
+                        if (!match) {
+                            return 'Invalid timestamp format';
+                        }
+                        
+                        const microTimestamp = parseInt(match[2]);
+                        const millisTimestamp = Math.floor(microTimestamp / 1000);
+                        const date = new Date(millisTimestamp);
+                        
+                        if (isNaN(date.getTime())) {
+                            return 'Invalid timestamp';
+                        }
+                        
+                        // Format as DD-MM-YYYY HH-MM-SS.mmm
+                        const day = String(date.getDate()).padStart(2, '0');
+                        const month = String(date.getMonth() + 1).padStart(2, '0');
+                        const year = date.getFullYear();
+                        const hours = String(date.getHours()).padStart(2, '0');
+                        const minutes = String(date.getMinutes()).padStart(2, '0');
+                        const seconds = String(date.getSeconds()).padStart(2, '0');
+                        const milliseconds = String(date.getMilliseconds()).padStart(3, '0');
+                        
+                        return `${day}-${month}-${year} ${hours}-${minutes}-${seconds}.${milliseconds}`;
+                    } catch (error) {
+                        console.error('Error parsing timestamp:', timestampStr, error);
+                        return 'Error parsing timestamp';
+                    }
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

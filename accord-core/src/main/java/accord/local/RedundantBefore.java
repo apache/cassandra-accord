@@ -18,27 +18,11 @@
 
 package accord.local;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
-import java.util.TreeMap;
-import java.util.TreeSet;
-import java.util.function.Function;
-import java.util.function.Predicate;
-import java.util.stream.Collectors;
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
-
 import accord.api.RoutingKey;
 import accord.api.VisibleForImplementation;
 import accord.local.RedundantStatus.Coverage;
-import accord.local.RedundantStatus.SomeStatus;
 import accord.local.RedundantStatus.Property;
+import accord.local.RedundantStatus.SomeStatus;
 import accord.primitives.AbstractRanges;
 import accord.primitives.Deps;
 import accord.primitives.EpochSupplier;
@@ -54,10 +38,26 @@ import accord.utils.Invariants;
 import accord.utils.ReducingIntervalMap;
 import accord.utils.ReducingRangeMap;
 
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+
 import static accord.api.ProtocolModifiers.Toggles.requiresUniqueHlcs;
 import static accord.local.RedundantStatus.Coverage.SOME;
-import static accord.local.RedundantStatus.ONLY_LE_MASK;
 import static accord.local.RedundantStatus.NOT_OWNED_ONLY;
+import static accord.local.RedundantStatus.ONLY_LE_MASK;
 import static accord.local.RedundantStatus.PRE_BOOTSTRAP_OR_STALE_ONLY;
 import static accord.local.RedundantStatus.Property.GC_BEFORE;
 import static accord.local.RedundantStatus.Property.LOCALLY_APPLIED;
@@ -70,9 +70,9 @@ import static accord.local.RedundantStatus.Property.LOCALLY_WITNESSED;
 import static accord.local.RedundantStatus.Property.PRE_BOOTSTRAP;
 import static accord.local.RedundantStatus.Property.PRE_BOOTSTRAP_OR_STALE;
 import static accord.local.RedundantStatus.Property.SHARD_APPLIED;
-import static accord.local.RedundantStatus.WAS_OWNED_SYNCED;
 import static accord.local.RedundantStatus.WAS_OWNED_ONLY;
 import static accord.local.RedundantStatus.WAS_OWNED_RETIRED;
+import static accord.local.RedundantStatus.WAS_OWNED_SYNCED;
 import static accord.local.RedundantStatus.addHistory;
 import static accord.local.RedundantStatus.any;
 import static accord.local.RedundantStatus.mask;
@@ -88,6 +88,60 @@ import static accord.utils.Invariants.requireStrictlyOrdered;
 
 public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Bounds>
 {
+    /**
+     * Creates a detailed visualization of redundantBefore showing max bounds for every property in each range.
+     * This is useful for debugging redundantBefore state by showing which transactions are redundant for each property
+     * across different ranges.
+     *
+     * @param redundantBefore the RedundantBefore instance to visualize
+     * @return a formatted string showing ranges and their property max bounds
+     */
+    public static String print(RedundantBefore redundantBefore)
+    {
+        if (redundantBefore == null || redundantBefore.size() == 0)
+            return "RedundantBefore{EMPTY}";
+
+        StringBuilder builder = new StringBuilder("RedundantBefore{\n");
+
+        redundantBefore.foldl((bounds, sb, p1, p2) -> {
+            if (bounds != null) {
+                sb.append("  Range[").append(bounds.range).append("] {\n");
+                sb.append("    Epochs: ").append(bounds.startEpoch).append(" to ").append(bounds.endEpoch).append('\n');
+
+                if (bounds.staleUntilAtLeast != null) {
+                    sb.append("    StaleUntilAtLeast: ").append(bounds.staleUntilAtLeast).append('\n');
+                }
+
+                sb.append("    PropertyMaxBounds:\n");
+                for (RedundantStatus.Property property : RedundantStatus.Property.values())
+                {
+                    TxnId maxBound = bounds.maxBound(property);
+                    if (maxBound != TxnId.NONE)
+                    {
+                        sb.append("      ").append(property).append(": ").append(maxBound).append('\n');
+                    }
+                }
+
+                sb.append("    BootstrappedAt: ").append(bounds.bootstrappedAt).append('\n');
+                sb.append("    GcBefore: ").append(bounds.gcBefore).append('\n');
+                sb.append("  }\n");
+            }
+            return sb;
+        }, builder, null, null, ignore -> false);
+
+        builder.append("}");
+        return builder.toString();
+    }
+
+    public static boolean satisfies(RedundantBefore redundantBefore, TxnId txnId, RoutingKey routingKey, RedundantStatus.Property property)
+    {
+        if (redundantBefore == null || redundantBefore.size() == 0)
+            return false;
+
+        Bounds bounds = redundantBefore.get(routingKey);
+        return bounds != null && bounds.is(txnId, property);
+    }
+
     public interface RedundantBeforeSupplier
     {
         RedundantBefore redundantBefore();

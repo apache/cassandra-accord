@@ -303,6 +303,12 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
             return !cacheLoading.cacheEmpty();
         }
 
+        @Override
+        public GlobalCommandsForKey commandsForKey(String key)
+        {
+            return commandsForKey(PrefixedIntHashKey.Hash.fromString(key));
+        }
+
         private static CommandStore.Factory factory(SimulatedDelayedExecutorService executor, CacheLoading isLoadedCheck)
         {
             return (id, node, agent, store, progressLogFactory, listenersFactory, rangesForEpoch, journal) -> new DelayedCommandStore(id, node, agent, store, progressLogFactory, listenersFactory, rangesForEpoch, executor, isLoadedCheck, journal);
