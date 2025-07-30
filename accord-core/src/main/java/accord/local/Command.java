@@ -18,6 +18,7 @@
 
 package accord.local;
 
+import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -911,6 +912,20 @@ public abstract class Command implements ICommand
                 return directRangeDeps.txnId(i);
 
             throw new IndexOutOfBoundsException(i + " >= " + txnIdCount());
+        }
+
+        public List<TxnId> asListUnsafe()
+        {
+            return new AbstractList<>()
+            {
+                @Override
+                public TxnId get(int index) { return txnId(index); }
+                @Override
+                public int size()
+                {
+                    return txnIdCount();
+                }
+            };
         }
 
         int indexOf(TxnId txnId)

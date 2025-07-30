@@ -1,0 +1,573 @@
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cluster Debug Interface - Durability Service</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="/widgets/transaction_widget.js"></script>
+    <script src="/widgets/navigation.js"></script>
+    <script src="/widgets/host_selector.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .host-selector {
+            margin-bottom: 2rem;
+            padding: 1rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .host-selector select {
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-left: 0.5rem;
+        }
+        
+        .search-container {
+            margin-bottom: 2rem;
+            padding: 1rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .search-input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        
+        .error, .loading {
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+            text-align: center;
+        }
+        
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .loading {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #b8daff;
+        }
+        
+        .keyspace-table-container {
+            margin-bottom: 2rem;
+        }
+        
+        .keyspace-table-header {
+            background: #343a40;
+            color: white;
+            padding: 1rem;
+            margin-bottom: 0;
+            border-radius: 8px 8px 0 0;
+            user-select: none;
+        }
+        
+        .keyspace-table-content {
+            background: white;
+            border-radius: 0 0 8px 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .durability-service-list {
+            padding: 1rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        
+        .durability-service-entry {
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border-left: 4px solid #28a745;
+            width: 450px;
+            flex-shrink: 0;
+        }
+        
+        .entry-header {
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        
+        .token-range {
+            font-family: monospace;
+            background: #e9ecef;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+        }
+        
+        .status-info {
+            color: #6c757d;
+            font-size: 0.9em;
+        }
+        
+        .field-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+        
+        .field-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.25rem 0;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .field-label {
+            font-weight: 500;
+            color: #495057;
+        }
+        
+        .field-value {
+            font-family: monospace;
+            color: #212529;
+        }
+        
+        .field-value.boolean {
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            color: white;
+            font-weight: bold;
+        }
+        
+        .field-value.boolean.true {
+            background-color: #28a745;
+        }
+        
+        .field-value.boolean.false {
+            background-color: #dc3545;
+        }
+        
+        .field-value.numeric {
+            color: #007bff;
+            font-weight: 500;
+        }
+        
+        .field-value.timestamp {
+            cursor: help;
+            text-decoration: underline dotted;
+        }
+        
+        .field-value.timestamp.recent {
+            background-color: #d4edda;
+            color: #155724;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+        }
+        
+        .field-value.timestamp.moderate {
+            background-color: #fff3cd;
+            color: #856404;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+        }
+        
+        .field-value.timestamp.old {
+            background-color: #f8d7da;
+            color: #721c24;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+        }
+
+        .waiting-field {
+            grid-column: 1 / -1;
+        }
+
+        .waiting-pre {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 0.75rem;
+            margin: 0;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            font-family: 'Monaco', 'Consolas', 'Courier New', monospace;
+            font-size: 0.85em;
+            line-height: 1.4;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        .no-data {
+            text-align: center;
+            color: #6c757d;
+            padding: 2rem;
+            font-style: italic;
+        }
+        
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+        
+        .btn-primary:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <navigation-widget></navigation-widget>
+        <host-selector v-model="selectedHost" @change="loadData"></host-selector>
+
+        <div v-if="error" class="error">
+            {{ error }}
+        </div>
+
+        <div class="search-container" v-if="selectedHost">
+            <input 
+                v-model="searchFilter" 
+                type="text" 
+                placeholder="Search by keyspace, table, token range, or any field..." 
+                class="search-input"
+            >
+        </div>
+
+        <div v-if="loading" class="loading">
+            Loading durability service data...
+        </div>
+
+        <div v-if="!loading && selectedHost && durabilityServiceData.length === 0" class="no-data">
+            No durability service data found for {{ selectedHost }}
+        </div>
+
+        <div v-for="(keyspaceGroup, keyspaceTable) in groupedData" :key="keyspaceTable" class="keyspace-table-container">
+            <div class="keyspace-table-header">
+                <span>{{ keyspaceTable }}</span>
+            </div>
+            
+            <div class="keyspace-table-content">
+                <div class="durability-service-list">
+                    <div v-for="entry in keyspaceGroup" :key="entry.tokenStart + '.' + entry.tokenEnd" class="durability-service-entry">
+                        <div class="entry-header">
+                            <p class="token-range">{{ entry.tokenStart }} → {{ entry.tokenEnd }}</p>
+                            <p class="status-info">
+                                <span :class="['field-value', 'boolean', entry.stopping ? 'true' : 'false']">
+                                    {{ entry.stopping ? 'STOPPING' : 'RUNNING' }}
+                                </span>
+                                <span :class="['field-value', 'boolean', entry.stopped ? 'true' : 'false']">
+                                    {{ entry.stopped ? 'STOPPED' : 'ACTIVE' }}
+                                </span>
+                            </p>
+                        </div>
+                        
+                        <div class="field-grid">
+                            <div class="field-item">
+                                <span class="field-label">Last Started:</span>
+                                <span class="field-value timestamp" :class="getTimestampClass(entry.lastStartedAt)" :title="formatTimestampWithRecency(entry.lastStartedAt)">{{ formatTimestamp(entry.lastStartedAt) }}</span>
+                            </div>
+                            <div class="field-item">
+                                <span class="field-label">Cycle Started:</span>
+                                <span class="field-value timestamp" :class="getTimestampClass(entry.cycleStartedAt)" :title="formatTimestampWithRecency(entry.cycleStartedAt)">{{ formatTimestamp(entry.cycleStartedAt) }}</span>
+                            </div>
+                            <div class="field-item">
+                                <span class="field-label">Retries:</span>
+                                <span class="field-value numeric">{{ entry.retries }}</span>
+                            </div>
+                            <div class="field-item">
+                                <span class="field-label">Min:</span>
+                                <span class="field-value">{{ entry.min || 'N/A' }}</span>
+                            </div>
+                            <div class="field-item">
+                                <span class="field-label">Requested By:</span>
+                                <span class="field-value">{{ entry.requestedBy || 'N/A' }}</span>
+                            </div>
+                            <div class="field-item">
+                                <span class="field-label">Active:</span>
+                                <span class="field-value">{{ entry.active || 'N/A' }}</span>
+                            </div>
+                            <div class="field-item waiting-field">
+                                <span class="field-label">Waiting:</span>
+                                <pre class="waiting-pre">{{ entry.waiting || 'N/A' }}</pre>
+                            </div>
+                            <div class="field-item">
+                                <span class="field-label">Node Offset:</span>
+                                <span class="field-value numeric">{{ entry.nodeOffset }}</span>
+                            </div>
+                            <div class="field-item">
+                                <span class="field-label">Cycle Offset:</span>
+                                <span class="field-value numeric">{{ entry.cycleOffset }}</span>
+                            </div>
+                            <div class="field-item">
+                                <span class="field-label">Active Index:</span>
+                                <span class="field-value numeric">{{ entry.activeIndex }}</span>
+                            </div>
+                            <div class="field-item">
+                                <span class="field-label">Next Index:</span>
+                                <span class="field-value numeric">{{ entry.nextIndex }}</span>
+                            </div>
+                            <div class="field-item">
+                                <span class="field-label">Next To Index:</span>
+                                <span class="field-value numeric">{{ entry.nextToIndex }}</span>
+                            </div>
+                            <div class="field-item">
+                                <span class="field-label">End Index:</span>
+                                <span class="field-value numeric">{{ entry.endIndex }}</span>
+                            </div>
+                            <div class="field-item">
+                                <span class="field-label">Current Splits:</span>
+                                <span class="field-value numeric">{{ entry.currentSplits }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            components: {
+                'transaction-widget': window.TransactionWidgetComponent,
+                'navigation-widget': window.NavigationWidgetComponent,
+                'host-selector': window.HostSelectorComponent
+            },
+            data() {
+                return {
+                    selectedHost: new URLSearchParams(window.location.search).get('host') || '',
+                    hosts: [],
+                    durabilityServiceData: [],
+                    loading: false,
+                    error: null,
+                    searchFilter: '',
+                };
+            },
+            computed: {
+                filteredData() {
+                    if (!this.searchFilter) return this.durabilityServiceData;
+                    
+                    const filter = this.searchFilter.toLowerCase();
+                    return this.durabilityServiceData.filter(entry => {
+                        return Object.values(entry).some(value => 
+                            value && value.toString().toLowerCase().includes(filter)
+                        );
+                    });
+                },
+                groupedData() {
+                    const grouped = {};
+                    
+                    this.filteredData.forEach(entry => {
+                        const keyspaceTable = `${entry.keyspaceName}.${entry.tableName}`;
+                        
+                        if (!grouped[keyspaceTable]) {
+                            grouped[keyspaceTable] = [];
+                        }
+                        
+                        grouped[keyspaceTable].push(entry);
+                    });
+                    
+                    return grouped;
+                }
+            },
+            mounted() {
+                this.loadAvailableHosts();
+                if (this.selectedHost) {
+                    this.loadData();
+                }
+            },
+            methods: {
+                async loadAvailableHosts() {
+                    const response = await fetch('/hosts');
+                    if (response.ok) {
+                        const result = await response.json();
+                        this.hosts = result.data || [];
+                    }
+                },
+
+                async loadData() {
+                    if (!this.selectedHost) return;
+
+                    this.loading = true;
+                    this.error = null;
+
+                    try {
+                        const response = await fetch(`/hosts/${this.selectedHost}/durability_service`);
+                        if (!response.ok) {
+                            throw new Error(`Failed to load data: ${response.statusText}`);
+                        }
+
+                        const result = await response.json();
+                        this.durabilityServiceData = result.data || [];
+                    } catch (error) {
+                        this.error = error.message;
+                        this.durabilityServiceData = [];
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+                
+                formatTimestamp(timestamp) {
+                    if (!timestamp || timestamp === 0) {
+                        return 'N/A';
+                    }
+                    
+                    try {
+                        // Convert to milliseconds if it's in microseconds
+                        let millisTimestamp = timestamp;
+                        if (timestamp > 1e15) {
+                            millisTimestamp = Math.floor(timestamp / 1000);
+                        }
+                        
+                        const date = new Date(millisTimestamp);
+                        
+                        if (isNaN(date.getTime())) {
+                            return 'Invalid timestamp';
+                        }
+                        
+                        // Format as DD-MM-YYYY HH:MM:SS (minutes ago)
+                        const day = String(date.getDate()).padStart(2, '0');
+                        const month = String(date.getMonth() + 1).padStart(2, '0');
+                        const year = date.getFullYear();
+                        const hours = String(date.getHours()).padStart(2, '0');
+                        const minutes = String(date.getMinutes()).padStart(2, '0');
+                        const seconds = String(date.getSeconds()).padStart(2, '0');
+                        
+                        const formattedDate = `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
+                        const recency = this.getTimestampRecency(timestamp);
+                        
+                        return recency ? `${formattedDate} (${recency})` : formattedDate;
+                    } catch (error) {
+                        console.error('Error parsing timestamp:', timestamp, error);
+                        return 'Error parsing timestamp';
+                    }
+                },
+                
+                formatTimestampWithRecency(timestamp) {
+                    const formattedDate = this.formatTimestamp(timestamp);
+                    if (formattedDate === 'N/A' || formattedDate === 'Invalid timestamp' || formattedDate === 'Error parsing timestamp') {
+                        return formattedDate;
+                    }
+                    return formattedDate;
+                },
+                
+                getTimestampRecency(timestamp) {
+                    if (!timestamp || timestamp === 0) {
+                        return null;
+                    }
+                    
+                    try {
+                        // Convert to milliseconds if it's in microseconds
+                        let millisTimestamp = timestamp;
+                        if (timestamp > 1e15) {
+                            millisTimestamp = Math.floor(timestamp / 1000);
+                        }
+                        
+                        const timestampDate = new Date(millisTimestamp);
+                        const now = new Date();
+                        
+                        if (isNaN(timestampDate.getTime())) {
+                            return null;
+                        }
+                        
+                        const diffMinutes = Math.floor((now - timestampDate) / (1000 * 60));
+                        
+                        if (diffMinutes < 1) {
+                            return 'just now';
+                        } else if (diffMinutes === 1) {
+                            return '1 minute ago';
+                        } else if (diffMinutes < 60) {
+                            return `${diffMinutes} minutes ago`;
+                        } else if (diffMinutes < 120) {
+                            return '1 hour ago';
+                        } else if (diffMinutes < 1440) {
+                            const hours = Math.floor(diffMinutes / 60);
+                            return `${hours} hours ago`;
+                        } else {
+                            const days = Math.floor(diffMinutes / 1440);
+                            return days === 1 ? '1 day ago' : `${days} days ago`;
+                        }
+                    } catch (error) {
+                        return null;
+                    }
+                },
+                
+                getTimestampClass(timestamp) {
+                    if (!timestamp || timestamp === 0) {
+                        return '';
+                    }
+                    
+                    try {
+                        // Convert to milliseconds if it's in microseconds
+                        let millisTimestamp = timestamp;
+                        if (timestamp > 1e15) {
+                            millisTimestamp = Math.floor(timestamp / 1000);
+                        }
+                        
+                        const timestampDate = new Date(millisTimestamp);
+                        const now = new Date();
+                        
+                        if (isNaN(timestampDate.getTime())) {
+                            return '';
+                        }
+                        
+                        const diffMinutes = Math.floor((now - timestampDate) / (1000 * 60));
+                        
+                        if (diffMinutes <= 10) {
+                            return 'recent';  // Green background
+                        } else if (diffMinutes <= 60) {
+                            return 'moderate';  // Yellow background
+                        } else {
+                            return 'old';  // Red background
+                        }
+                    } catch (error) {
+                        return '';
+                    }
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

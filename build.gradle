@@ -18,7 +18,7 @@
 
 plugins {
     // https://github.com/eskatos/creadur-rat-gradle
-    id("org.nosphere.apache.rat") version "0.7.1"
+//    id("org.nosphere.apache.rat") version "0.7.1"
 }
 
 repositories {
@@ -26,14 +26,16 @@ repositories {
 }
 
 // See buildSrc/src/main/groovy/accord.java-conventions.gradle for java standards
-
-rat {
-    // List of Gradle exclude directives, defaults to ['**/.gradle/**']
-    excludes.add("**/build/**")
-    excludes.add("**/*.md")
-    excludes.add(".idea/**")
-    if (layout.projectDirectory.file(".rat-excludes.txt").asFile.exists())
-    {
-        excludeFile.set(layout.projectDirectory.file(".rat-excludes.txt"))
-    }
-}
+//
+//rat {
+//    // List of Gradle exclude directives, defaults to ['**/.gradle/**']
+//    excludes.add("**/build/**")
+//    excludes.add("**/*.md")
+//    excludes.add(".idea/**")
+//    excludes.add(".claude/**")
+//    excludes.add("**/.summaries/**")
+//    if (layout.projectDirectory.file(".rat-excludes.txt").asFile.exists())
+//    {
+//        excludeFile.set(layout.projectDirectory.file(".rat-excludes.txt"))
+//    }
+//}

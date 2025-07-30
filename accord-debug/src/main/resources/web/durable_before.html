@@ -1,0 +1,352 @@
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cluster Debug Interface - Durable Before</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="/widgets/transaction_widget.js"></script>
+    <script src="/widgets/navigation.js"></script>
+    <script src="/widgets/host_selector.js"></script>
+
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .host-selector {
+            margin-bottom: 2rem;
+            padding: 1rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .host-selector select {
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-left: 0.5rem;
+        }
+        
+        .search-container {
+            margin-bottom: 2rem;
+            padding: 1rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .search-input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        
+        .error, .loading {
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+            text-align: center;
+        }
+        
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .loading {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #b8daff;
+        }
+        
+        .keyspace-table-container {
+            margin-bottom: 2rem;
+        }
+        
+        .keyspace-table-header {
+            background: #343a40;
+            color: white;
+            padding: 1rem;
+            margin-bottom: 0;
+            border-radius: 8px 8px 0 0;
+            user-select: none;
+        }
+        
+        .keyspace-table-content {
+            background: white;
+            border-radius: 0 0 8px 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .durable-before-list {
+            padding: 1rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        
+        .durable-before-entry {
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border-left: 4px solid #6610f2;
+            width: 450px;
+            flex-shrink: 0;
+        }
+        
+        .entry-header {
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        
+        .token-range {
+            font-family: monospace;
+            background: #e9ecef;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+        }
+        
+        .field-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+        
+        .field-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.25rem 0;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .field-label {
+            font-weight: 500;
+            color: #495057;
+        }
+        
+        .field-value {
+            font-family: monospace;
+            color: #212529;
+            word-break: break-all;
+        }
+        
+        .field-value.txn-id {
+            color: #6610f2;
+            font-weight: 500;
+        }
+        
+        .no-data {
+            text-align: center;
+            color: #6c757d;
+            padding: 2rem;
+            font-style: italic;
+        }
+        
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+        
+        .btn-primary:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <navigation-widget></navigation-widget>
+        <host-selector v-model="selectedHost" @change="loadData"></host-selector>
+
+        <div v-if="error" class="error">
+            {{ error }}
+        </div>
+
+        <div class="search-container" v-if="selectedHost">
+            <input 
+                v-model="searchFilter" 
+                type="text" 
+                placeholder="Search by keyspace, table, token range, or transaction ID..." 
+                class="search-input"
+            >
+        </div>
+
+        <div v-if="loading" class="loading">
+            Loading durable before data...
+        </div>
+
+        <div v-if="!loading && selectedHost && durableBeforeData.length === 0" class="no-data">
+            No durable before data found for {{ selectedHost }}
+        </div>
+
+        <div v-for="(keyspaceGroup, keyspaceTable) in groupedData" :key="keyspaceTable" class="keyspace-table-container">
+            <div class="keyspace-table-header">
+                <span>{{ keyspaceTable }}</span>
+            </div>
+            
+            <div class="keyspace-table-content">
+                <div class="durable-before-list">
+                    <div v-for="entry in keyspaceGroup" :key="entry.tokenStart + '.' + entry.tokenEnd" class="durable-before-entry">
+                        <div class="entry-header">
+                            <p class="token-range">{{ entry.tokenStart }} → {{ entry.tokenEnd }}</p>
+                        </div>
+                        
+                        <div class="field-grid">
+                            <div class="field-item">
+                                <span class="field-label">Quorum:</span>
+                                <transaction-widget 
+                                    v-if="entry.quorum && entry.quorum !== 'N/A'"
+                                    :txn-id="entry.quorum"
+                                    type="quorum"
+                                    @transaction-click="onTransactionClick">
+                                </transaction-widget>
+                                <span v-else class="field-value txn-id">N/A</span>
+                            </div>
+                            <div class="field-item">
+                                <span class="field-label">Universal:</span>
+                                <transaction-widget 
+                                    v-if="entry.universal && entry.universal !== 'N/A'"
+                                    :txn-id="entry.universal"
+                                    type="universal"
+                                    @transaction-click="onTransactionClick">
+                                </transaction-widget>
+                                <span v-else class="field-value txn-id">N/A</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            components: {
+                'transaction-widget': window.TransactionWidgetComponent,
+                'navigation-widget': window.NavigationWidgetComponent,
+                'host-selector': window.HostSelectorComponent
+            },
+            data() {
+                return {
+                    selectedHost: new URLSearchParams(window.location.search).get('host') || '',
+                    hosts: [],
+                    durableBeforeData: [],
+                    loading: false,
+                    error: null,
+                    searchFilter: '',
+                };
+            },
+            computed: {
+                filteredData() {
+                    if (!this.searchFilter) return this.durableBeforeData;
+                    
+                    const filter = this.searchFilter.toLowerCase();
+                    return this.durableBeforeData.filter(entry => {
+                        return Object.values(entry).some(value => 
+                            value && value.toString().toLowerCase().includes(filter)
+                        );
+                    });
+                },
+                groupedData() {
+                    const grouped = {};
+                    
+                    this.filteredData.forEach(entry => {
+                        const keyspaceTable = `${entry.keyspaceName}.${entry.tableName}`;
+                        
+                        if (!grouped[keyspaceTable]) {
+                            grouped[keyspaceTable] = [];
+                        }
+                        
+                        grouped[keyspaceTable].push(entry);
+                    });
+                    
+                    return grouped;
+                }
+            },
+            mounted() {
+                this.loadAvailableHosts();
+                if (this.selectedHost) {
+                    this.loadData();
+                }
+            },
+            methods: {
+                async loadAvailableHosts() {
+                    const response = await fetch('/hosts');
+                    if (response.ok) {
+                        const result = await response.json();
+                        this.hosts = result.data || [];
+                    }
+                },
+
+                async loadData() {
+                    if (!this.selectedHost) return;
+
+                    this.loading = true;
+                    this.error = null;
+
+                    try {
+                        const response = await fetch(`/hosts/${this.selectedHost}/durable_before`);
+                        if (!response.ok) {
+                            throw new Error(`Failed to load data: ${response.statusText}`);
+                        }
+
+                        const result = await response.json();
+                        this.durableBeforeData = result.data || [];
+                    } catch (error) {
+                        this.error = error.message;
+                        this.durableBeforeData = [];
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+                
+                onTransactionClick(txnId) {
+                    console.log('Transaction clicked:', txnId);
+                    // The click handling is already in the component itself
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

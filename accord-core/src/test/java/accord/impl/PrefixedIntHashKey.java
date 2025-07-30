@@ -196,6 +196,34 @@ public abstract class PrefixedIntHashKey implements RoutableKey
             super(prefix, hash);
         }
 
+        /**
+         * Parse a Hash from string format "prefix#hash"
+         * @param str String in format "prefix#hash", e.g. "0#32960"
+         * @return Hash instance
+         * @throws IllegalArgumentException if string format is invalid
+         */
+        public static Hash fromString(String str)
+        {
+            if (str == null || str.trim().isEmpty())
+                throw new IllegalArgumentException("String cannot be null or empty");
+            
+            String trimmed = str.trim();
+            int hashIndex = trimmed.indexOf('#');
+            if (hashIndex == -1)
+                throw new IllegalArgumentException("Invalid format: expected 'prefix#hash', got: " + str);
+            
+            try
+            {
+                int prefix = Integer.parseInt(trimmed.substring(0, hashIndex));
+                int hash = Integer.parseInt(trimmed.substring(hashIndex + 1));
+                return new Hash(prefix, hash);
+            }
+            catch (NumberFormatException e)
+            {
+                throw new IllegalArgumentException("Invalid number format in: " + str, e);
+            }
+        }
+
         @Override
         public accord.primitives.Range asRange()
         {
@@ -215,6 +243,12 @@ public abstract class PrefixedIntHashKey implements RoutableKey
         public Object suffix()
         {
             return hash;
+        }
+
+        @Override
+        public String toString()
+        {
+            return prefix + "#" + hash;
         }
     }
 

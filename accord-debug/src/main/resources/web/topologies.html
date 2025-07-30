@@ -1,0 +1,464 @@
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cluster Debug Interface - Topologies</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="/widgets/transaction_widget.js"></script>
+    <script src="/widgets/navigation.js"></script>
+    <script src="/widgets/host_selector.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .host-selector {
+            margin-bottom: 2rem;
+            padding: 1rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .host-selector select {
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-left: 0.5rem;
+        }
+        
+        .search-container {
+            margin-bottom: 2rem;
+            padding: 1rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .search-input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        
+        .error, .loading {
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+            text-align: center;
+        }
+        
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .loading {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #b8daff;
+        }
+        
+        .topology-entry {
+            margin-bottom: 2rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .epoch-header {
+            background: #20c997;
+            color: white;
+            padding: 0.75rem 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .epoch-info {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            font-size: 1.1em;
+        }
+        
+        .epoch-number {
+            font-weight: bold;
+        }
+        
+        .ready-states {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+        
+        .epoch-status {
+            display: flex;
+            gap: 1rem;
+        }
+        
+        .status-indicator {
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            font-size: 0.9em;
+            font-weight: bold;
+        }
+        
+        .status-indicator.ready {
+            background-color: #28a745;
+            color: white;
+        }
+        
+        .status-indicator.not-ready {
+            background-color: #dc3545;
+            color: white;
+        }
+        
+        .epoch-details {
+            padding: 0.75rem 1rem;
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+            display: none;
+        }
+        
+        .epoch-field-grid {
+            display: none;
+        }
+        
+        .epoch-field {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.25rem 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .field-label {
+            font-weight: 500;
+            color: #495057;
+        }
+        
+        .field-value {
+            font-family: monospace;
+            color: #212529;
+            word-break: break-all;
+        }
+        
+        .table-epochs-section {
+            padding: 0.75rem 1rem;
+        }
+        
+        .table-epochs-header {
+            display: none;
+        }
+        
+        .table-epoch-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        
+        .table-epoch-entry {
+            background: #ffffff;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 0.75rem;
+            min-width: 250px;
+            flex: 1;
+            margin-bottom: 0.5rem;
+        }
+        
+        .table-epoch-header {
+            font-weight: bold;
+            color: #20c997;
+            margin-bottom: 0.5rem;
+        }
+        
+        .node-lists {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        
+        .node-list {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .node-list-label {
+            font-weight: 500;
+            color: #495057;
+            font-size: 0.85em;
+        }
+        
+        .node-list-items {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.25rem;
+        }
+        
+        .node-item {
+            background: #e9ecef;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            font-size: 0.8em;
+            font-family: monospace;
+        }
+        
+        .node-item.added {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .node-item.removed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .node-item.synced {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        
+        .node-item.closed {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .node-item.retired {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .no-data {
+            text-align: center;
+            color: #6c757d;
+            padding: 2rem;
+            font-style: italic;
+        }
+        
+        .no-table-epochs {
+            text-align: center;
+            color: #6c757d;
+            padding: 1rem;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <navigation-widget></navigation-widget>
+        <host-selector v-model="selectedHost" @change="loadData"></host-selector>
+
+        <div v-if="error" class="error">
+            {{ error }}
+        </div>
+
+        <div class="search-container" v-if="selectedHost">
+            <input 
+                v-model="searchFilter" 
+                type="text" 
+                placeholder="Search by epoch, keyspace, table, or node..." 
+                class="search-input"
+            >
+        </div>
+
+        <div v-if="loading" class="loading">
+            Loading topology data...
+        </div>
+
+        <div v-if="!loading && selectedHost && topologyData.length === 0" class="no-data">
+            No topology data found for {{ selectedHost }}
+        </div>
+
+        <div v-for="topology in filteredData" :key="topology.epoch ? topology.epoch.epoch : 'no-epoch'" class="topology-entry">
+            <div class="epoch-header">
+                <div class="epoch-info">
+                    <span class="epoch-number">Epoch {{ topology.epoch ? topology.epoch.epoch : 'Unknown' }}</span>
+                    <span class="ready-states" v-if="topology.epoch">
+                        Metadata:{{ topology.epoch.readyMetadata || 'N/A' }} | 
+                        Coordinate:{{ topology.epoch.readyCoordinate || 'N/A' }} | 
+                        Data:{{ topology.epoch.readyData || 'N/A' }} | 
+                        Reads:{{ topology.epoch.readyReads || 'N/A' }}
+                    </span>
+                </div>
+                <div class="epoch-status" v-if="topology.epoch">
+                    <span :class="['status-indicator', topology.epoch.ready ? 'ready' : 'not-ready']">
+                        {{ topology.epoch.ready ? 'READY' : 'NOT READY' }}
+                    </span>
+                </div>
+            </div>
+            
+            <div class="table-epochs-section">
+                <div v-if="topology.tableEpochs.length === 0" class="no-table-epochs">
+                    No table changes in this epoch
+                </div>
+                
+                <div class="table-epoch-list" v-if="topology.tableEpochs.length > 0">
+                    <div v-for="tableEpoch in topology.tableEpochs" :key="tableEpoch.keyspaceName + '.' + tableEpoch.tableName" class="table-epoch-entry">
+                        <div class="table-epoch-header">
+                            {{ tableEpoch.keyspaceName }}.{{ tableEpoch.tableName }}
+                        </div>
+                        
+                        <div class="node-lists">
+                            <div class="node-list" v-if="tableEpoch.added.length > 0">
+                                <span class="node-list-label">Added:</span>
+                                <div class="node-list-items">
+                                    <span v-for="node in tableEpoch.added" :key="node" class="node-item added">{{ node }}</span>
+                                </div>
+                            </div>
+                            
+                            <div class="node-list" v-if="tableEpoch.removed.length > 0">
+                                <span class="node-list-label">Removed:</span>
+                                <div class="node-list-items">
+                                    <span v-for="node in tableEpoch.removed" :key="node" class="node-item removed">{{ node }}</span>
+                                </div>
+                            </div>
+                            
+                            <div class="node-list" v-if="tableEpoch.synced.length > 0 || tableEpoch.closed.length > 0">
+                                <span class="node-list-label">Synced/Closed:</span>
+                                <div class="node-list-items">
+                                    <span v-for="node in tableEpoch.synced" :key="node" class="node-item synced">{{ node }}</span>
+                                    <span v-for="node in tableEpoch.closed" :key="node" class="node-item closed">{{ node }}</span>
+                                </div>
+                            </div>
+                            
+                            <div class="node-list" v-if="tableEpoch.retired.length > 0">
+                                <span class="node-list-label">Retired:</span>
+                                <div class="node-list-items">
+                                    <span v-for="node in tableEpoch.retired" :key="node" class="node-item retired">{{ node }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            components: {
+                'transaction-widget': window.TransactionWidgetComponent,
+                'navigation-widget': window.NavigationWidgetComponent,
+                'host-selector': window.HostSelectorComponent
+            },
+            data() {
+                return {
+                    selectedHost: new URLSearchParams(window.location.search).get('host') || '',
+                    hosts: [],
+                    topologyData: [],
+                    loading: false,
+                    error: null,
+                    searchFilter: '',
+                };
+            },
+            computed: {
+                filteredData() {
+                    if (!this.searchFilter) return this.topologyData;
+                    
+                    const filter = this.searchFilter.toLowerCase();
+                    return this.topologyData.filter(topology => {
+                        // Search in epoch data
+                        if (topology.epoch) {
+                            const epochStr = topology.epoch.epoch.toString();
+                            if (epochStr.includes(filter)) return true;
+                            
+                            const epochFields = [
+                                topology.epoch.readyMetadata,
+                                topology.epoch.readyCoordinate,
+                                topology.epoch.readyData,
+                                topology.epoch.readyReads
+                            ];
+                            
+                            if (epochFields.some(field => field && field.toLowerCase().includes(filter))) {
+                                return true;
+                            }
+                        }
+                        
+                        // Search in table epochs
+                        return topology.tableEpochs.some(tableEpoch => {
+                            const tableFields = [
+                                tableEpoch.keyspaceName,
+                                tableEpoch.tableName,
+                                ...tableEpoch.added,
+                                ...tableEpoch.removed,
+                                ...tableEpoch.synced,
+                                ...tableEpoch.closed,
+                                ...tableEpoch.retired
+                            ];
+                            
+                            return tableFields.some(field => 
+                                field && field.toLowerCase().includes(filter)
+                            );
+                        });
+                    });
+                }
+            },
+            mounted() {
+                this.loadAvailableHosts();
+                if (this.selectedHost) {
+                    this.loadData();
+                }
+            },
+            methods: {
+                async loadAvailableHosts() {
+                    const response = await fetch('/hosts');
+                    if (response.ok) {
+                        const result = await response.json();
+                        this.hosts = result.data || [];
+                    }
+                },
+
+                async loadData() {
+                    if (!this.selectedHost) return;
+
+                    this.loading = true;
+                    this.error = null;
+
+                    try {
+                        const response = await fetch(`/hosts/${this.selectedHost}/topologies`);
+                        if (!response.ok) {
+                            throw new Error(`Failed to load data: ${response.statusText}`);
+                        }
+
+                        const result = await response.json();
+                        this.topologyData = result.data || [];
+                    } catch (error) {
+                        this.error = error.message;
+                        this.topologyData = [];
+                    } finally {
+                        this.loading = false;
+                    }
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

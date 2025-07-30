@@ -53,6 +53,7 @@ dependencies {
         exclude group: 'org.slf4j', module: 'jcl-over-slf4j'
     }
     testImplementation group: 'org.awaitility', name: 'awaitility', version: '4.2.0'
+    testImplementation project(':accord-debug')
 }
 
 task burn(type: JavaExec) {

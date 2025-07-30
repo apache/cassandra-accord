@@ -212,7 +212,7 @@ public abstract class InMemoryCommandStore extends CommandStore
     @VisibleForTesting
     public NavigableMap<TxnId, GlobalCommand> unsafeCommands()
     {
-        return commands;
+        return new TreeMap<>(commands);
     }
 
     @VisibleForTesting
@@ -325,6 +325,8 @@ public abstract class InMemoryCommandStore extends CommandStore
     {
         return commandsForKey.computeIfAbsent(key, GlobalCommandsForKey::new);
     }
+
+    public abstract GlobalCommandsForKey commandsForKey(String key);
 
     public boolean hasCommandsForKey(RoutingKey key)
     {
@@ -941,6 +943,11 @@ public abstract class InMemoryCommandStore extends CommandStore
             super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder, journal);
         }
 
+        public GlobalCommandsForKey commandsForKey(String key)
+        {
+            throw new UnsupportedOperationException();
+        }
+
         private synchronized void maybeRun()
         {
             if (active != null)
@@ -1034,6 +1041,12 @@ public abstract class InMemoryCommandStore extends CommandStore
             // "this" is leaked before constructor is completed, but since all fields are "final" and set before "this"
             // is leaked, then visibility should not be an issue.
             executor.execute(() -> thread = Thread.currentThread());
+        }
+
+        public GlobalCommandsForKey commandsForKey(String key)
+        {
+            throw new UnsupportedOperationException();
+
         }
 
         void assertThread()

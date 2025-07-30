@@ -19,3 +19,5 @@
 rootProject.name = 'accord'
 include 'accord-core'
 include 'accord-maelstrom'
+include 'accord-debug'
+include 'accord-cluster-debug'

@@ -1,0 +1,691 @@
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lamport Diagram - Accord Debug</title>
+    <script src="vue.global.js"></script>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .lamport-container {
+            display: flex;
+            height: 100vh;
+            flex-direction: column;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        
+        .lamport-content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+        
+        .filter-sidebar {
+            width: 200px;
+            background: white;
+            border-right: 2px solid #e0e0e0;
+            padding: 15px;
+            overflow-y: auto;
+        }
+        
+        .diagram-area {
+            flex: 1;
+            overflow: auto;
+            background: #fafafa;
+            position: relative;
+        }
+        
+        .info-panel {
+            width: 25%;
+            background: white;
+            border-left: 2px solid #e0e0e0;
+            padding: 20px;
+            overflow-y: auto;
+            display: none;
+        }
+
+        .info-panel pre {
+            overflow-x: scroll;
+        }
+        
+        .info-panel.visible {
+            display: block;
+        }
+        
+        .controls {
+            padding: 10px 20px;
+            background: white;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .control-group label {
+            font-size: 12px;
+            font-weight: bold;
+            color: #666;
+        }
+
+        textarea {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            resize: vertical;
+        }
+        
+        .diagram-svg {
+            display: block;
+            min-width: 100%;
+            min-height: 600px;
+        }
+        
+        /* SVG Styles */
+        .process-line {
+            stroke: #bdc3c7;
+            stroke-width: 2;
+            opacity: 0.3;
+        }
+        
+        .process-line.highlighted {
+            stroke: #2c3e50;
+            opacity: 1;
+        }
+        
+        .process-label {
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            font-weight: bold;
+            fill: #2c3e50;
+            text-anchor: middle;
+        }
+        
+        .message-arrow {
+            stroke: #95a5a6;
+            stroke-width: 2;
+            fill: none;
+            opacity: 0.3;
+            cursor: pointer;
+        }
+        
+        .message-arrow.highlighted {
+            stroke: #e74c3c;
+            stroke-width: 3;
+            opacity: 1;
+        }
+        
+        .message-arrow.self-message {
+            stroke: #9b59b6;
+        }
+        
+        .message-arrow.self-message.highlighted {
+            stroke: #8e44ad;
+            stroke-width: 3;
+        }
+        
+        .message-circle {
+            fill: #95a5a6;
+            opacity: 0.3;
+            cursor: pointer;
+        }
+        
+        .message-circle.highlighted {
+            fill: #e74c3c;
+            opacity: 1;
+        }
+        
+        .message-circle.self-message {
+            fill: #9b59b6;
+        }
+        
+        .message-circle.self-message.highlighted {
+            fill: #8e44ad;
+        }
+        
+        .message-label {
+            font-family: Arial, sans-serif;
+            font-size: 11px;
+            fill: #2c3e50;
+            text-anchor: middle;
+            cursor: pointer;
+            opacity: 0.3;
+        }
+
+        .highlighted .message-label {
+            opacity: 1;
+        }
+        .message-label-bg {
+            fill: white;
+            stroke: #ddd;
+            stroke-width: 1;
+            cursor: pointer;
+        }
+
+        .message-label-bg.highlighted {
+            fill: white;
+            stroke: #ddd;
+            stroke-width: 1;
+            opacity: 1;
+            cursor: pointer;
+        }
+
+        .arrow-head {
+            fill: #95a5a6;
+            opacity: 0.3;
+        }
+        
+        .arrow-head.highlighted {
+            fill: #e74c3c;
+            opacity: 1;
+        }
+        
+        .arrow-head.self-message {
+            fill: #9b59b6;
+        }
+        
+        .arrow-head.self-message.highlighted {
+            fill: #8e44ad;
+        }
+        
+        .info-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #2c3e50;
+        }
+        
+        .info-section {
+            margin-bottom: 20px;
+        }
+        
+        .info-section h4 {
+            margin: 0 0 8px 0;
+            color: #34495e;
+            font-size: 14px;
+        }
+        
+        .info-section p {
+            margin: 0;
+            color: #7f8c8d;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        
+        .tag-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 5px;
+        }
+        
+        .tag {
+            background: #ecf0f1;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            color: #2c3e50;
+        }
+        
+        .error-message {
+            color: #e74c3c;
+            background: #fdf2f2;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        
+        .drag-drop-zone {
+            border: 2px dashed #bdc3c7;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+            margin: 5px 0;
+            background: #f8f9fa;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .drag-drop-zone:hover {
+            border-color: #3498db;
+            background: #e3f2fd;
+        }
+        
+        .drag-drop-zone.drag-over {
+            border-color: #e74c3c;
+            background: #ffebee;
+            border-style: solid;
+        }
+        
+        .drag-drop-zone.drag-active {
+            border-color: #27ae60;
+            background: #e8f5e8;
+            border-style: solid;
+        }
+
+        .drag-drop-zone.drag-over .drag-drop-icon {
+            color: #e74c3c;
+        }
+        
+        .drag-drop-zone.drag-active .drag-drop-icon {
+            color: #27ae60;
+        }
+        
+        .drag-drop-text {
+            font-size: 10px;
+            color: #7f8c8d;
+        }
+
+        .input-content {
+            display: none;
+        }
+        
+        .input-content.active {
+            display: block;
+        }
+        
+        .filter-section {
+            max-height: 500px;
+            overflow-y: scroll;
+            margin-bottom: 20px;
+        }
+        
+        .filter-title {
+            font-size: 14px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .message-type-filters {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .message-type-bubble {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 3px 12px;
+            border: 2px solid #3498db;
+            border-radius: 3px;
+            background: #3498db;
+            color: white;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            user-select: none;
+        }
+        
+        .message-type-bubble:hover {
+            background: #2980b9;
+            border-color: #2980b9;
+        }
+        
+        .message-type-bubble.disabled {
+            background: #ecf0f1;
+            border-color: #bdc3c7;
+            color: #7f8c8d;
+        }
+        
+        .message-type-bubble.disabled:hover {
+            background: #d5dbdb;
+            border-color: #95a5a6;
+        }
+        
+        .bubble-name {
+            font-size: 9px;
+            flex: 1;
+        }
+
+        .message-type-bubble.disabled .bubble-count {
+            background: rgba(127, 140, 141, 0.3);
+        }
+        
+        .filter-actions {
+            margin-bottom: 5px;
+            display: flex;
+            flex-direction: row;
+        }
+        
+        .filter-btn {
+            padding: 3px 6px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: white;
+            cursor: pointer;
+            font-size: 10px;
+            text-align: center;
+            flex: 1;
+            margin: 0px 5px 0px 5px;
+        }
+        
+        .filter-btn:hover {
+            background: #f5f5f5;
+        }
+
+        .paging {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 4px;
+            padding: 12px 0;
+            background: white;
+            border-bottom: 1px solid #e0e0e0;
+            font-family: Arial, sans-serif;
+        }
+
+        .page {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 36px;
+            height: 36px;
+            padding: 0 8px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            background: white;
+            color: #666;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            user-select: none;
+        }
+
+        .page:hover {
+            background: #f5f5f5;
+            border-color: #3498db;
+            color: #3498db;
+        }
+
+        .page.active {
+            background: #3498db;
+            border-color: #3498db;
+            color: white;
+            font-weight: 600;
+            box-shadow: 0 2px 4px rgba(52, 152, 219, 0.2);
+        }
+
+        .page.active:hover {
+            background: #2980b9;
+            border-color: #2980b9;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="lamport-container">
+            <div class="controls">
+                <!-- File Upload Tab -->
+                <div class="input-content active">
+                    <div 
+                        class="drag-drop-zone"
+                        :class="{ 
+                            'drag-over': isDragOver, 
+                            'drag-active': isDragActive 
+                        }"
+                        @dragover.prevent="handleDragOver"
+                        @dragenter.prevent="handleDragEnter" 
+                        @dragleave.prevent="handleDragLeave"
+                        @drop.prevent="handleDrop"
+                    >
+                        <div class="drag-drop-text">
+                            {{ isDragOver ? 'Drop JSON file here' : 'Drop JSON file here' }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div v-if="error" class="error-message">
+                {{ error }}
+            </div>
+
+            <div class="paging" v-if="pages.length > 1">
+                <div v-for="(idx) in pages"
+                     class="page"
+                     :class="{active : idx === activePage}"
+                     @click="togglePage(idx)">
+                    {{ idx + 1 }}
+                </div>
+            </div>
+
+            <div class="lamport-content">
+                <div class="filter-sidebar" v-if="messageTypes.length > 0">
+                    <div class="filter-section">
+                        <div class="filter-title">
+                            Message Types
+                        </div>
+
+                        <div class="filter-actions">
+                            <div class="filter-btn" @click="enableAllMessageTypes">Show All</div>
+                            <div class="filter-btn" @click="disableAllMessageTypes">Hide All</div>
+                        </div>
+
+                        <div class="message-type-filters">
+                            <div 
+                                v-for="messageType in messageTypes" 
+                                :key="messageType.name"
+                                class="message-type-bubble"
+                                :class="{ disabled: !messageType.enabled }"
+                                @click="toggleMessageType(messageType.name)"
+                                :title="messageType.enabled ? 'Click to hide ' + messageType.name + ' messages' : 'Click to show ' + messageType.name + ' messages'"
+                            >
+                                <span class="bubble-name">{{ messageType.name }}</span>
+                            </div>
+                        </div>
+
+                    </div>
+                    
+                    <div class="filter-section" v-if="tags.length > 0">
+                        <div class="filter-title">
+                            Tags
+                        </div>
+
+                        <div class="filter-actions">
+                            <div class="filter-btn" @click="enableAllTags">Show All Tags</div>
+                            <div class="filter-btn" @click="disableAllTags">Hide All Tags</div>
+                        </div>
+
+                        <div class="message-type-filters">
+                            <div 
+                                v-for="tag in tags" 
+                                :key="tag.name"
+                                class="message-type-bubble"
+                                :class="{ disabled: !tag.enabled }"
+                                @click="toggleTag(tag.name)"
+                                :title="tag.enabled ? 'Click to hide messages with tag: ' + tag.name : 'Click to show messages with tag: ' + tag.name"
+                            >
+                                <span class="bubble-name">{{ tag.name }}</span>
+                            </div>
+                        </div>
+                        
+
+                    </div>
+                </div>
+                
+                <div class="diagram-area">
+                    <svg 
+                        class="diagram-svg" 
+                        :width="diagramWidth"
+                        :height="diagramHeight"
+                        v-if="processedMessages.length > 0"
+                    >
+                        <!-- Process lines -->
+                        <g v-for="(process, index) in processes" :key="'process-' + process">
+                            <line 
+                                :x1="getProcessX(process)" 
+                                :y1="headerHeight" 
+                                :x2="getProcessX(process)" 
+                                :y2="diagramHeight - footerHeight"
+                                class="process-line"
+                                :class="{ highlighted: isProcessHighlighted(process) }"
+                            />
+                            <text 
+                                :x="getProcessX(process)" 
+                                :y="headerHeight - 10"
+                                class="process-label"
+                            >
+                                {{ process }}
+                            </text>
+                        </g>
+                        
+                        <!-- Message arrows and circles (rendered first, behind text) -->
+                        <g v-for="(message, index) in processedMessages" :key="'message-arrow-' + index">
+                            <!-- Message arrow or self-loop -->
+                            <g v-if="message.from === message.to">
+                                <!-- Self-message oval -->
+                                <path 
+                                    :d="getSelfMessagePath(message)"
+                                    class="message-arrow self-message"
+                                    :class="{ highlighted: isMessageHighlighted(message) }"
+                                    @click="onMessageClick(message)"
+                                />
+                                <!-- Arrow head for self-message -->
+                                <polygon 
+                                    :points="getSelfMessageArrowPoints(message)"
+                                    class="arrow-head self-message"
+                                    :class="{ highlighted: isMessageHighlighted(message) }"
+                                />
+                            </g>
+                            <g v-else>
+                                <!-- Regular message arrow -->
+                                <line 
+                                    :x1="getProcessX(message.from)" 
+                                    :y1="getMessageY(message.normalizedSentAt)"
+                                    :x2="getProcessX(message.to)" 
+                                    :y2="getMessageY(message.normalizedReceivedAt)"
+                                    class="message-arrow"
+                                    :class="{ highlighted: isMessageHighlighted(message) }"
+                                    @click="onMessageClick(message)"
+                                />
+                                <!-- Arrow head -->
+                                <polygon 
+                                    :points="getArrowPoints(message)"
+                                    class="arrow-head"
+                                    :class="{ highlighted: isMessageHighlighted(message) }"
+                                />
+                            </g>
+                            
+                            <!-- Message circles -->
+                            <circle 
+                                :cx="getProcessX(message.from)" 
+                                :cy="getMessageY(message.normalizedSentAt)"
+                                r="4"
+                                class="message-circle"
+                                :class="{ 
+                                    highlighted: isMessageHighlighted(message),
+                                    'self-message': message.from === message.to
+                                }"
+                                @click="onMessageClick(message)"
+                            />
+                            <circle 
+                                v-if="message.from !== message.to"
+                                :cx="getProcessX(message.to)" 
+                                :cy="getMessageY(message.normalizedReceivedAt)"
+                                r="4"
+                                class="message-circle"
+                                :class="{ highlighted: isMessageHighlighted(message) }"
+                                @click="onMessageClick(message)"
+                            />
+                        </g>
+                        
+                        <!-- Message labels (rendered last, on top) -->
+                        <g v-for="(message, index) in processedMessages" :key="'message-label-' + index"
+                           :class="{ highlighted: isMessageHighlighted(message) }">
+                            <!-- Message label background -->
+                            <rect 
+                                :x="getLabelX(message) - getLabelWidth(message.short_description) / 2 - 20"
+                                :y="getLabelY(message) - 7"
+                                :width="getLabelWidth(message.short_description) + 40"
+                                height="14"
+                                class="message-label-bg"
+                                @click="onMessageClick(message)"
+                                :title="'Click to view details for: ' + message.short_description"
+                            />
+                            <!-- Message label text -->
+                            <text
+                                :x="getLabelX(message)" 
+                                :y="getLabelY(message) + 3"
+                                class="message-label"
+                                @click="onMessageClick(message)"
+                                :title="'Click to view details for: ' + message.short_description"
+                            >
+                                {{ message.short_description }}
+                            </text>
+                        </g>
+                    </svg>
+                </div>
+                
+                <div class="info-panel" :class="{ visible: selectedMessage }">
+                    <div v-if="selectedMessage">
+                        <div class="info-title">Message Details</div>
+                        
+                        <div class="info-section">
+                            <h4>Basic Information</h4>
+                            <p><strong>From:</strong> {{ selectedMessage.from }}</p>
+                            <p><strong>To:</strong> {{ selectedMessage.to }}</p>
+                            <p><strong>Type:</strong> {{ selectedMessage.message_kind }}</p>
+                            <p><strong>Short Description:</strong> {{ selectedMessage.short_description }}</p>
+                        </div>
+                        
+                        <div class="info-section">
+                            <h4>Timing</h4>
+                            <p><strong>Sent At:</strong> {{ selectedMessage.sent_at }}</p>
+                            <p><strong>Received At:</strong> {{ selectedMessage.received_at }}</p>
+                            <p><strong>Duration:</strong> {{ selectedMessage.received_at - selectedMessage.sent_at }}ms</p>
+                        </div>
+                        
+                        <div class="info-section" v-if="selectedMessage.tags && selectedMessage.tags.length > 0">
+                            <h4>Tags</h4>
+                            <div class="tag-list">
+                                <span v-for="tag in selectedMessage.tags" :key="tag" class="tag">{{ tag }}</span>
+                            </div>
+                        </div>
+                        
+                        <div class="info-section">
+                            <h4>Description</h4>
+                            <pre>{{ selectedMessage.long_description }}</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="lamport_diagram.js"></script>
+</body>
+</html>
