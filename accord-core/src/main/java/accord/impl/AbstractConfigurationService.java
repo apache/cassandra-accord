@@ -323,6 +323,7 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
     @Override
     public Topology currentTopology()
     {
+        if (isEmpty()) return null;
         return epochs.topologyForLastReceived();
     }
 
