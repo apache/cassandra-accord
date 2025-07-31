@@ -263,7 +263,6 @@ public class TopologyManager
             Ranges closed = Ranges.EMPTY, retired = Ranges.EMPTY;
         }
 
-        private static final Epochs EMPTY = new Epochs(new EpochState[0], Collections.emptyList(), Collections.emptyList(), -1);
         private final long currentEpoch;
         private final long firstNonEmptyEpoch;
         // Epochs are sorted in _descending_ order
@@ -684,7 +683,7 @@ public class TopologyManager
         this.self = self;
         this.time = time;
         this.timeouts = timeouts;
-        this.epochs = Epochs.EMPTY;
+        this.epochs = new Epochs(new EpochState[0], new ArrayList<>(), new ArrayList<>(), -1);;
     }
 
     public EpochsSnapshot epochsSnapshot()
@@ -725,7 +724,7 @@ public class TopologyManager
         synchronized (this)
         {
             prev = epochs;
-            Invariants.requireArgument(topology.epoch == prev.nextEpoch() || epochs == Epochs.EMPTY,
+            Invariants.requireArgument(topology.epoch == prev.nextEpoch() || epochs.epochs.length == 0,
                                        "Expected topology update %d to be %d", topology.epoch, prev.nextEpoch());
             EpochState[] nextEpochs = new EpochState[prev.epochs.length + 1];
             List<Epochs.Notifications> pending = new ArrayList<>(prev.pending);
@@ -862,7 +861,7 @@ public class TopologyManager
 
     public boolean isEmpty()
     {
-        return epochs == Epochs.EMPTY;
+        return epochs.epochs.length == 0;
     }
 
     public long epoch()

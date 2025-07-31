@@ -167,7 +167,9 @@ public interface ConfigurationService
 
     default long currentEpoch()
     {
-        return currentTopology().epoch();
+        Topology topology = currentTopology();
+        if (topology == null) return 0;
+        return topology.epoch();
     }
 
     /**
