@@ -93,6 +93,9 @@ public interface Journal
 
         public boolean isEquivalent(TopologyUpdate other)
         {
+            if (other == null)
+                return false;
+
             boolean equivalent = global.isEquivalent(other.global);
             if (!equivalent)
                 return false;

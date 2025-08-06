@@ -706,7 +706,7 @@ public abstract class CommandStores implements AsyncExecutorFactory
         if (epoch <= prev.global.epoch())
             return new TopologyUpdate(prev, () -> done(epoch));
 
-        Topology newLocalTopology = newTopology.forNode(supplier.node.id()).trim();
+        final Topology newLocalTopology = newTopology.forNode(supplier.node.id()).trim();
         Ranges addedGlobal = newTopology.ranges().without(prev.global.ranges());
         node.addNewRangesToDurableBefore(addedGlobal, epoch);
 
