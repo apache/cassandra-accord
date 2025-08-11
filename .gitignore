@@ -4,3 +4,10 @@ build/
 accord-core/build/
 accord-maelstrom/build/
 .rat-excludes.txt
+
+# Coding tools like NeoVim and Visual Studio Code will store their metadata at the following paths
+accord-core/bin/
+accord-maelstrom/bin/
+.project
+.settings
+.classpath

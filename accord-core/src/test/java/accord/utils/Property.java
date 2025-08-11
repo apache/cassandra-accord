@@ -72,6 +72,11 @@ public class Property
         }
 
         @SuppressWarnings("unchecked")
+        public T withOnlySeed(long seed)
+        {
+            return withSeed(seed).withExamples(1);
+        }
+
         public T withExamples(int examples)
         {
             if (examples <= 0)
@@ -104,7 +109,7 @@ public class Property
             }
             catch (ExecutionException e)
             {
-                throw new PropertyError(propertyError(this, e.getCause()));
+                throw new PropertyError(propertyError(this, e.getCause()), e.getCause());
             }
             catch (InterruptedException e)
             {
@@ -213,10 +218,11 @@ public class Property
         return sb.toString();
     }
 
-    private static String statefulPropertyError(StatefulBuilder input, Throwable cause, Object state, List<String> history)
+    private static String statefulPropertyError(StatefulBuilder input, Throwable cause, Object state, int failingStep, List<String> history)
     {
         StringBuilder sb = propertyErrorCommon(input, cause);
         sb.append("Steps: ").append(input.steps).append('\n');
+        sb.append("Failing Step: ").append(failingStep).append('\n');
         sb.append("Values:\n");
         String stateStr = state == null ? null : state.toString().replace("\n", "\n\t\t");
         sb.append("\tState: ").append(stateStr).append(": ").append(state == null ? "unknown type" : state.getClass().getCanonicalName()).append('\n');
@@ -493,6 +499,7 @@ public class Property
             {
                 State state = null;
                 List<String> history = new ArrayList<>(steps);
+                int seenCommands = 0;
                 LongArrayList historyTiming = stepTimeout == null ? null : new LongArrayList();
                 try
                 {
@@ -506,7 +513,7 @@ public class Property
                         for (int j = 0; j < steps; j++)
                         {
                             Gen<Command<State, SystemUnderTest, ?>> cmdGen = commands.commands(state);
-                            Command cmd = cmdGen.next(rs);
+                            Command<State, SystemUnderTest, ?> cmd = cmdGen.next(rs);
                             for (int a = 0; cmd.checkPreconditions(state) != PreCheckResult.Ok && a < 42; a++)
                             {
                                 if (a == 41)
@@ -517,14 +524,16 @@ public class Property
                             {
                                 for (Command<State, SystemUnderTest, ?> sub : ((MultistepCommand<State, SystemUnderTest>) cmd))
                                 {
+                                    seenCommands++;
                                     history.add(sub.detailed(state));
-                                    process(sub, state, sut, history.size(), historyTiming);
+                                    process(sub, state, sut, seenCommands, historyTiming);
                                 }
                             }
                             else
                             {
+                                seenCommands++;
                                 history.add(cmd.detailed(state));
-                                process(cmd, state, sut, history.size(), historyTiming);
+                                process(cmd, state, sut, seenCommands, historyTiming);
                             }
                         }
                         commands.destroySut(sut, null);
@@ -542,7 +551,7 @@ public class Property
                 }
                 catch (Throwable t)
                 {
-                    throw new PropertyError(statefulPropertyError(this, t, state, maybeRewriteHistory(history, historyTiming)), t);
+                    throw new PropertyError(statefulPropertyError(this, t, state, seenCommands, maybeRewriteHistory(history, historyTiming)), t);
                 }
                 if (pure)
                 {
@@ -577,8 +586,7 @@ public class Property
             return newHistory;
         }
 
-        @SuppressWarnings({ "rawtypes", "unchecked" })
-        private <State, SystemUnderTest> void process(Command cmd, State state, SystemUnderTest sut, int id, @Nullable LongArrayList stepTiming) throws Throwable
+        private <State, SystemUnderTest> void process(Command<State, SystemUnderTest, ?> cmd, State state, SystemUnderTest sut, int id, @Nullable LongArrayList stepTiming) throws Throwable
         {
             if (stepTimeout == null)
             {
@@ -609,8 +617,10 @@ public class Property
         default String detailed(State state) {return this.toString();}
         default void process(State state, SystemUnderTest sut) throws Throwable
         {
-            checkPostconditions(state, apply(state),
-                                sut, run(sut));
+            Result apply = apply(state);
+            Result run = run(sut);
+            checkPostconditions(state, apply,
+                                sut, run);
         }
     }
 
@@ -851,6 +861,7 @@ public class Property
         default void destroyState(State state, @Nullable Throwable cause) throws Throwable {}
         default void destroySut(SystemUnderTest sut, @Nullable Throwable cause) throws Throwable {}
         Gen<Command<State, SystemUnderTest, ?>> commands(State state) throws Throwable;
+
     }
 
     public static <State, SystemUnderTest> CommandsBuilder<State, SystemUnderTest> commands(Supplier<Gen<State>> stateGen, Function<State, SystemUnderTest> sutFactory)
@@ -906,6 +917,7 @@ public class Property
             this.stateGen = stateGen;
             this.sutFactory = sutFactory;
         }
+
 
         public CommandsBuilder<State, SystemUnderTest> preCommands(FailingConsumer<State> preCommands)
         {
@@ -1126,7 +1138,7 @@ public class Property
                                 for (Setup<State, SystemUnderTest> s : unknownWeights)
                                     weights.put(s, unknownWeightGen.nextInt(rs));
                             }
-                            nonConditional = Gens.pick(weights);
+                            nonConditional = weights.isEmpty() ? null : Gens.pick(weights);
                             if (conditionalCommands != null)
                             {
                                 conditionalWeights = new LinkedHashMap<>();
@@ -1233,6 +1245,7 @@ public class Property
                     for (var fn : onFailures)
                         fn.onFailure(state, sut, history, cause);
                 }
+
             };
         }
 
@@ -1251,4 +1264,5 @@ public class Property
             void accept(A a, B b) throws Throwable;
         }
     }
+
 }

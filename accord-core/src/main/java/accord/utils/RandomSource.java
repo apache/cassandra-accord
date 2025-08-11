@@ -292,24 +292,32 @@ public interface RandomSource
 
     default <T> T pickOrderedSet(SortedSet<T> set)
     {
+        Invariants.require(!set.isEmpty(), "can not pick from an empty collection");
+        if (set.size() == 1) return Iterables.getFirst(set, null);
         int offset = nextInt(0, set.size());
         return Iterables.get(set, offset);
     }
 
     default <T> T pickOrderedSet(LinkedHashSet<T> set)
     {
+        Invariants.require(!set.isEmpty(), "can not pick from an empty collection");
+        if (set.size() == 1) return Iterables.getFirst(set, null);
         int offset = nextInt(0, set.size());
         return Iterables.get(set, offset);
     }
 
     default <T extends Enum<T>> T pickOrderedSet(EnumSet<T> set)
     {
+        Invariants.require(!set.isEmpty(), "can not pick from an empty collection");
+        if (set.size() == 1) return Iterables.getFirst(set, null);
         int offset = nextInt(0, set.size());
         return Iterables.get(set, offset);
     }
 
     default <T extends Comparable<? super T>> T pickUnorderedSet(Set<T> set)
     {
+        Invariants.require(!set.isEmpty(), "can not pick from an empty collection");
+        if (set.size() == 1) return Iterables.getFirst(set, null);
         if (set instanceof SortedSet)
             return pickOrderedSet((SortedSet<T>) set);
         List<T> values = new ArrayList<>(set);
