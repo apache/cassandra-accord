@@ -157,7 +157,7 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
 
         public boolean isEmpty()
         {
-            return lastReceived == 0;
+            return epochs.isEmpty();
         }
 
         synchronized EpochState getOrCreate(long epoch)
@@ -323,7 +323,7 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
     @Override
     public Topology currentTopology()
     {
-        if (isEmpty()) return null;
+        if (epochs.lastReceived() == 0) return null;
         return epochs.topologyForLastReceived();
     }
 
