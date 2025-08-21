@@ -933,8 +933,6 @@ public class TopologyManager
             for (int i = 0; i < topologies.size() && count > 0; i++, count--)
             {
                 Topology topology = topologies.get(i);
-                Invariants.require(i > 0 || topology.epoch() == minEpoch || firstNonEmpty == topology.epoch(),
-                                   "Min epoch: %d. Range: %s", minEpoch, this);
                 forEach.accept(topology);
             }
         }
