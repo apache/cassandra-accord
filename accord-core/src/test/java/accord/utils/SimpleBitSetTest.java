@@ -64,6 +64,12 @@ class SimpleBitSetTest
         return new Property.SimpleCommand<>("NextSetBit(" + idx + ')', s2 -> s2.nextSetBit(idx));
     }
 
+    private static Property.Command<State, Void, ?> nextSetBitOutOfRange(RandomSource rs, State state)
+    {
+        int idx = rs.nextInt(state.size, Integer.MAX_VALUE);
+        return new Property.SimpleCommand<>("NextSetBitOutOfRange(" + idx + ')', s2 -> s2.nextSetBit(idx));
+    }
+
     @Test
     public void test()
     {
@@ -74,6 +80,7 @@ class SimpleBitSetTest
                                             .add(SimpleBitSetTest::clear)
                                             .add(SimpleBitSetTest::isEmpty)
                                             .add(SimpleBitSetTest::nextSetBit)
+                                            .add(SimpleBitSetTest::nextSetBitOutOfRange)
                                             .build());
     }
 
@@ -145,13 +152,20 @@ class SimpleBitSetTest
         public int nextSetBit(int fromIndex)
         {
             int expected;
-            for (expected = fromIndex; expected < size; expected++)
+            if (fromIndex >= size)
             {
-                if (model.get(expected))
-                    break;
-            }
-            if (expected == size)
                 expected = -1;
+            }
+            else
+            {
+                for (expected = fromIndex; expected < size; expected++)
+                {
+                    if (model.get(expected))
+                        break;
+                }
+                if (expected == size)
+                    expected = -1;
+            }
             int actual = sut.nextSetBit(fromIndex);
 
             Assertions.assertThat(actual).isEqualTo(expected);
@@ -167,7 +181,7 @@ class SimpleBitSetTest
         @Override
         public String toString()
         {
-            return sut.getClass().getSimpleName();
+            return sut.getClass().getSimpleName() + ", size=" + size;
         }
     }
 }

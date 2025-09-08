@@ -77,6 +77,8 @@ public class SmallBitSet implements SimpleBitSet
     @Override
     public int nextSetBit(int fromIndex)
     {
+        if (fromIndex >= 64)
+            return -1;
         long bits = this.bits & bitsEqualOrGreater(fromIndex);
         if (bits == 0)
             return -1;

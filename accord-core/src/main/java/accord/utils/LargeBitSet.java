@@ -320,7 +320,7 @@ public class LargeBitSet implements SimpleBitSet
     private int nextSetBitInternal(int i, int exclIndexBound, int ifNotFound)
     {
         Invariants.requireArgument(i >= 0);
-        Invariants.requireArgument(i <= size());
+        if (i >= size()) return -1;
 
         if (count == 0)
             return ifNotFound;
