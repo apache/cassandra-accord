@@ -1,0 +1,576 @@
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cluster Debug Interface - Progress Log</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="/widgets/navigation.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .host-selector {
+            margin-bottom: 2rem;
+            padding: 1rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .host-selector select {
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-left: 0.5rem;
+        }
+        
+        .search-container {
+            margin-bottom: 2rem;
+            padding: 1rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .search-input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        
+        .error, .loading {
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+            text-align: center;
+        }
+        
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .loading {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #b8daff;
+        }
+        
+        .command-store-container {
+            margin-bottom: 2rem;
+        }
+        
+        .command-store-header {
+            background: #17a2b8;
+            color: white;
+            padding: 1rem;
+            margin-bottom: 0;
+            border-radius: 8px 8px 0 0;
+            user-select: none;
+        }
+        
+        .command-store-content {
+            background: white;
+            border-radius: 0 0 8px 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .keyspace-table-container {
+            border-bottom: 1px solid #eee;
+        }
+        
+        .keyspace-table-header {
+            background: #f8f9fa;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid #eee;
+            user-select: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .progress-log-list {
+            padding: 1rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        
+        .progress-log-entry {
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border-left: 4px solid #17a2b8;
+            width: 400px;
+            flex-shrink: 0;
+        }
+        
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .txn-id {
+            font-family: monospace;
+            background: #e9ecef;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            font-size: 0.9em;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .txn-id:hover {
+            background: #007bff;
+            color: white;
+        }
+        
+        .table-info {
+            font-size: 0.8em;
+            color: #6c757d;
+        }
+        
+        .progress-sections {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        
+        .progress-section {
+            background: white;
+            padding: 0.75rem;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+        }
+        
+        .section-header {
+            font-weight: 500;
+            color: #495057;
+            margin-bottom: 0.5rem;
+            padding-bottom: 0.25rem;
+            border-bottom: 1px solid #f1f3f4;
+        }
+        
+        .waiting-section {
+            border-left: 4px solid #ffc107;
+        }
+        
+        .home-section {
+            border-left: 4px solid #28a745;
+        }
+        
+        .field-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.25rem 0;
+            font-size: 0.85em;
+        }
+        
+        .field-label {
+            font-weight: 500;
+            color: #495057;
+            flex-shrink: 0;
+            margin-right: 1rem;
+        }
+        
+        .field-value {
+            font-family: monospace;
+            color: #212529;
+            word-break: break-all;
+            text-align: right;
+        }
+        
+        .field-value.timestamp {
+            cursor: help;
+            text-decoration: underline dotted;
+        }
+        
+        .field-value.boolean {
+            font-weight: 500;
+        }
+        
+        .field-value.boolean.true {
+            color: #28a745;
+        }
+        
+        .field-value.boolean.false {
+            color: #dc3545;
+        }
+        
+        .progress-status {
+            background: #6c757d;
+            color: white;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            font-size: 0.8em;
+            font-weight: 500;
+        }
+        
+        .progress-status.queued {
+            background: #ffc107;
+            color: #212529;
+        }
+        
+        .progress-status.running {
+            background: #007bff;
+        }
+        
+        .progress-status.completed {
+            background: #28a745;
+        }
+        
+        .no-data {
+            text-align: center;
+            color: #6c757d;
+            padding: 2rem;
+            font-style: italic;
+        }
+        
+        .stats-info {
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            background: #e1f5fe;
+            border-radius: 4px;
+            border-left: 4px solid #17a2b8;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <navigation-widget></navigation-widget>
+
+        <div class="host-selector">
+            <label for="hostSelect">Select Host:</label>
+            <select id="hostSelect" v-model="selectedHost" @change="loadData">
+                <option value="">-- Select a host --</option>
+                <option v-for="host in availableHosts" :key="host.host + ':' + host.port" :value="host.host + ':' + host.port">
+                    {{ host.host }}:{{ host.port }}
+                </option>
+            </select>
+        </div>
+
+        <div v-if="error" class="error">
+            {{ error }}
+        </div>
+
+        <div class="search-container" v-if="selectedHost">
+            <input 
+                v-model="searchFilter" 
+                type="text" 
+                placeholder="Search by transaction ID, keyspace, table, or any field..." 
+                class="search-input"
+            >
+        </div>
+
+        <div v-if="loading" class="loading">
+            Loading progress log data...
+        </div>
+
+        <div v-if="!loading && selectedHost && progressLogData.length > 0" class="stats-info">
+            Showing {{ filteredData.length }} of {{ progressLogData.length }} progress log entries from {{ selectedHost }}
+        </div>
+
+        <div v-if="!loading && selectedHost && progressLogData.length === 0" class="no-data">
+            No progress log data found for {{ selectedHost }}
+        </div>
+
+        <div v-for="(storeGroup, commandStoreId) in groupedData" :key="commandStoreId" class="command-store-container">
+            <div class="command-store-header">
+                <span>Command Store {{ commandStoreId }}</span>
+            </div>
+            
+            <div class="command-store-content">
+                <div v-for="(keyspaceGroup, keyspaceTable) in storeGroup" :key="keyspaceTable" class="keyspace-table-container">
+                    <div class="keyspace-table-header">
+                        <span>{{ keyspaceTable }}</span>
+                    </div>
+                    
+                    <div class="progress-log-list">
+                        <div v-for="entry in keyspaceGroup" :key="entry.txnId" class="progress-log-entry">
+                            <div class="progress-header">
+                                <div>
+                                    <div class="txn-id" @click="openTransactionSearch(entry.txnId)" :title="formatTimestamp(entry.txnId)">{{ entry.txnId }}</div>
+                                    <div class="table-info">{{ entry.tableId }}</div>
+                                </div>
+                                <div>
+                                    <span class="field-value boolean" :class="{ true: entry.contactEveryone, false: !entry.contactEveryone }">
+                                        {{ entry.contactEveryone ? 'Contact Everyone' : 'Selective Contact' }}
+                                    </span>
+                                </div>
+                            </div>
+                            
+                            <div class="progress-sections">
+                                <!-- Waiting State -->
+                                <div class="progress-section waiting-section">
+                                    <div class="section-header">⏳ Waiting State</div>
+                                    <div class="field-item">
+                                        <span class="field-label">Initialised:</span>
+                                        <span class="field-value boolean" :class="{ true: !entry.waitingIsUninitialised, false: entry.waitingIsUninitialised }">
+                                            {{ entry.waitingIsUninitialised ? 'No' : 'Yes' }}
+                                        </span>
+                                    </div>
+                                    <div class="field-item" v-if="entry.waitingBlockedUntil">
+                                        <span class="field-label">Blocked Until:</span>
+                                        <span class="field-value">{{ entry.waitingBlockedUntil }}</span>
+                                    </div>
+                                    <div class="field-item" v-if="entry.waitingHomeSatisfies">
+                                        <span class="field-label">Home Satisfies:</span>
+                                        <span class="field-value">{{ entry.waitingHomeSatisfies }}</span>
+                                    </div>
+                                    <div class="field-item" v-if="entry.waitingProgress">
+                                        <span class="field-label">Progress:</span>
+                                        <span class="progress-status" :class="getProgressClass(entry.waitingProgress)">{{ entry.waitingProgress }}</span>
+                                    </div>
+                                    <div class="field-item">
+                                        <span class="field-label">Retry Count:</span>
+                                        <span class="field-value">{{ entry.waitingRetryCounter }}</span>
+                                    </div>
+                                    <div class="field-item" v-if="entry.waitingPackedKeyTrackerBits">
+                                        <span class="field-label">Key Tracker:</span>
+                                        <span class="field-value">{{ entry.waitingPackedKeyTrackerBits }}</span>
+                                    </div>
+                                    <div class="field-item" v-if="entry.waitingScheduledAt">
+                                        <span class="field-label">Scheduled At:</span>
+                                        <span class="field-value timestamp" :title="formatTimestampFromMillis(entry.waitingScheduledAt)">{{ formatTimestampFromMillis(entry.waitingScheduledAt) }}</span>
+                                    </div>
+                                </div>
+                                
+                                <!-- Home State -->
+                                <div class="progress-section home-section">
+                                    <div class="section-header">🏠 Home State</div>
+                                    <div class="field-item" v-if="entry.homePhase">
+                                        <span class="field-label">Phase:</span>
+                                        <span class="field-value">{{ entry.homePhase }}</span>
+                                    </div>
+                                    <div class="field-item" v-if="entry.homeProgress">
+                                        <span class="field-label">Progress:</span>
+                                        <span class="progress-status" :class="getProgressClass(entry.homeProgress)">{{ entry.homeProgress }}</span>
+                                    </div>
+                                    <div class="field-item">
+                                        <span class="field-label">Retry Count:</span>
+                                        <span class="field-value">{{ entry.homeRetryCounter }}</span>
+                                    </div>
+                                    <div class="field-item" v-if="entry.homeScheduledAt">
+                                        <span class="field-label">Scheduled At:</span>
+                                        <span class="field-value timestamp" :title="formatTimestampFromMillis(entry.homeScheduledAt)">{{ formatTimestampFromMillis(entry.homeScheduledAt) }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            components: {
+                'navigation-widget': window.NavigationWidgetComponent
+            },
+            data() {
+                return {
+                    selectedHost: new URLSearchParams(window.location.search).get('host') || '',
+                    availableHosts: [],
+                    progressLogData: [],
+                    loading: false,
+                    error: null,
+                    searchFilter: ''
+                };
+            },
+            computed: {
+                filteredData() {
+                    if (!this.searchFilter || !Array.isArray(this.progressLogData)) {
+                        return Array.isArray(this.progressLogData) ? this.progressLogData : [];
+                    }
+                    
+                    const filter = this.searchFilter.toLowerCase();
+                    return this.progressLogData.filter(entry => {
+                        return Object.values(entry).some(value => 
+                            value && value.toString().toLowerCase().includes(filter)
+                        );
+                    });
+                },
+                groupedData() {
+                    const grouped = {};
+                    const dataToGroup = Array.isArray(this.filteredData) ? this.filteredData : [];
+                    
+                    dataToGroup.forEach(entry => {
+                        if (!entry || typeof entry !== 'object') return;
+                        
+                        const storeId = entry.commandStoreId || 0;
+                        const keyspaceTable = `${entry.keyspaceName || 'unknown'}.${entry.tableName || 'unknown'}`;
+                        
+                        if (!grouped[storeId]) {
+                            grouped[storeId] = {};
+                        }
+                        
+                        if (!grouped[storeId][keyspaceTable]) {
+                            grouped[storeId][keyspaceTable] = [];
+                        }
+                        
+                        grouped[storeId][keyspaceTable].push(entry);
+                    });
+                    
+                    return grouped;
+                }
+            },
+            mounted() {
+                this.loadAvailableHosts();
+                if (this.selectedHost) {
+                    this.loadData();
+                }
+            },
+            methods: {
+                async loadAvailableHosts() {
+                    try {
+                        const response = await fetch('/hosts');
+                        if (response.ok) {
+                            const result = await response.json();
+                            this.availableHosts = result.data || [];
+                            console.log('Loaded hosts:', this.availableHosts);
+                        }
+                    } catch (error) {
+                        console.error('Failed to load hosts:', error);
+                    }
+                },
+                
+                async loadData() {
+                    console.log('loadData called with selectedHost:', this.selectedHost);
+                    if (!this.selectedHost) return;
+                    
+                    this.loading = true;
+                    this.error = null;
+                    
+                    try {
+                        const response = await fetch(`/hosts/${this.selectedHost}/progress_log`);
+                        if (!response.ok) {
+                            throw new Error(`Failed to load data: ${response.statusText}`);
+                        }
+                        
+                        const result = await response.json();
+                        console.log('API response:', result.success);
+                        this.progressLogData = result.data || [];
+                    } catch (error) {
+                        console.error('Error loading data:', error);
+                        this.error = error.message;
+                        this.progressLogData = [];
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+                
+                openTransactionSearch(txnId) {
+                    const url = `/txn.html?txn_id=${encodeURIComponent(txnId)}`;
+                    window.open(url, '_blank', 'width=1200,height=800,scrollbars=yes,resizable=yes');
+                },
+                
+                getProgressClass(progress) {
+                    if (!progress) return '';
+                    const prog = progress.toLowerCase();
+                    if (prog.includes('queued')) return 'queued';
+                    if (prog.includes('running') || prog.includes('active')) return 'running';
+                    if (prog.includes('completed') || prog.includes('done')) return 'completed';
+                    return '';
+                },
+                
+                formatTimestamp(timestampStr) {
+                    if (!timestampStr || timestampStr === 'N/A') {
+                        return 'No timestamp available';
+                    }
+                    
+                    try {
+                        // Parse timestamp format: [8,1756196012873001,130(KW),2]
+                        const match = timestampStr.match(/\[(\d+),(\d+),(\d+).*\]/);
+                        if (!match) {
+                            return 'Invalid timestamp format';
+                        }
+                        
+                        const microTimestamp = parseInt(match[2]);
+                        const millisTimestamp = Math.floor(microTimestamp / 1000);
+                        const date = new Date(millisTimestamp);
+                        
+                        if (isNaN(date.getTime())) {
+                            return 'Invalid timestamp';
+                        }
+                        
+                        // Format as DD-MM-YYYY HH-MM-SS.mmm
+                        const day = String(date.getDate()).padStart(2, '0');
+                        const month = String(date.getMonth() + 1).padStart(2, '0');
+                        const year = date.getFullYear();
+                        const hours = String(date.getHours()).padStart(2, '0');
+                        const minutes = String(date.getMinutes()).padStart(2, '0');
+                        const seconds = String(date.getSeconds()).padStart(2, '0');
+                        const milliseconds = String(date.getMilliseconds()).padStart(3, '0');
+                        
+                        return `${day}-${month}-${year} ${hours}-${minutes}-${seconds}.${milliseconds}`;
+                    } catch (error) {
+                        console.error('Error parsing timestamp:', timestampStr, error);
+                        return 'Error parsing timestamp';
+                    }
+                },
+                
+                formatTimestampFromMillis(millis) {
+                    if (!millis || millis === 0) {
+                        return 'Not scheduled';
+                    }
+                    
+                    try {
+                        const date = new Date(millis);
+                        
+                        if (isNaN(date.getTime())) {
+                            return 'Invalid timestamp';
+                        }
+                        
+                        // Format as DD-MM-YYYY HH-MM-SS.mmm
+                        const day = String(date.getDate()).padStart(2, '0');
+                        const month = String(date.getMonth() + 1).padStart(2, '0');
+                        const year = date.getFullYear();
+                        const hours = String(date.getHours()).padStart(2, '0');
+                        const minutes = String(date.getMinutes()).padStart(2, '0');
+                        const seconds = String(date.getSeconds()).padStart(2, '0');
+                        const milliseconds = String(date.getMilliseconds()).padStart(3, '0');
+                        
+                        return `${day}-${month}-${year} ${hours}-${minutes}-${seconds}.${milliseconds}`;
+                    } catch (error) {
+                        console.error('Error parsing timestamp:', millis, error);
+                        return 'Error parsing timestamp';
+                    }
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

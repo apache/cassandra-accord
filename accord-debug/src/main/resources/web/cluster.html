@@ -1,0 +1,238 @@
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accord Debug Interface</title>
+    <script src="vue.global.js"></script>
+    <script src="/widgets/transaction_widget.js"></script>
+    <script src="/widgets/navigation.js"></script>
+    <script src="/widgets/host_selector.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="app">
+        <div v-if="error" class="error">
+            {{ error }}
+        </div>
+
+        <div class="search-container">
+            <input 
+                v-model="searchFilter" 
+                type="text" 
+                placeholder="Filter transactions by ID or status..." 
+                class="search-input"
+            >
+        </div>
+
+        <div class="nodes-container">
+            <div v-if="loading && nodes.length === 0" class="loading">
+                Discovering nodes...
+            </div>
+            
+            <div v-for="node in getFilteredNodes()" :key="node.id" class="node-strip">
+                <div class="node-header">
+                    <h2>Node {{ node.id }}</h2>
+                    <span class="store-count">{{ node.stores.length }} stores</span>
+                </div>
+                
+                <div class="stores-container">
+                    <div v-for="store in node.stores" :key="store.storeId"
+                         class="command-store" 
+                         :data-node-id="node.id" 
+                         :data-store-id="store.storeId">
+                        <div class="store-header">
+                            <h3>Store {{ store.storeId }}</h3>
+                            <div class="store-ranges" v-if="store.ranges && store.ranges.length > 0">
+                                <span
+                                    v-for="range in store.ranges" 
+                                    :key="range"
+                                    class="range-item"
+                                    :class="{ 'active': selectedRange === range }"
+                                    @click="toggleRangeFilter(range)"
+                                    :title="'Click to filter by range: ' + range">
+                                    {{ range }}
+                                </span>
+                            </div>
+                        </div>
+                        
+                        <div class="transactions-list">
+                            <div v-if="!store.loaded && !store.loading" class="loading-txns">Scroll to load transactions...</div>
+                            <div v-else-if="store.loading" class="loading-txns">Loading transactions...</div>
+                            <div v-else-if="store.error" class="error-txns">{{ store.error }}</div>
+                            <div v-else-if="store.loaded && store.transactions.length === 0" class="no-txns">No transactions</div>
+                            <div v-else-if="store.loaded">
+                                <div v-for="txn in store.transactions" :key="txn.txnId"
+                                     class="transaction-item clickable"
+                                     @click="showTransactionDetails(txn, node.id, store.storeId)">
+                                    <div class="txn-id">{{ txn.txnId }}</div>
+                                    <div :class="['txn-status', txn.saveStatus ]">{{ txn.saveStatus }}</div>
+                                </div>
+                                <div v-if="store.transactions.length === 0 && searchFilter" class="no-txns">
+                                    No transactions match "{{ searchFilter }}"
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Transaction Details Popup -->
+        <div v-if="showTransactionPopup" class="popup-overlay" @click="closeTransactionPopup">
+            <div class="popup-content" @click.stop>
+                <div class="popup-header">
+                    <h2>Transaction Details</h2>
+                    <button @click="closeTransactionPopup" class="close-btn">&times;</button>
+                </div>
+                
+                <!-- Breadcrumbs -->
+                <div v-if="transactionBreadcrumbs.length > 1" class="breadcrumb-container">
+                    <div class="breadcrumb-label">Dependency Chain:</div>
+                    <div class="breadcrumb-nav">
+                        <span v-for="(breadcrumb, index) in transactionBreadcrumbs" :key="breadcrumb.txnId" class="breadcrumb-item">
+                            <span v-if="index < transactionBreadcrumbs.length - 1" 
+                                  class="breadcrumb-link clickable" 
+                                  @click="navigateToBreadcrumb(index)"
+                                  :title="'Click to navigate back to: ' + breadcrumb.txnId">
+                                {{ breadcrumb.txnId }}
+                            </span>
+                            <span v-else class="breadcrumb-current">
+                                {{ breadcrumb.txnId }}
+                            </span>
+                            <span v-if="index < transactionBreadcrumbs.length - 1" class="breadcrumb-arrow">→</span>
+                        </span>
+                    </div>
+                </div>
+                
+                <div class="popup-body" v-if="selectedTransaction">
+                    <div class="txn-detail-section">
+                        <h3>Basic Information</h3>
+                        <div class="txn-detail-item">
+                            <span class="txn-detail-label">Transaction ID:</span>
+                            <span class="txn-detail-value">
+                                <transaction-widget :txn-id="selectedTransaction.txnId"></transaction-widget>
+                            </span>
+                        </div>
+                        <div class="txn-detail-item">
+                            <span class="txn-detail-label">Routing Key:</span>
+                            <span class="txn-detail-value clickable routing-key" @click="showCommandsForKey(selectedTransaction.routingKey)"
+                                  :title="'Click to view CommandsForKey for: ' + selectedTransaction.routingKey">
+                                {{ selectedTransaction.routingKey || 'null' }}
+                            </span>
+                        </div>
+                        <div class="txn-detail-item">
+                            <span class="txn-detail-label">Save Status:</span>
+                            <span class="txn-detail-value" :class="['status', selectedTransaction.saveStatus]">{{ selectedTransaction.saveStatus }}</span>
+                        </div>
+                        <div class="txn-detail-item">
+                            <span class="txn-detail-label">Durability:</span>
+                            <span class="txn-detail-value">{{ selectedTransaction.durability || 'null' }}</span>
+                        </div>
+                        <div class="txn-detail-item">
+                            <span class="txn-detail-label">Execute At:</span>
+                            <span class="txn-detail-value">{{ selectedTransaction.executeAt || 'null' }}</span>
+                        </div>
+                    </div>
+
+                    <div class="txn-detail-section">
+                        <h3>Participants</h3>
+                        <h4>Owns</h4>
+                        <div class="txn-detail-item">
+                            <span class="txn-detail-value participants">{{ selectedTransaction.participantsOwns || 'null' }}</span>
+                        </div>
+                        <h4>Touches</h4>
+                        <div class="txn-detail-item">
+                            <span class="txn-detail-value participants">{{ selectedTransaction.participantsTouches || 'null' }}</span>
+                        </div>
+                        <h4>HasTouched</h4>
+                        <div class="txn-detail-item">
+                            <span class="txn-detail-value participants">{{ selectedTransaction.participantsHasTouched || 'null' }}</span>
+                        </div>
+                        <div v-if="selectedTransaction.participantsExecutes">
+                            <h4>Executes</h4>
+                            <div class="txn-detail-item">
+                                <span class="txn-detail-value participants">{{ selectedTransaction.participantsExecutes || 'null' }}</span>
+                            </div>
+                        </div>
+                        <div v-if="selectedTransaction.participantsWaitsOn">
+                            <h4>WaitsOn</h4>
+                            <div class="txn-detail-item">
+                                <span class="txn-detail-value participants">{{ selectedTransaction.participantsWaitsOn || 'null' }}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="txn-detail-section">
+                        <h3>State Information</h3>
+                        <div class="txn-detail-item">
+                            <span class="txn-detail-label">Promised:</span>
+                            <span class="txn-detail-value">{{ selectedTransaction.promised || 'null' }}</span>
+                        </div>
+                        <div class="txn-detail-item">
+                            <span class="txn-detail-label">Accepted/Committed:</span>
+                            <span class="txn-detail-value">{{ selectedTransaction.acceptedOrCommitted || 'null' }}</span>
+                        </div>
+                    </div>
+
+                    <div class="txn-detail-section" v-if="selectedTransaction.partialDeps && selectedTransaction.partialDeps.length > 0">
+                        <h3>Partial Dependencies ({{ selectedTransaction.partialDeps.length }})</h3>
+                        <div class="txn-bubble-container">
+                            <span v-for="dep in selectedTransaction.partialDeps"
+                                  :key="dep" 
+                                  class="txn-bubble clickable" 
+                                  @click="showTransactionById(dep)"
+                                  :title="'Click to view transaction: ' + dep">
+                                {{ dep }}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="txn-detail-section" v-if="selectedTransaction.waitingOnKeys && selectedTransaction.waitingOnKeys.length > 0">
+                        <h3>Waiting On Keys ({{ selectedTransaction.waitingOnKeys.length }})</h3>
+                        <div class="txn-bubble-container">
+                            <span v-for="key in selectedTransaction.waitingOnKeys"
+                                  class="txn-detail-value clickable routing-key"
+                                  @click="showCommandsForKey(key)"
+                                  :title="'Click to view CommandsForKey for: ' + key">
+                                {{ key || 'null' }}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="txn-detail-section" v-if="selectedTransaction.waitingOnTxnIds && selectedTransaction.waitingOnTxnIds.length > 0">
+                        <h3>Waiting On ({{ selectedTransaction.waitingOnTxnIds.length }})</h3>
+                        <div class="txn-bubble-container">
+                            <span v-for="txn in selectedTransaction.waitingOnTxnIds"
+                                  :key="txn"
+                                  class="txn-bubble clickable"
+                                  @click="showTransactionById(txn)"
+                                  :title="'Click to view transaction: ' + txn">
+                                {{ txn }}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    <script src="cluster.js"></script>
+</body>
+</html>

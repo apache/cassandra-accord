@@ -48,6 +48,8 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 import javax.annotation.Nullable;
 
+import accord.debug.NewServer;
+
 import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -633,6 +635,7 @@ public class Cluster
         Map<Id, Node> nodeMap = new LinkedHashMap<>();
         Map<Id, AsyncExecutor> executorMap = new LinkedHashMap<>();
         Map<Id, Journal> journalMap = new LinkedHashMap<>();
+
         try
         {
             RandomSource random = randomSupplier.get();
@@ -679,6 +682,7 @@ public class Cluster
             TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, prefixes, topology, topologyUpdates, nodeMap::get, schemaApply);
             List<DurabilityService> durabilityServices = new ArrayList<>();
             List<Service> services = new ArrayList<>();
+            NewServer debugServer = new NewServer(8080);
             for (Id id : nodes)
             {
                 ClusterScheduler scheduler = sinks.new ClusterScheduler(id.id);
@@ -702,6 +706,15 @@ public class Cluster
                 durabilityServices.add(node.durability());
                 nodeMap.put(id, node);
                 durabilityServices.add(new DurabilityService(node));
+
+                debugServer.registerNode(node);
+            }
+            debugServer.start();
+
+            for (Node node : nodeMap.values())
+            {
+                node.configService().registerListener((ListStore) node.commandStores().dataStore());
+                node.configService().registerListener(node.durability());
             }
 
             for (Node node : nodeMap.values())
@@ -763,8 +776,11 @@ public class Cluster
 
             Scheduled restart = clusterScheduler.recurring(() -> {
                 Id id = pickNodeNotBootstrapping(random, nodesList, nodeMap);
+                System.out.println("id = " + id);
+                NewServer.getInstance().pause();
                 if (id == null)
                     return;
+
 
                 CommandStores stores = nodeMap.get(id).commandStores();
                 while (sinks.drain(getPendingPredicate(id, stores.all()))) ;
@@ -811,7 +827,7 @@ public class Cluster
                 // we can get ahead of prior state by executing further if we skip some earlier phase's dependencies
                 listStore.checkAtLeast(stores, prevData);
                 trace.debug("Done with replay.");
-            }, () -> random.nextInt(10, 30), SECONDS);
+            }, () -> random.nextInt(3, 5), SECONDS);
 
             durabilityServices.forEach(DurabilityService::start);
             services.forEach(Service::start);

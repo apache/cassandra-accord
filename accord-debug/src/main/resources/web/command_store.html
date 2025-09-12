@@ -1,0 +1,536 @@
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cluster Debug Interface - Command Store</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="/widgets/transaction_widget.js"></script>
+    <script src="/widgets/navigation.js"></script>
+    <script src="/widgets/host_selector.js"></script>
+    <script src="/widgets/routing_key_widget.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .redundant-before {
+            height: 1000px;
+            overflow-y: scroll;
+        }
+        .selectors-container {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 0.5rem;
+        }
+
+        .host-selector {
+            margin-bottom: 0rem;
+        }
+        .host-selector, .store-selector, .search-selector {
+            padding: 1rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .search-selector {
+            flex: 1;
+            min-width: 300px;
+        }
+        
+        .search-selector input {
+            flex: 1;
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            min-width: 200px;
+        }
+        
+        .host-selector label, .store-selector label, .search-selector label {
+            font-weight: 500;
+            color: #495057;
+            margin-right: 0.5rem;
+            white-space: nowrap;
+        }
+        
+        .host-selector select, .store-selector select {
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            min-width: 200px;
+        }
+
+        .property-filter {
+            margin-bottom: 0.5rem;
+            padding: 1rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .main-layout {
+            display: grid;
+            grid-template-columns: 1fr 350px;
+            gap: 0.5rem;
+            padding: 0.5rem;
+        }
+        
+        .transactions-section {
+            min-width: 0; /* Prevents grid overflow */
+        }
+        
+        .properties-sidebar {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 0.5rem;
+            border: 1px solid #dee2e6;
+            height: fit-content;
+            position: sticky;
+            top: 0.5rem;
+        }
+        
+        .properties-section {
+            margin-bottom: 0.5rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 0.5rem;
+        }
+        
+        .section-title {
+            font-size: 1.2em;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: #495057;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 0.5rem;
+        }
+        
+        .range-group {
+            margin-bottom: 0.5rem;
+            padding: 5px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+        
+        .range-info {
+            margin-bottom: 1rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 2px solid #e9ecef;
+        }
+        
+        .range-token {
+            font-family: monospace;
+            background: #007bff;
+            color: white;
+            padding: 0.5rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.9em;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            display: inline-block;
+        }
+        
+        .range-epochs {
+            font-size: 0.85em;
+            color: #6c757d;
+            font-family: monospace;
+        }
+        
+        .properties-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 0.75rem;
+        }
+        
+        .property-item {
+            padding: 0.75rem;
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #dee2e6;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+        
+        .property-item:hover {
+            border-color: #007bff;
+            box-shadow: 0 2px 8px rgba(0,123,255,0.15);
+        }
+        
+        .property-item.active {
+            border-color: #007bff;
+            background: #e7f3ff;
+        }
+        
+        .property-name {
+            font-size: 0.85em;
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 0.5rem;
+        }
+        
+        .property-timestamp {
+            font-family: monospace;
+            font-size: 0.8em;
+            color: #212529;
+            background: #f8f9fa;
+            padding: 0.4rem 0.6rem;
+            border-radius: 4px;
+            border: 1px solid #e9ecef;
+        }
+        
+        @media (max-width: 1200px) {
+            .main-layout {
+                grid-template-columns: 1fr;
+            }
+            
+            .properties-sidebar {
+                position: static;
+            }
+        }
+        
+        
+
+        .search-container {
+            margin-bottom: 0.5rem;
+            padding: 1rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .search-input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        
+        .error, .loading {
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+            text-align: center;
+        }
+        
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .loading {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #b8daff;
+        }
+        
+        .store-info {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 0.5rem;
+            overflow: hidden;
+        }
+        
+        .store-header {
+            background: #007bff;
+            color: white;
+            padding: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .store-title {
+            font-size: 1.2em;
+            font-weight: 600;
+        }
+        
+        .store-details {
+            background: rgba(255,255,255,0.2);
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+        
+        .transactions-section {
+            padding: 0.5rem;
+        }
+        
+        .section-title {
+            font-size: 1.1em;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: #495057;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 0.5rem;
+        }
+        
+        .transactions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+            gap: 1rem;
+        }
+        
+        .transaction-card {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 1rem;
+            transition: all 0.3s;
+        }
+        
+        .transaction-card.filtered-out {
+            opacity: 0.3;
+            background: #f1f1f1;
+        }
+        
+        .transaction-card:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .txn-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .txn-id {
+            font-family: monospace;
+            background: #007bff;
+            color: white;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            font-size: 0.85em;
+            cursor: pointer;
+        }
+        
+        .txn-id:hover {
+            background: #0056b3;
+        }
+        
+        .txn-status {
+            font-size: 0.8em;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            background: #28a745;
+            color: white;
+        }
+        
+        .txn-fields {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 0.5rem;
+        }
+        
+        .txn-field {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            padding: 0.25rem 0;
+            font-size: 0.9em;
+        }
+        
+        .field-label {
+            font-weight: 500;
+            color: #495057;
+            min-width: 100px;
+            margin-right: 0.5rem;
+        }
+        
+        .field-value {
+            font-family: monospace;
+            color: #212529;
+            font-size: 0.85em;
+            word-break: break-all;
+            text-align: right;
+            flex: 1;
+        }
+        
+        .no-data {
+            text-align: center;
+            color: #6c757d;
+            padding: 3rem;
+            font-style: italic;
+        }
+        
+        .stats-info {
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            background: #e7f3ff;
+            border-radius: 4px;
+            border-left: 4px solid #007bff;
+            font-size: 0.9em;
+        }
+        
+        .ranges-info {
+            margin-top: 0.5rem;
+            font-size: 0.9em;
+            color: #6c757d;
+        }
+        
+        .range-item {
+            background: #e9ecef;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 0.8em;
+            margin-right: 0.5rem;
+            display: inline-block;
+            margin-bottom: 0.25rem;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <navigation-widget></navigation-widget>
+
+        <div class="selectors-container">
+            <div class="host-selector">
+                <label for="hostSelect">Select Host:</label>
+                <select id="hostSelect" v-model="selectedHostId" @change="handleHostChange">
+                    <option value="">-- Select a host --</option>
+                    <option v-for="host in hosts" :key="host.id" :value="host.id">
+                        {{ host.id }}
+                    </option>
+                </select>
+            </div>
+
+            <div class="store-selector" v-if="selectedHost">
+                <label for="storeSelect">Select Command Store:</label>
+                <select id="storeSelect" v-model="selectedStoreId" @change="handleStoreChange">
+                    <option value="">-- Select a command store --</option>
+                    <option v-for="store in selectedHost.stores" :key="store.storeId" :value="store.storeId">
+                        Store {{ store.storeId }} ({{ store.ranges.length }} ranges)
+                    </option>
+                </select>
+            </div>
+
+            <div class="search-selector" v-if="selectedStore && transactions.length > 0">
+                <label for="searchInput">Search:</label>
+                <input 
+                    id="searchInput"
+                    v-model="searchFilter" 
+                    type="text" 
+                    placeholder="Search transactions by TxnId, status, or any field..." 
+                    class="search-input"
+                >
+            </div>
+        </div>
+
+        <div v-if="error" class="error">
+            {{ error }}
+        </div>
+
+        <div v-if="loading" class="loading">
+            Loading transactions...
+        </div>
+
+        <div v-if="selectedStore && !loading" class="store-info">
+            <!-- Main Layout with Transactions and Properties Sidebar -->
+            <div class="main-layout">
+                <div class="transactions-section">
+                    <div v-if="filteredTransactions.length === 0" class="no-data">
+                        <div v-if="transactions.length === 0">No transactions found for this store</div>
+                        <div v-else>No transactions match your search criteria</div>
+                    </div>
+
+                    <div class="transactions-grid" v-if="filteredTransactions.length > 0">
+                        <div 
+                            v-for="txn in filteredTransactions" 
+                            :key="txn.txnId" 
+                            class="transaction-card"
+                            :class="{ 'filtered-out': isFilteredOut(txn) }"
+                        >
+                            <div class="txn-header">
+                                <transaction-widget :txn-id="txn.txnId"></transaction-widget>
+                                <div class="txn-status">{{ txn.saveStatus }}</div>
+                            </div>
+                            
+                            <div class="txn-fields">
+                                <div class="txn-field" v-if="txn.route">
+                                    <span class="field-label">Route:</span>
+                                    <span class="field-value">
+                                        <routing-key-widget
+                                                :keys="[txn.route]"
+                                                :host-id="selectedHostId"
+                                                class="compact">
+                                        </routing-key-widget>
+                                    </span>
+                                </div>
+                                <div class="txn-field" v-if="txn.executeAt">
+                                    <span class="field-label">Execute At:</span>
+                                    <span class="field-value">{{ txn.executeAt }}</span>
+                                </div>
+                                <div class="txn-field" v-if="txn.durability">
+                                    <span class="field-label">Durability:</span>
+                                    <span class="field-value">{{ txn.durability }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="properties-sidebar" v-if="redundantBeforeData.length > 0">
+                    <div class="redundant-before">
+                        <div class="section-title">Redundant Before</div>
+                        <div v-for="rangeData in redundantBeforeData" :key="rangeData.range" class="range-group">
+                            <div class="range-info">
+                                <div class="range-token">[{{ rangeData.tokenStart }}, {{ rangeData.tokenEnd }})</div>
+                                <div class="range-epochs">{{ rangeData.startEpoch || 'N/A' }} -> {{ rangeData.endEpoch || 'N/A' }}</div>
+                            </div>
+                            <div class="properties-grid">
+                                <div
+                                    v-for="property in rangeData.properties"
+                                    :key="property.property"
+                                    class="property-item"
+                                    :class="{ active: selectedProperty === property.property }"
+                                    @click="filterByProperty(property.property)"
+                                >
+                                    <div class="property-name">{{ property.property }}:</div>
+                                    <div class="property-timestamp">{{ property.timestamp }}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="command_store.js"></script>
+</body>
+</html>

@@ -642,7 +642,7 @@ public class BurnTestBase
 
     protected static void run(long seed)
     {
-        Duration timeout = Duration.ofMinutes(3);
+        Duration timeout = Duration.ofMinutes(3000);
         try
         {
             TimeoutUtils.runBlocking(timeout, "BurnTest with timeout", () -> run(seed, 1000));

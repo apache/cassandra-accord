@@ -43,8 +43,20 @@ public class Ballot extends Timestamp
         return new Ballot(epoch, hlc, flags, node);
     }
 
-    public static final Ballot ZERO = new Ballot(Timestamp.NONE);
-    public static final Ballot MAX = new Ballot(Timestamp.MAX);
+    public static final Ballot ZERO = new Ballot(Timestamp.NONE) {
+        @Override
+        public String toStandardString()
+        {
+            return "NONE";
+        }
+    };
+    public static final Ballot MAX = new Ballot(Timestamp.MAX) {
+        @Override
+        public String toStandardString()
+        {
+            return "ZERO";
+        }
+    };
 
     public Ballot(Timestamp from)
     {

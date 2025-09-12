@@ -18,6 +18,8 @@
 
 package accord.primitives;
 
+import java.util.AbstractList;
+import java.util.List;
 import java.util.Objects;
 
 import accord.api.RoutingKey;
@@ -116,6 +118,20 @@ public class PartialDeps extends Deps
     public Deps asFullUnsafe()
     {
         return new Deps(keyDeps, rangeDeps);
+    }
+
+    public List<TxnId> asListUnsafe()
+    {
+        return new AbstractList<>()
+        {
+            @Override
+            public TxnId get(int index) { return txnId(index); }
+            @Override
+            public int size()
+            {
+                return txnIdCount();
+            }
+        };
     }
 
     public Deps reconstitute(FullRoute<?> route)

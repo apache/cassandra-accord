@@ -1,0 +1,339 @@
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cluster Debug Interface - Commands For Key</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="/widgets/navigation.js"></script>
+    <script src="/widgets/host_selector.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .search-container {
+            margin-bottom: 2rem;
+            padding: 1rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .search-row {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .search-input {
+            flex: 1;
+            min-width: 200px;
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        
+        .search-btn {
+            padding: 0.75rem 1.5rem;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        
+        .search-btn:hover {
+            background: #0056b3;
+        }
+        
+        .search-btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        
+        .error, .loading {
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+            text-align: center;
+        }
+        
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .loading {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #b8daff;
+        }
+        
+        .key-info {
+            margin-bottom: 2rem;
+            padding: 1rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-left: 4px solid #28a745;
+        }
+        
+        .key-info h2 {
+            margin: 0 0 0.5rem 0;
+            color: #495057;
+        }
+        
+        .routing-key {
+            font-family: monospace;
+            background: #e9ecef;
+            padding: 0.5rem;
+            border-radius: 3px;
+            font-size: 1.1em;
+            word-break: break-all;
+        }
+        
+        .commands-for-key-table {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .cfk-table-header {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1.5fr 1fr 1fr 0.8fr 0.8fr 1fr;
+            gap: 1px;
+            background: #007bff;
+            padding: 0;
+        }
+        
+        .cfk-header-cell {
+            background: #007bff;
+            color: white;
+            padding: 1rem 0.5rem;
+            font-weight: 600;
+            font-size: 0.9em;
+            text-align: center;
+        }
+        
+        .cfk-table-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1.5fr 1fr 1fr 0.8fr 0.8fr 1fr;
+            gap: 1px;
+            background: #f8f9fa;
+        }
+        
+        .cfk-table-row:nth-child(even) {
+            background: #ffffff;
+        }
+        
+        .cfk-cell {
+            background: inherit;
+            padding: 0.75rem 0.5rem;
+            font-family: monospace;
+            font-size: 0.85em;
+            word-break: break-all;
+            border-bottom: 1px solid #dee2e6;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+        
+        .cfk-cell.txn-id {
+            cursor: pointer;
+            color: #007bff;
+            text-decoration: underline;
+        }
+        
+        .cfk-cell.txn-id:hover {
+            background: #e3f2fd;
+        }
+        
+        .no-data {
+            text-align: center;
+            color: #6c757d;
+            padding: 3rem;
+            font-style: italic;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .stats-info {
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            background: #e7f3ff;
+            border-radius: 4px;
+            border-left: 4px solid #007bff;
+            font-size: 0.9em;
+        }
+        
+        @media (max-width: 1200px) {
+            .cfk-table-header,
+            .cfk-table-row {
+                grid-template-columns: 1fr 1fr 1fr 1fr;
+            }
+            
+            .cfk-header-cell:nth-child(n+5),
+            .cfk-cell:nth-child(n+5) {
+                display: none;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .cfk-table-header,
+            .cfk-table-row {
+                grid-template-columns: 1fr 1fr;
+            }
+            
+            .cfk-header-cell:nth-child(n+3),
+            .cfk-cell:nth-child(n+3) {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div v-if="error" class="error">
+            {{ error }}
+        </div>
+
+        <div v-if="loading" class="loading">
+            Loading commands for key data...
+        </div>
+
+        <template v-if="!loading && commandsData && commandsData.length > 0">
+            <div class="key-info">
+                <h2>Commands For Key</h2>
+                <div class="routing-key">{{ searchKey }}</div>
+            </div>
+
+            <div class="commands-for-key-table">
+                <div class="cfk-table-header">
+                    <div class="cfk-header-cell">Txn ID</div>
+                    <div class="cfk-header-cell">Ballot</div>
+                    <div class="cfk-header-cell">Deps Known Until</div>
+                    <div class="cfk-header-cell">Flags</div>
+                    <div class="cfk-header-cell">Execute At</div>
+                    <div class="cfk-header-cell">Missing</div>
+                    <div class="cfk-header-cell">Status</div>
+                    <div class="cfk-header-cell">Status Overrides</div>
+                </div>
+                <div v-for="cmd in commandsData" :key="cmd.txnId + '.' + cmd.commandStoreId" class="cfk-table-row">
+                    <div class="cfk-cell txn-id" @click="openTransactionDetail(cmd.txnId)">{{ cmd.txnId || 'null' }}</div>
+                    <div class="cfk-cell">{{ cmd.ballot || 'null' }}</div>
+                    <div class="cfk-cell">{{ cmd.depsKnownBefore || 'null' }}</div>
+                    <div class="cfk-cell">{{ cmd.flags || 'null' }}</div>
+                    <div class="cfk-cell">{{ cmd.executeAt || 'null' }}</div>
+                    <div class="cfk-cell">{{ cmd.missing || 'null' }}</div>
+                    <div class="cfk-cell">{{ cmd.status || 'null' }}</div>
+                    <div class="cfk-cell">{{ cmd.statusOverrides || 'null' }}</div>
+                </div>
+            </div>
+        </template>
+
+        <div v-if="!loading && searchKey && commandsData && commandsData.length === 0" class="no-data">
+            No commands found for key "{{ searchKey }}" on {{ selectedHost }}
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            components: {
+                'navigation-widget': window.NavigationWidgetComponent,
+                'host-selector': window.HostSelectorComponent
+            },
+            data() {
+                return {
+                    selectedHost: new URLSearchParams(window.location.search).get('host') || '',
+                    searchKey: new URLSearchParams(window.location.search).get('key') || '',
+                    commandsData: null,
+                    loading: false,
+                    error: null
+                };
+            },
+            mounted() {
+                // If both host and key are provided in URL, load data automatically
+                if (this.selectedHost && this.searchKey) {
+                    this.loadCommandsForKey();
+                }
+            },
+            methods: {
+                async loadCommandsForKey() {
+                    if (!this.selectedHost || !this.searchKey.trim()) {
+                        this.error = 'Please select a host and enter a routing key';
+                        return;
+                    }
+                    
+                    this.loading = true;
+                    this.error = null;
+                    this.commandsData = null;
+                    
+                    try {
+                        const encodedKey = encodeURIComponent(this.searchKey.trim());
+                        const response = await fetch(`/hosts/${this.selectedHost}/commands_for_keys/${encodedKey}`);
+                        
+                        if (!response.ok) {
+                            throw new Error(`Failed to load commands for key: ${response.statusText}`);
+                        }
+                        
+                        const result = await response.json();
+                        console.log('Commands for key response:', result);
+
+                        this.commandsData = result.data || [];
+                        
+                        // Update URL with current search parameters
+                        const url = new URL(window.location);
+                        url.searchParams.set('host', this.selectedHost);
+                        url.searchParams.set('key', this.searchKey.trim());
+                        window.history.replaceState({}, '', url);
+                        
+                    } catch (error) {
+                        console.error('Error loading commands for key:', error);
+                        this.error = error.message;
+                        this.commandsData = null;
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+                
+                openTransactionDetail(txnId) {
+                    if (!txnId || txnId === 'null') return;
+                    
+                    const url = `/txn.html?host=${encodeURIComponent(this.selectedHost)}&txn_id=${encodeURIComponent(txnId)}`;
+                    window.open(url, '_blank', 'width=1200,height=800,scrollbars=yes,resizable=yes');
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

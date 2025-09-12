@@ -49,7 +49,7 @@ import static accord.local.RedundantStatus.Property.PRE_BOOTSTRAP_OR_STALE;
 import static accord.local.RedundantStatus.selectOrCreate;
 import static accord.local.RedundantStatus.toAll;
 
-public class RedundantBeforeTest
+public class RedundantBeforeInfoTest
 {
     @Test
     public void test()
