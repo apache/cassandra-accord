@@ -628,9 +628,9 @@ limitations under the License.
                            :class="{ highlighted: isMessageHighlighted(message) }">
                             <!-- Message label background -->
                             <rect 
-                                :x="getLabelX(message) - getLabelWidth(message.short_description) / 2 - 20"
+                                :x="getLabelX(message) - getLabelWidth(truncateText(message.short_description)) / 2 - 20"
                                 :y="getLabelY(message) - 7"
-                                :width="getLabelWidth(message.short_description) + 40"
+                                :width="getLabelWidth(truncateText(message.short_description)) + 40"
                                 height="14"
                                 class="message-label-bg"
                                 @click="onMessageClick(message)"
@@ -644,7 +644,7 @@ limitations under the License.
                                 @click="onMessageClick(message)"
                                 :title="'Click to view details for: ' + message.short_description"
                             >
-                                {{ message.short_description }}
+                                {{ truncateText(message.short_description) }}
                             </text>
                         </g>
                     </svg>
@@ -656,17 +656,14 @@ limitations under the License.
                         
                         <div class="info-section">
                             <h4>Basic Information</h4>
-                            <p><strong>From:</strong> {{ selectedMessage.from }}</p>
-                            <p><strong>To:</strong> {{ selectedMessage.to }}</p>
-                            <p><strong>Type:</strong> {{ selectedMessage.message_kind }}</p>
-                            <p><strong>Short Description:</strong> {{ selectedMessage.short_description }}</p>
+                            <p>{{ selectedMessage.from }} -> {{ selectedMessage.to }}</p>
+                            <p>{{selectedMessage.id}}#{{ selectedMessage.message_kind }}</p>
+                            <p>{{ selectedMessage.short_description }}</p>
                         </div>
                         
                         <div class="info-section">
-                            <h4>Timing</h4>
-                            <p><strong>Sent At:</strong> {{ selectedMessage.sent_at }}</p>
-                            <p><strong>Received At:</strong> {{ selectedMessage.received_at }}</p>
-                            <p><strong>Duration:</strong> {{ selectedMessage.received_at - selectedMessage.sent_at }}ms</p>
+                            <p><strong>Sent At:</strong> {{ formatDateTime(selectedMessage.sent_at) }}</p>
+                            <p><strong>Received At:</strong> {{ formatDateTime(selectedMessage.received_at) }}</p>
                         </div>
                         
                         <div class="info-section" v-if="selectedMessage.tags && selectedMessage.tags.length > 0">

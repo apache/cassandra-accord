@@ -26,7 +26,6 @@ createApp({
             filteredMessages: [],
             processedMessages: [],
             processes: [],
-            timeMap: new Map(),
             selectedMessage: null,
             highlightedMessages: [],
             error: null,
@@ -51,7 +50,7 @@ createApp({
             headerHeight: 50,
             footerHeight: 30,
             processSpacing: 500,
-            timeStep: 30,
+            timeStep: 50,
             selfLoopWidth: 100
         };
     },
@@ -69,6 +68,30 @@ createApp({
     },
     
     methods: {
+        formatDateTime(timestamp) {
+            if (!timestamp) return 'N/A';
+            
+            try {
+                const date = new Date(timestamp);
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = String(date.getFullYear()).slice(-2);
+                const hours = String(date.getHours()).padStart(2, '0');
+                const minutes = String(date.getMinutes()).padStart(2, '0');
+                const seconds = String(date.getSeconds()).padStart(2, '0');
+                const milliseconds = String(date.getMilliseconds()).padStart(3, '0');
+                
+                return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}:${milliseconds}`;
+            } catch (error) {
+                return timestamp; // Return original if parsing fails
+            }
+        },
+        
+        truncateText(text, maxLength = 20) {
+            if (!text) return '';
+            return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+        },
+        
         loadSampleData() {
             const sampleData = [];
             
@@ -151,7 +174,10 @@ createApp({
 
             // Create timestamp mapping for normalization from filtered messages
             const allTimestamps = new Set();
+            const reqReceivedAt = new Map();
             filteredMessages.forEach(msg => {
+                if (msg && msg.message_kind.endsWith("_REQ"))
+                    reqReceivedAt.set([msg.to, msg.id], msg.received_at);
                 allTimestamps.add(msg.sent_at);
                 allTimestamps.add(msg.received_at);
             });
@@ -163,11 +189,20 @@ createApp({
             });
             
             // Process filtered messages with normalized timestamps
-            this.processedMessages = filteredMessages.map(msg => ({
-                ...msg,
-                normalizedSentAt: timeMap.get(msg.sent_at),
-                normalizedReceivedAt:  timeMap.get(msg.received_at) > timeMap.get(msg.sent_at) ? timeMap.get(msg.received_at) : timeMap.get(msg.sent_at)
-            }))
+            this.processedMessages = filteredMessages.map(msg => {
+                var sent_at = msg.sent_at;
+                var received_at = msg.sent_at;
+                if (msg && msg.message_kind.endsWith("_RSP") && reqReceivedAt.has([msg.from, msg.id]))
+                {
+                    sent_at = reqReceivedAt.get([msg.from, msg.id]);
+                    received_at = sent_at + 1;
+                }
+                return {
+                    ...msg,
+                    normalizedSentAt: timeMap.get(sent_at),
+                    normalizedReceivedAt: timeMap.get(received_at) + 1
+                };
+            })
             
             // Calculate diagram dimensions
             this.calculateDimensions(timeMap);
