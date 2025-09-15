@@ -47,9 +47,8 @@ import static accord.coordinate.tracking.RequestStatus.Failed;
 import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.primitives.Routables.Slice.Minimal;
 
-public class CollectLatestDeps extends AbstractCoordination<List<LatestDeps>, GetLatestDepsReply, GetLatestDepsOk>
+public class CollectLatestDeps extends AbstractCoordination<Route<?>, List<LatestDeps>, GetLatestDepsReply, GetLatestDepsOk>
 {
-    final Route<?> route;
     final Timestamp executeAt;
     final @Nullable Ballot ballot;
 
@@ -57,8 +56,7 @@ public class CollectLatestDeps extends AbstractCoordination<List<LatestDeps>, Ge
 
     CollectLatestDeps(Node node, Topologies topologies, TxnId txnId, Route<?> route, @Nullable Ballot ballot, Timestamp executeAt, BiConsumer<List<LatestDeps>, Throwable> callback)
     {
-        super(node, node.someSequentialExecutor(), txnId, topologies.nodes(), callback);
-        this.route = route;
+        super(node, node.someSequentialExecutor(), txnId, route, topologies.nodes(), callback);
         this.executeAt = executeAt;
         this.ballot = ballot;
         this.tracker = new QuorumTracker(topologies);
@@ -83,7 +81,7 @@ public class CollectLatestDeps extends AbstractCoordination<List<LatestDeps>, Ge
         else
         {
             super.start();
-            contact(to -> new GetLatestDeps(to, tracker.topologies(), route, txnId, ballot, executeAt));
+            contact(to -> new GetLatestDeps(to, tracker.topologies(), scope, txnId, ballot, executeAt));
         }
     }
 
@@ -124,12 +122,6 @@ public class CollectLatestDeps extends AbstractCoordination<List<LatestDeps>, Ge
     public CoordinationKind kind()
     {
         return CoordinationKind.CollectLatestDeps;
-    }
-
-    @Override
-    public Unseekables<?> scope()
-    {
-        return route;
     }
 
     @Override

@@ -42,7 +42,7 @@ public interface Routable
             return this == Range;
         }
 
-        public static Routable.Domain ofOrdinal(int ordinal)
+        public static Routable.Domain forOrdinal(int ordinal)
         {
             return VALUES[ordinal];
         }

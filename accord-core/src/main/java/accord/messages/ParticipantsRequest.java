@@ -22,7 +22,6 @@ import java.util.function.BiFunction;
 import javax.annotation.Nullable;
 
 import accord.local.Node.Id;
-import accord.local.PreLoadContext;
 import accord.local.SafeCommandStore;
 import accord.primitives.FullRoute;
 import accord.primitives.Participants;
@@ -34,13 +33,12 @@ import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.topology.Topology.NodeInfo;
 import accord.utils.Invariants;
-import accord.utils.MapReduceConsume;
 import accord.utils.async.Cancellable;
 
 import static accord.topology.Shard.Flag.MUST_WITNESS;
 import static accord.utils.Invariants.illegalArgument;
 
-public abstract class ParticipantsRequest<P extends Participants<?>, R extends Reply> extends NoWaitRequest<P, R> implements Request, PreLoadContext, MapReduceConsume<SafeCommandStore, R>
+public abstract class ParticipantsRequest<P extends Participants<?>, R extends Reply> extends NoWaitRequest<P, R>
 {
     public final long waitForEpoch;
 
@@ -56,12 +54,6 @@ public abstract class ParticipantsRequest<P extends Participants<?>, R extends R
      * range owned by the target node for the involved epochs.
      */
     public P scope()
-    {
-        return scope;
-    }
-
-    @Override
-    public Unseekables<?> keys()
     {
         return scope;
     }

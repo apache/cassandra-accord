@@ -868,7 +868,6 @@ public abstract class CommandStores implements AsyncExecutorFactory
     {
         return mapReduce(StoreFinder.selector(participants, minEpoch, maxEpoch), new MapReduceCommandStores<Participants<?>, Void>(participants)
         {
-            @Override public Unseekables<?> keys() { return participants; }
             @Override public LoadKeys loadKeys() { return loadKeys;}
             @Override public LoadKeysFor loadKeysFor() { return loadKeysFor; }
             @Override public Void reduce(Void o1, Void o2) { return null; }

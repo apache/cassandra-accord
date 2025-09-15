@@ -23,6 +23,9 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.function.BiConsumer;
 
+import javax.annotation.Nullable;
+
+import accord.api.Tracing;
 import accord.coordinate.tracking.AbstractTracker;
 import accord.coordinate.tracking.ReadTracker;
 import accord.coordinate.tracking.RequestStatus;
@@ -30,6 +33,7 @@ import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.SequentialAsyncExecutor;
 import accord.messages.Callback;
+import accord.primitives.Participants;
 import accord.primitives.Route;
 import accord.primitives.WithQuorum;
 import accord.primitives.Ranges;
@@ -109,20 +113,23 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
     protected final Node node;
     protected final SequentialAsyncExecutor executor;
     protected final TxnId txnId;
+    protected final @Nullable Tracing tracing;
+    private final DebugMap debug;
+
     private BiConsumer<? super Result, Throwable> callback;
     private boolean isDone;
     private Throwable failure;
-    final DebugMap debug;
 
-    protected ReadCoordinator(Node node, SequentialAsyncExecutor executor, Topologies topologies, TxnId txnId, BiConsumer<? super Result, Throwable> callback)
+    protected ReadCoordinator(Node node, SequentialAsyncExecutor executor, Topologies topologies, TxnId txnId, Participants<?> participants, BiConsumer<? super Result, Throwable> callback)
     {
         super(topologies);
         this.coordinationId = node.nextCoordinationId();
         this.node = node;
         this.executor = executor;
         this.txnId = txnId;
-        this.callback = callback;
+        this.tracing = node.agent().trace(txnId, participants, kind());
         this.debug = debug() ? new DebugMap(topologies.nodes()) : null;
+        this.callback = callback;
     }
 
     protected abstract Action process(Id from, Reply reply);
@@ -142,6 +149,8 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
             debug.debug(from, reply);
 
         Action action = process(from, reply);
+        if (tracing != null)
+            tracing.trace(null, "received reply from %s: (%s) %s", from, action, reply);
         switch (action)
         {
             default: throw new UnhandledEnum(action);
@@ -178,7 +187,11 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
     public void onSlowResponse(Id from)
     {
         if (!isDone)
+        {
+            if (tracing != null)
+                tracing.trace(null, "marking %s slow", from);
             handle(recordSlowResponse(from));
+        }
     }
 
     @Override
@@ -190,6 +203,12 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
         if (debug != null)
             debug.debug(from, failure);
 
+        if (tracing != null)
+        {
+            if (failure == null) tracing.trace(null, "timeout %s", from);
+            else tracing.trace(null, "received failure response from %s: %s", from, failure);
+        }
+
         this.failure = FailureAccumulator.append(this.failure, failure);
         handle(recordFailure(from));
     }
@@ -198,6 +217,9 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
     public boolean onCallbackFailure(Id from, Throwable failure)
     {
         if (isDone) return false;
+
+        if (tracing != null)
+            tracing.trace(null, "callback failed processing reply from %s: %s", from, failure);
 
         finishWithFailureOverride(failure);
         return true;
@@ -230,8 +252,11 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
     {
         Invariants.require(!isDone);
         Invariants.require(failure != null);
-        setDone();
         onDone(null, failure);
+        node.agent().coordinatorEvents().onFailed(failure, txnId, scope(), this);
+        if (tracing != null)
+            tracing.trace(null, "finishing with failure: %s", failure);
+        setDone();
     }
 
     protected void finishOnExhaustion()
@@ -267,9 +292,12 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
                 break;
             case Success:
                 Invariants.require(!isDone);
-                onDone(waitingOnData == 0 ? Success.Success : Success.Quorum, null);
+                Success success = waitingOnData == 0 ? Success.Success : Success.Quorum;
+                onDone(success, null);
                 // isDone = true needs to be last or exceptions thrown by onDone are ignored and this never finishes
                 setDone();
+                if (tracing != null)
+                    tracing.trace(null, "finishing with %s", success);
                 break;
             case Failed:
                 finishOnExhaustion();
@@ -278,6 +306,8 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
 
     protected void start(List<Id> to)
     {
+        if (tracing != null)
+            tracing.trace(null, "contacting %s", to);
         to.forEach(this::contact);
     }
 
@@ -305,6 +335,8 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
         //                      queueing callbacks externally, so two may not be in-flight at once
         List<Id> contact = new ArrayList<>(1);
         RequestStatus status = trySendMore(List::add, contact);
+        if (tracing != null)
+            tracing.trace(null, "contacting %s", contact);
         contact.forEach(this::contact);
         return status;
     }

@@ -37,7 +37,6 @@ import accord.primitives.Participants;
 import accord.primitives.Route;
 import accord.primitives.TxnId;
 
-import static accord.api.TraceEventType.FETCH;
 import static accord.coordinate.Infer.InvalidIf.NotKnownToBeInvalid;
 import static accord.coordinate.Infer.InvalidateAndCallback.locallyInvalidateAndCallback;
 import static accord.local.CommandStores.*;
@@ -51,29 +50,35 @@ public class FetchRoute extends CheckShards<Route<?>, Participants<?>>
 {
     final LatentStoreSelector reportTo;
 
-    FetchRoute(Node node, TxnId txnId, Infer.InvalidIf invalidIf, Participants<?> contactable, LatentStoreSelector reportTo, BiConsumer<Route<?>, Throwable> callback, @Nullable Tracing tracing)
+    FetchRoute(Node node, TxnId txnId, Infer.InvalidIf invalidIf, Participants<?> contactable, LatentStoreSelector reportTo, BiConsumer<Route<?>, Throwable> callback)
     {
-        super(node, node.someSequentialExecutor(), txnId, contactable, txnId.epoch(), IncludeInfo.Route, null, invalidIf, callback, tracing);
+        super(node, node.someSequentialExecutor(), txnId, contactable, txnId.epoch(), IncludeInfo.Route, null, invalidIf, callback);
         this.reportTo = reportTo;
     }
 
-    public static Object fetchRoute(Node node, TxnId txnId, Infer.InvalidIf invalidIf, Participants<?> unseekables, LatentStoreSelector reportTo, BiConsumer<Route<?>, Throwable> callback, Tracing tracing)
+    public static Object fetchRoute(Node node, TxnId txnId, Infer.InvalidIf invalidIf, Participants<?> participants, LatentStoreSelector reportTo, BiConsumer<Route<?>, Throwable> callback)
+    {
+        Tracing tracing = node.agent().trace(txnId, participants, CoordinationKind.FetchRoute);
+        return fetchRoute(node, txnId, invalidIf, participants, reportTo, callback, tracing);
+    }
+
+    private static Object fetchRoute(Node node, TxnId txnId, Infer.InvalidIf invalidIf, Participants<?> participants, LatentStoreSelector reportTo, BiConsumer<Route<?>, Throwable> callback, @Nullable Tracing tracing)
     {
         if (!node.topology().hasEpoch(txnId.epoch()))
         {
             if (tracing != null)
                 tracing.trace(null, "Waiting for epoch %d", txnId.epoch());
-            return node.withEpochAtLeast(txnId.epoch(), null, callback, () -> fetchRoute(node, txnId, invalidIf, unseekables, reportTo, callback, tracing));
+            return node.withEpochAtLeast(txnId.epoch(), null, callback, () -> fetchRoute(node, txnId, invalidIf, participants, reportTo, callback, tracing));
         }
 
-        FetchRoute fetchRoute = new FetchRoute(node, txnId, invalidIf, unseekables, reportTo, callback, tracing);
+        FetchRoute fetchRoute = new FetchRoute(node, txnId, invalidIf, participants, reportTo, callback);
         fetchRoute.start();
         return fetchRoute;
     }
 
     public static Object fetchRoute(Node node, TxnId txnId, Participants<?> contactable, LatentStoreSelector reportTo, BiConsumer<Route<?>, Throwable> callback)
     {
-        return fetchRoute(node, txnId, NotKnownToBeInvalid, contactable, reportTo, callback, node.agent().trace(txnId, FETCH));
+        return fetchRoute(node, txnId, NotKnownToBeInvalid, contactable, reportTo, callback, null);
     }
 
     @Override

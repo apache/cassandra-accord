@@ -22,26 +22,29 @@ import javax.annotation.Nullable;
 
 import accord.local.Node;
 import accord.local.SequentialAsyncExecutor;
+import accord.primitives.Participants;
 import accord.primitives.TxnId;
 import accord.utils.Invariants;
 
 // TODO (desired): move failure and callback handling here,
 //  so we can standardise and cleanup as we advance the state machines
-public abstract class AbstractSimpleCoordination implements Coordination
+public abstract class AbstractSimpleCoordination<P extends Participants<?>> implements Coordination
 {
     final long coordinationId;
     protected final Node node;
     protected final SequentialAsyncExecutor executor;
     protected final TxnId txnId;
+    protected final P scope;
     private Throwable failure;
     private boolean isDoneWithReplies, isFinishing, isDone;
 
-    protected AbstractSimpleCoordination(Node node, SequentialAsyncExecutor executor, TxnId txnId)
+    protected AbstractSimpleCoordination(Node node, SequentialAsyncExecutor executor, TxnId txnId, P scope)
     {
         this.coordinationId = node.nextCoordinationId();
         this.node = node;
         this.executor = executor;
         this.txnId = Invariants.nonNull(txnId);
+        this.scope = scope;
     }
 
     @Override
@@ -55,6 +58,8 @@ public abstract class AbstractSimpleCoordination implements Coordination
     {
         return txnId;
     }
+
+    public final P scope() { return scope; }
 
     @Override
     public final SequentialAsyncExecutor executor()

@@ -27,7 +27,6 @@ import accord.local.SequentialAsyncExecutor;
 import accord.messages.Callback;
 import accord.primitives.FullRoute;
 import accord.primitives.TxnId;
-import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.SortedList;
 
@@ -38,9 +37,8 @@ import static accord.topology.Topologies.SelectNodeOwnership.SHARE;
  * Abstract parent class for implementing preaccept-like operations where we may need to fetch additional replies
  * from future epochs.
  */
-abstract class AbstractCoordinatePreAccept<Result, Reply extends accord.messages.Reply, Ok> extends AbstractCoordination<Result, Reply, Ok> implements Callback<Reply>
+abstract class AbstractCoordinatePreAccept<Result, Reply extends accord.messages.Reply, Ok> extends AbstractCoordination<FullRoute<?>, Result, Reply, Ok> implements Callback<Reply>
 {
-    final FullRoute<?> route;
     final Topologies topologies;
 
     AbstractCoordinatePreAccept(Node node, SequentialAsyncExecutor executor, FullRoute<?> route, @Nonnull TxnId txnId, BiConsumer<? super Result, Throwable> callback)
@@ -50,8 +48,7 @@ abstract class AbstractCoordinatePreAccept<Result, Reply extends accord.messages
 
     AbstractCoordinatePreAccept(Node node, SequentialAsyncExecutor executor, FullRoute<?> route, @Nonnull TxnId txnId, Topologies topologies, BiConsumer<? super Result, Throwable> callback)
     {
-        super(node, executor, txnId, topologies.nodes(), callback);
-        this.route = route;
+        super(node, executor, txnId, route, topologies.nodes(), callback);
         this.topologies = topologies;
     }
 
@@ -68,7 +65,7 @@ abstract class AbstractCoordinatePreAccept<Result, Reply extends accord.messages
 
     final void onPreAcceptedInNewEpoch(Topologies topologies, long latestEpoch)
     {
-        TopologyMismatch mismatch = TopologyMismatch.checkForMismatch(node.topology().globalForEpoch(latestEpoch), txnId, route.homeKey(), route);
+        TopologyMismatch mismatch = TopologyMismatch.checkForMismatch(node.topology().globalForEpoch(latestEpoch), txnId, scope.homeKey(), scope);
         if (mismatch == null) onPreAccepted(topologies);
         else onNewEpochTopologyMismatch(mismatch);
     }
@@ -77,12 +74,6 @@ abstract class AbstractCoordinatePreAccept<Result, Reply extends accord.messages
     public CoordinationKind kind()
     {
         return CoordinationKind.PreAccept;
-    }
-
-    @Override
-    public Unseekables<?> scope()
-    {
-        return route;
     }
 
     @Override

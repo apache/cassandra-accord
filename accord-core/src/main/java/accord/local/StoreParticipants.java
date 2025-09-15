@@ -251,6 +251,11 @@ public class StoreParticipants
         return owns;
     }
 
+    public Participants<?> max()
+    {
+        return route != null ? route.withHomeKey() : hasTouched();
+    }
+
     public boolean touchesOnlyOwned()
     {
         return true;

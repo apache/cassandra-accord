@@ -268,11 +268,9 @@ public abstract class Command implements ICommand
     @Nullable
     public final Route<?> route() { return participants().route(); }
 
-    public Participants<?> maxContactable()
+    public Participants<?> maxParticipants()
     {
-        Route<?> route = route();
-        if (route != null) return route.withHomeKey();
-        else return participants().hasTouched();
+        return participants.max();
     }
 
     /**

@@ -18,6 +18,8 @@
 
 package accord.utils;
 
+import java.util.Iterator;
+import java.util.function.Function;
 import java.util.function.IntFunction;
 
 public class TinyEnumSet<E extends Enum<E>>
@@ -48,6 +50,11 @@ public class TinyEnumSet<E extends Enum<E>>
     {
         int count = clazz.getEnumConstants().length;
         return new TinyEnumSet<>(-1 >>> (32 - count));
+    }
+
+    public static <E extends Enum<E>> TinyEnumSet<E> of()
+    {
+        return new TinyEnumSet<>(0);
     }
 
     public static <E extends Enum<E>> TinyEnumSet<E> of(Enum<E> value)
@@ -86,6 +93,16 @@ public class TinyEnumSet<E extends Enum<E>>
         return 0 != (bitset & (1 << ordinal));
     }
 
+    public boolean isEmpty()
+    {
+        return bitset == 0;
+    }
+
+    public int size()
+    {
+        return Integer.bitCount(bitset);
+    }
+
     public boolean contains(E value)
     {
         return contains(bitset, value.ordinal());
@@ -101,6 +118,16 @@ public class TinyEnumSet<E extends Enum<E>>
         return or(this, or, TinyEnumSet::new);
     }
 
+    public TinyEnumSet<E> and(TinyEnumSet<E> and)
+    {
+        return and(this, and, TinyEnumSet::new);
+    }
+
+    public TinyEnumSet<E> not(TinyEnumSet<E> not)
+    {
+        return not(this, not, TinyEnumSet::new);
+    }
+
     public TinyEnumSet<E> with(E flag)
     {
         return new TinyEnumSet<>(bitset | encode(flag));
@@ -109,6 +136,18 @@ public class TinyEnumSet<E extends Enum<E>>
     public static <S extends TinyEnumSet<?>> S or(S a, S b, IntFunction<S> constructor)
     {
         int newBitset = a.bitset | b.bitset;
+        return newBitset == a.bitset ? a : newBitset == b.bitset ? b : constructor.apply(newBitset);
+    }
+
+    public static <S extends TinyEnumSet<?>> S and(S a, S b, IntFunction<S> constructor)
+    {
+        int newBitset = a.bitset & b.bitset;
+        return newBitset == a.bitset ? a : newBitset == b.bitset ? b : constructor.apply(newBitset);
+    }
+
+    public static <S extends TinyEnumSet<?>> S not(S a, S b, IntFunction<S> constructor)
+    {
+        int newBitset = a.bitset & ~b.bitset;
         return newBitset == a.bitset ? a : newBitset == b.bitset ? b : constructor.apply(newBitset);
     }
 
@@ -132,25 +171,61 @@ public class TinyEnumSet<E extends Enum<E>>
         return bitset;
     }
 
-    protected String toString(Object[] universe)
+    protected String toString(IntFunction<E> universe)
     {
-        if (bitset == 0)
-            return "{}";
-
-        StringBuilder sb = new StringBuilder();
-        sb.append('{');
-        int bits = this.bitset;
-        while (bits != 0)
-        {
-            if (sb.length() > 1)
-                sb.append(',');
-            int i = Integer.numberOfTrailingZeros(bits);
-            sb.append(universe[i]);
-            bits ^= 1 << i;
-        }
-        sb.append('}');
-        return sb.toString();
+        return toString(bitset, universe);
     }
 
+    public static <E extends Enum<E>> String toString(int bits, IntFunction<E> universe)
+    {
+        return toString(bits, universe, Enum::toString);
+    }
+
+    public static <E extends Enum<E>> String toString(int bits, IntFunction<E> universe, Function<E, String> print)
+    {
+        if (bits == 0)
+            return "{}";
+
+        StringBuilder out = new StringBuilder();
+        out.append('{');
+        append(bits, universe, print, out);
+        out.append('}');
+        return out.toString();
+    }
+
+    public static <E extends Enum<E>> void append(int bits, IntFunction<E> universe, Function<E, String> print, StringBuilder out)
+    {
+        boolean comma = false;
+        while (bits != 0)
+        {
+            if (comma)
+                out.append(',');
+            int i = Integer.numberOfTrailingZeros(bits);
+            out.append(print.apply(universe.apply(i)));
+            bits ^= 1 << i;
+            comma = true;
+        }
+    }
+
+    public Iterable<E> iterable(IntFunction<E> lookup)
+    {
+        return () -> new Iterator<>()
+        {
+            int remaining = bitset;
+            @Override
+            public boolean hasNext()
+            {
+                return remaining != 0;
+            }
+
+            @Override
+            public E next()
+            {
+                E next = lookup.apply(Integer.numberOfTrailingZeros(remaining));
+                remaining ^= Integer.lowestOneBit(remaining);
+                return next;
+            }
+        };
+    }
 }
 

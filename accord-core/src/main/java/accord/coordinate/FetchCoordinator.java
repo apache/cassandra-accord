@@ -25,9 +25,9 @@ import accord.api.DataStore.StartingRangeFetch;
 import accord.api.DataStore.FetchRanges;
 import accord.local.Node;
 import accord.local.SequentialAsyncExecutor;
+import accord.primitives.FullRoute;
 import accord.primitives.Ranges;
 import accord.primitives.SyncPoint;
-import accord.primitives.Unseekables;
 import accord.topology.Topology;
 import accord.utils.Invariants;
 import accord.utils.SortedList;
@@ -43,7 +43,7 @@ import static accord.utils.Invariants.illegalState;
  * This coordinates both the fetching of data, and the point-in-time that data will be safe to read,
  * i.e. some point-in-time known to occur after any entry in the data that was fetched.
  */
-public abstract class FetchCoordinator extends AbstractSimpleCoordination
+public abstract class FetchCoordinator extends AbstractSimpleCoordination<FullRoute<?>>
 {
     /**
      * For each node, maintain what ranges have been requested, successfully retrieved or not, and whether we are
@@ -145,7 +145,7 @@ public abstract class FetchCoordinator extends AbstractSimpleCoordination
 
     protected FetchCoordinator(Node node, SequentialAsyncExecutor executor, Ranges ranges, SyncPoint syncPoint, FetchRanges fetchRanges)
     {
-        super(node, executor, syncPoint.syncId);
+        super(node, executor, syncPoint.syncId, syncPoint.route);
         this.ranges = ranges;
         this.syncPoint = syncPoint;
         this.fetchRanges = fetchRanges;
@@ -334,12 +334,6 @@ public abstract class FetchCoordinator extends AbstractSimpleCoordination
         // TODO (desired): we don't need to fail all requests to this node, just the one we have a failure response for
         state.fail();
         trySendMore();
-    }
-
-    @Override
-    public Unseekables<?> scope()
-    {
-        return syncPoint.route;
     }
 
     @Override

@@ -17,10 +17,6 @@
  */
 package accord.api;
 
-import java.util.function.BiConsumer;
-
-import javax.annotation.Nullable;
-
 import accord.local.CommandStore;
 
 public interface Tracing
@@ -34,35 +30,61 @@ public interface Tracing
 
     static String safeFormat(String fmt, Object ... args)
     {
-        try
+        if (args.length == 0)
+            return fmt;
+
+        StringBuilder out = new StringBuilder();
+        int prev = 0;
+        for (int argIndex = 0 ; argIndex < args.length ; ++argIndex)
         {
-            return String.format(fmt, args);
-        }
-        catch (Throwable t)
-        {
+            Object arg = args[argIndex];
+            int next = fmt.indexOf('%', prev);
+            if (next < 0)
+                break;
+
+            out.append(fmt, prev, next);
+            if (++next == fmt.length())
+                throw new IllegalArgumentException("Invalid substitution declaration: % not followed by d, s or %");
+
+            char ch = fmt.charAt(next);
+            prev = next + 1;
+
+            if (ch == '%')
+            {
+                out.append('%');
+                prev = next + 1;
+                continue;
+            }
+
+            if (ch != 's' && ch != 'd')
+                throw new IllegalArgumentException("Invalid substitution declaration: % not followed by d, s or %");
+
+            if (arg == null)
+            {
+                out.append("null");
+                continue;
+            }
+
             try
             {
-                String thrown = format(t);
-                StringBuilder argsStr = new StringBuilder();
-                if (args == null) argsStr.append("null");
-                else
-                {
-                    argsStr.append('[');
-                    for (int i = 0 ; i < args.length ; i++)
-                    {
-                        if (i > 0) argsStr.append(',');
-                        try { argsStr.append(args[i]); }
-                        catch (Throwable t2) { argsStr.append("<Could not invoke toString(): ").append(format(t2)).append('>'); }
-                    }
-                    argsStr.append(']');
-                }
-                return "<Could not invoke String.format(\"" + fmt + "\", " + argsStr + "): " + thrown + '>';
+                if (arg instanceof Throwable)
+                    arg = format((Throwable) arg);
+                out.append(arg);
             }
-            catch (Throwable t2)
+            catch (Throwable t)
             {
-                return "<Could not format string or failure info>";
+                try
+                {
+                    out.append("<Could not invoke toString(): ").append(format(t)).append('>');
+                }
+                catch (Throwable t2)
+                {
+                    out.append("<Could not invoke toString() on argument ").append(argIndex).append('>');
+                }
             }
         }
+        out.append(fmt, prev, fmt.length());
+        return out.toString();
     }
 
     static String format(Throwable failure)
@@ -70,14 +92,5 @@ public interface Tracing
         StackTraceElement[] ste = failure.getStackTrace();
         return failure.getClass().getSimpleName() + ':' + failure.getLocalizedMessage()
                + (ste.length > 0 ? " (@" + ste[0].getClassName() + '.' + ste[0].getMethodName() + ':' + ste[0].getLineNumber() + ')' : "");
-    }
-
-    static <V> BiConsumer<V, Throwable> wrap(BiConsumer<V, Throwable> wrap, String context, @Nullable Tracing tracing)
-    {
-        if (tracing == null) return wrap;
-        return (success, fail) -> {
-            if (fail != null) tracing.trace(null, "Failure when %s: %s", context, format(fail));
-            wrap.accept(success, fail);
-        };
     }
 }

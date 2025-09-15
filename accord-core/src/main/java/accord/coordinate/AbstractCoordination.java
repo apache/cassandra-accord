@@ -27,11 +27,13 @@ import java.util.function.Predicate;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import accord.api.Tracing;
 import accord.coordinate.tracking.AbstractTracker;
 import accord.local.Node;
 import accord.local.SequentialAsyncExecutor;
 import accord.messages.Callback;
 import accord.messages.Request;
+import accord.primitives.Participants;
 import accord.primitives.Route;
 import accord.primitives.TxnId;
 import accord.utils.DebugMap;
@@ -46,22 +48,25 @@ import accord.utils.async.AsyncChain;
 import accord.utils.async.Cancellable;
 
 // TODO (expected): move message sending here, so we can invalidate any pending callbacks when we advance the state machine
-public abstract class AbstractCoordination<Result, Reply extends accord.messages.Reply, Ok> extends AbstractSimpleCoordination implements Callback<Reply>
+public abstract class AbstractCoordination<P extends Participants<?>, Result, Reply extends accord.messages.Reply, Ok> extends AbstractSimpleCoordination<P> implements Callback<Reply>
 {
-    private BiConsumer<? super Result, Throwable> callback;
     private final SortedArrayList<Node.Id> nodes;
     private final SimpleBitSet expectingReply;
-    private Object[] replyState;
+    protected final @Nullable Tracing tracing;
     private final @Nullable DebugMap debug;
+
+    private BiConsumer<? super Result, Throwable> callback;
+    private Object[] replyState;
     private int replyCount;
 
-    protected AbstractCoordination(Node node, SequentialAsyncExecutor executor, TxnId txnId, SortedArrayList<Node.Id> nodes, BiConsumer<? super Result, Throwable> callback)
+    protected AbstractCoordination(Node node, SequentialAsyncExecutor executor, TxnId txnId, P participants, SortedArrayList<Node.Id> nodes, BiConsumer<? super Result, Throwable> callback)
     {
-        super(node, executor, txnId);
+        super(node, executor, txnId, participants);
         this.nodes = nodes;
         this.callback = Invariants.nonNull(callback);
         this.replyState = new Object[nodes.size()];
         this.expectingReply = SimpleBitSet.allocate(nodes.size());
+        this.tracing = node.agent().trace(txnId, participants, kind());
         this.debug = Invariants.debug() ? new DebugMap(nodes) : null;
     }
 
@@ -195,7 +200,11 @@ public abstract class AbstractCoordination<Result, Reply extends accord.messages
     public final void onSlowResponse(Node.Id from)
     {
         if (!isDoneWithReplies())
+        {
+            if (tracing != null)
+                tracing.trace(null, "marking %s slow", from);
             onSlowResponseInternal(from);
+        }
     }
 
     @Override
@@ -204,6 +213,12 @@ public abstract class AbstractCoordination<Result, Reply extends accord.messages
         int fromIndex = onReply(from, failure, true);
         if (fromIndex < 0)
             return;
+
+        if (tracing != null)
+        {
+            if (failure == null) tracing.trace(null, "timeout %s", from);
+            else tracing.trace(null, "received failure reply from %s: %s", from, failure);
+        }
 
         onFailureInternal(from, fromIndex, failure);
         Invariants.require(!expectingReply.isEmpty() || isFinishing() || isDone(), "%s", this);
@@ -221,6 +236,9 @@ public abstract class AbstractCoordination<Result, Reply extends accord.messages
 
         if (debug != null)
             debug.debug(from, reply);
+
+        if (tracing != null)
+            tracing.trace(null, "from %s: %s", from, reply);
 
         if (isFinal)
         {
@@ -246,12 +264,15 @@ public abstract class AbstractCoordination<Result, Reply extends accord.messages
         BiConsumer<?, Throwable> callback = tryTakeCallback();
         if (callback != null) callback.accept(null, failure);
         else node.agent().onUncaughtException(failure);
+        if (tracing != null)
+            tracing.trace(null, "callback failure processing from %s: %s", from, failure);
         return true;
     }
 
     void finishAndInvokeCallback(Result success, Throwable failure)
     {
         finishAndTakeCallback().accept(success, failure);
+        if (failure != null) node.agent().coordinatorEvents().onFailed(failure, txnId, scope, this);
     }
 
     BiConsumer<? super Result, Throwable> finishAndTakeCallback()

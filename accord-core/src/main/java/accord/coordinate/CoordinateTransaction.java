@@ -41,9 +41,9 @@ import accord.local.SequentialAsyncExecutor;
 import accord.local.StoreParticipants;
 import accord.messages.PreAccept.PreAcceptNack;
 import accord.messages.PreAccept.PreAcceptReply;
+import accord.primitives.Participants;
 import accord.primitives.Route;
 import accord.primitives.Status;
-import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.local.Node;
 import accord.messages.PreAccept.PreAcceptOk;
@@ -147,7 +147,7 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
                 // we must include Deps from fast path votes from earlier epochs that may have witnessed later transactions
                 // TODO (desired): we might mask some bugs by merging more responses than we strictly need, so optimise this to optionally merge minimal deps
                 node.agent().coordinatorEvents().onPreAccepted(txnId);
-                executeAdapter().execute(node, executor, topologies, route, Ballot.ZERO, FAST, flags, txnId, txn, txnId, deps, deps, finishAndTakeCallback());
+                executeAdapter().execute(node, executor, topologies, scope, Ballot.ZERO, FAST, flags, txnId, txn, txnId, deps, deps, finishAndTakeCallback());
                 return;
             }
         }
@@ -157,20 +157,20 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
             if (deps != null)
             {
                 node.agent().coordinatorEvents().onPreAccepted(txnId);
-                proposeAdapter().propose(node, executor, topologies, route, MEDIUM, Ballot.ZERO, txnId, txn, txnId, deps, finishAndTakeCallback());
+                proposeAdapter().propose(node, executor, topologies, scope, MEDIUM, Ballot.ZERO, txnId, txn, txnId, deps, finishAndTakeCallback());
                 return;
             }
         }
         else if (executeAt.is(REJECTED))
         {
-            proposeAndCommitInvalidate(node, executor, Ballot.ZERO, txnId, route.homeKey(), route, executeAt, finishAndTakeCallback());
+            proposeAndCommitInvalidate(node, executor, Ballot.ZERO, txnId, scope.homeKey(), scope, executeAt, finishAndTakeCallback());
             node.agent().coordinatorEvents().onRejected(txnId);
             return;
         }
 
         Deps deps = Deps.merge(oks.valuesAsNullableList(), oks.domainSize(), List::get, ok -> ok.deps);
         node.agent().coordinatorEvents().onPreAccepted(txnId);
-        proposeAdapter().propose(node, executor, topologies, route, SLOW, Ballot.ZERO, txnId, txn, executeAt, deps, finishAndTakeCallback());
+        proposeAdapter().propose(node, executor, topologies, scope, SLOW, Ballot.ZERO, txnId, txn, executeAt, deps, finishAndTakeCallback());
     }
 
     private Deps mergeFastOrMediumDeps(SortedListMap<?, PreAcceptOk> oks)
@@ -211,7 +211,7 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
 
         protected LocalExecute()
         {
-            super(route);
+            super(CoordinateTransaction.this.scope);
         }
 
         void start()
@@ -263,7 +263,7 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
                     }
                     else
                     {
-                        finishWithFailureOverride(Preempted.preempted(node.agent(), txnId, route.homeKey()));
+                        finishWithFailureOverride(Preempted.preempted(node.agent(), txnId, scope.homeKey()));
                     }
                 }
             });
@@ -273,7 +273,7 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
         public PreAcceptReply applyInternal(SafeCommandStore safeStore)
         {
             long minEpoch = topologies.oldestEpoch();
-            StoreParticipants participants = StoreParticipants.update(safeStore, route, minEpoch, txnId, txnId.epoch());
+            StoreParticipants participants = StoreParticipants.update(safeStore, scope, minEpoch, txnId, txnId.epoch());
             SafeCommand safeCommand = safeStore.get(txnId, participants);
 
             ExecuteFlags flags;
@@ -383,12 +383,6 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
         public LoadKeysFor loadKeysFor()
         {
             return LoadKeysFor.READ_WRITE;
-        }
-
-        @Override
-        public Unseekables<?> keys()
-        {
-            return route;
         }
     }
 }

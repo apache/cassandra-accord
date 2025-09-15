@@ -21,7 +21,6 @@ package accord.coordinate;
 import java.util.function.BiConsumer;
 import javax.annotation.Nullable;
 
-import accord.api.Tracing;
 import accord.local.CommandStores.LatentStoreSelector;
 import accord.coordinate.ExecuteFlag.CoordinationFlags;
 import accord.local.Node;
@@ -67,9 +66,9 @@ public class PrepareRecovery extends CheckShards<Outcome, FullRoute<?>>
     final Status witnessedByInvalidation;
     final LatentStoreSelector reportTo;
 
-    private PrepareRecovery(Node node, SequentialAsyncExecutor executor, Topologies topologies, TxnId txnId, Infer.InvalidIf invalidIf, FullRoute<?> route, Status witnessedByInvalidation, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback, @Nullable Tracing tracing)
+    private PrepareRecovery(Node node, SequentialAsyncExecutor executor, Topologies topologies, TxnId txnId, Infer.InvalidIf invalidIf, FullRoute<?> route, Status witnessedByInvalidation, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback)
     {
-        super(node, executor, txnId, route, IncludeInfo.All, node.uniqueTimestamp(Ballot::fromValues), invalidIf, callback, tracing);
+        super(node, executor, txnId, route, IncludeInfo.All, node.uniqueTimestamp(Ballot::fromValues), invalidIf, callback);
         this.reportTo = reportTo;
         // if witnessedByInvalidation == AcceptedInvalidate then we cannot assume its definition was known, and our comparison with the status is invalid
         Invariants.require(witnessedByInvalidation != Status.AcceptedInvalidate);
@@ -79,14 +78,14 @@ public class PrepareRecovery extends CheckShards<Outcome, FullRoute<?>>
         assert topologies.oldestEpoch() == topologies.currentEpoch() && topologies.currentEpoch() == txnId.epoch();
     }
 
-    public static PrepareRecovery recover(Node node, SequentialAsyncExecutor executor, TxnId txnId, Infer.InvalidIf invalidIf, FullRoute<?> route, @Nullable Status witnessedByInvalidation, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback, @Nullable Tracing tracing)
+    public static PrepareRecovery recover(Node node, SequentialAsyncExecutor executor, TxnId txnId, Infer.InvalidIf invalidIf, FullRoute<?> route, @Nullable Status witnessedByInvalidation, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback)
     {
-        return recover(node, executor, node.topology().forEpoch(route, txnId.epoch(), SHARE), txnId, invalidIf, route, witnessedByInvalidation, reportTo, callback, tracing);
+        return recover(node, executor, node.topology().forEpoch(route, txnId.epoch(), SHARE), txnId, invalidIf, route, witnessedByInvalidation, reportTo, callback);
     }
 
-    private static PrepareRecovery recover(Node node, SequentialAsyncExecutor executor, Topologies topologies, TxnId txnId, Infer.InvalidIf invalidIf, FullRoute<?> route, @Nullable Status witnessedByInvalidation, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback, @Nullable Tracing tracing)
+    private static PrepareRecovery recover(Node node, SequentialAsyncExecutor executor, Topologies topologies, TxnId txnId, Infer.InvalidIf invalidIf, FullRoute<?> route, @Nullable Status witnessedByInvalidation, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback)
     {
-        PrepareRecovery recover = new PrepareRecovery(node, executor, topologies, txnId, invalidIf, route, witnessedByInvalidation, reportTo, callback, tracing);
+        PrepareRecovery recover = new PrepareRecovery(node, executor, topologies, txnId, invalidIf, route, witnessedByInvalidation, reportTo, callback);
         recover.start();
         return recover;
     }
@@ -130,8 +129,6 @@ public class PrepareRecovery extends CheckShards<Outcome, FullRoute<?>>
     {
         if (failure != null)
         {
-            if (tracing != null)
-                tracing.trace(null, "RecoverWithRoute failed: " + Tracing.format(failure));
             invokeCallback(null, failure);
             return;
         }
@@ -139,7 +136,7 @@ public class PrepareRecovery extends CheckShards<Outcome, FullRoute<?>>
         CheckStatusOkFull full = ((CheckStatusOkFull) this.merged).finish(query, query, query, success.withQuorum, previouslyKnownToBeInvalidIf);
         Known known = full.knownFor(txnId, query, query);
         if (tracing != null)
-            tracing.trace(null, "RecoverWithRoute merged: " + full);
+            tracing.trace(null, "merged: " + full);
 
         // TODO (required): audit this logic, and centralise with e.g. FetchData inferences
         // TODO (expected): skip straight to ExecuteTxn if we have a Stable reply from each shard
@@ -151,15 +148,15 @@ public class PrepareRecovery extends CheckShards<Outcome, FullRoute<?>>
                 if (known.definition().isKnown())
                 {
                     if (tracing != null)
-                        tracing.trace(null, "RecoverWithRoute found definition; invoking Recover.");
+                        tracing.trace(null, "found definition; invoking Recover.");
 
                     Txn txn = full.partialTxn.reconstitute(query);
-                    Recover.recover(node, txnId, txn, query, full.durability.isFastPathDurablyDecided(), reportTo, takeCallback(), tracing);
+                    Recover.recover(node, txnId, txn, query, full.durability.isFastPathDurablyDecided(), reportTo, takeCallback());
                 }
                 else if (!known.definition().isOrWasKnown())
                 {
                     if (tracing != null)
-                        tracing.trace(null, "RecoverWithRoute found no current or erased transaction; invoking Invalidate.");
+                        tracing.trace(null, "found no current or erased transaction; invoking Invalidate.");
 
                     if (witnessedByInvalidation != null && witnessedByInvalidation.compareTo(Status.PreAccepted) > 0)
                         throw illegalState("We previously invalidated, finding a status that should be recoverable");
@@ -170,7 +167,7 @@ public class PrepareRecovery extends CheckShards<Outcome, FullRoute<?>>
                 {
                     ProgressToken progressToken = full.toProgressToken();
                     if (tracing != null)
-                        tracing.trace(null, "RecoverWithRoute found insufficient information to Recover or Invalidate; calling back with %s.", progressToken);
+                        tracing.trace(null, "found insufficient information to Recover or Invalidate; calling back with %s.", progressToken);
                     invokeCallback(progressToken, null);
                 }
                 break;
@@ -183,7 +180,7 @@ public class PrepareRecovery extends CheckShards<Outcome, FullRoute<?>>
                     if (!known.isTruncated() && !known.isInvalidated())
                     {
                         if (tracing != null)
-                            tracing.trace(null, "RecoverWithRoute found Apply/WasApply, but no definition, truncation or invalidation; must have raced with Apply, reporting no progress in expectation next attempt is successful.");
+                            tracing.trace(null, "found Apply/WasApply, but no definition, truncation or invalidation; must have raced with Apply, reporting no progress in expectation next attempt is successful.");
 
                         // we must have raced with a successful apply, so should simply abort
                         invokeCallback(ProgressToken.NONE, null);
@@ -202,7 +199,7 @@ public class PrepareRecovery extends CheckShards<Outcome, FullRoute<?>>
                             if (known.isInvalidated())
                             {
                                 if (tracing != null)
-                                    tracing.trace(null, "RecoverWithRoute found partially truncated Invalidate; committing to shards " + trySendTo);
+                                    tracing.trace(null, "found partially truncated Invalidate; committing to shards " + trySendTo);
                                 Commit.Invalidate.commitInvalidate(node, txnId, trySendTo, txnId);
                             }
                             else
@@ -214,7 +211,7 @@ public class PrepareRecovery extends CheckShards<Outcome, FullRoute<?>>
                                     if (!known.is(DepsKnown))
                                     {
                                         if (tracing != null)
-                                            tracing.trace(null, "RecoverWithRoute found partially truncated Apply with incomplete Deps; advancing state machine for shards " + trySendTo);
+                                            tracing.trace(null, "found partially truncated Apply with incomplete Deps; advancing state machine for shards " + trySendTo);
 
                                         Invariants.require(txnId.isSystemTxn() || full.partialTxn.covers(trySendTo));
                                         Participants<?> haveStable = full.map.knownFor(Known.DepsOnly, trySendTo);
@@ -229,7 +226,7 @@ public class PrepareRecovery extends CheckShards<Outcome, FullRoute<?>>
                                     else
                                     {
                                         if (tracing != null)
-                                            tracing.trace(null, "RecoverWithRoute found partially truncated Apply; persisting to shards " + trySendTo);
+                                            tracing.trace(null, "found partially truncated Apply; persisting to shards " + trySendTo);
 
                                         Invariants.require(full.stableDeps.covers(trySendTo));
                                         Invariants.require(txnId.isSystemTxn() || full.partialTxn.covers(trySendTo));
@@ -242,7 +239,7 @@ public class PrepareRecovery extends CheckShards<Outcome, FullRoute<?>>
                         else
                         {
                             if (tracing != null)
-                                tracing.trace(null, "RecoverWithRoute found Apply truncated at all shards; advancing Durability to at least Majority");
+                                tracing.trace(null, "found Apply truncated at all shards; advancing Durability to at least Majority");
 
                             propagate = full.merge(AllQuorums);
                         }
@@ -264,7 +261,7 @@ public class PrepareRecovery extends CheckShards<Outcome, FullRoute<?>>
                     if (known.is(DepsKnown))
                     {
                         if (tracing != null)
-                            tracing.trace(null, "RecoverWithRoute found Apply with DepsKnown; persisting to all shards.");
+                            tracing.trace(null, "found Apply with DepsKnown; persisting to all shards.");
                         deps = full.stableDeps.reconstitute(query);
                         missingDeps = query.slice(0, 0);
                     }
@@ -273,7 +270,7 @@ public class PrepareRecovery extends CheckShards<Outcome, FullRoute<?>>
                         Participants<?> hasDeps = full.map.knownFor(Known.DepsOnly, query);
                         missingDeps = query.without(hasDeps);
                         if (tracing != null)
-                            tracing.trace(null, "RecoverWithRoute found Apply, with deps missing for %s; advancing state machine for these shards.", missingDeps);
+                            tracing.trace(null, "found Apply, with deps missing for %s; advancing state machine for these shards.", missingDeps);
 
                         if (full.stableDeps == null)
                         {
@@ -298,16 +295,16 @@ public class PrepareRecovery extends CheckShards<Outcome, FullRoute<?>>
                 else
                 {
                     if (tracing != null)
-                        tracing.trace(null, "RecoverWithRoute found %s; invoking Recover", known);
+                        tracing.trace(null, "found %s; invoking Recover", known);
 
-                    Recover.recover(node, txnId, txn, query, full.durability.isFastPathDurablyDecided(), takeCallback(), tracing);
+                    Recover.recover(node, txnId, txn, query, full.durability.isFastPathDurablyDecided(), takeCallback());
                 }
                 break;
             }
             case Abort:
             {
                 if (tracing != null)
-                    tracing.trace(null, "RecoverWithRoute Found Abort; propagating locally.");
+                    tracing.trace(null, "Found Abort; propagating locally.");
 
                 if (witnessedByInvalidation != null && witnessedByInvalidation.hasBeen(Status.PreCommitted))
                     throw illegalState("We previously invalidated, finding a status that should be recoverable");
@@ -318,7 +315,7 @@ public class PrepareRecovery extends CheckShards<Outcome, FullRoute<?>>
             case Erased:
             {
                 if (tracing != null)
-                    tracing.trace(null, "RecoverWithRoute found Erased; propagating locally.");
+                    tracing.trace(null, "found Erased; propagating locally.");
 
                 // we should only be able to hit the Erased case if every participating shard has advanced past this TxnId, so we don't need to recover it
                 Propagate.propagate(node, txnId, previouslyKnownToBeInvalidIf, sourceEpoch, success.withQuorum, query, query, reportTo, null, full, (s, f) -> invokeCallback(f == null ? TRUNCATED_DURABLE_OR_INVALIDATED : null, f), tracing);

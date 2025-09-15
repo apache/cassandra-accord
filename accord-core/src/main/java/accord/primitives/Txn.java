@@ -190,7 +190,6 @@ public interface Txn
             this.witnessedBy = witnessedBy;
         }
 
-
         public boolean isWrite()
         {
             return this == Write;
@@ -224,7 +223,7 @@ public interface Txn
             return awaitsOnlyDeps;
         }
 
-        public static Kind ofOrdinal(int ordinal)
+        public static Kind forOrdinal(int ordinal)
         {
             return VALUES[ordinal];
         }
@@ -287,6 +286,16 @@ public interface Txn
         public char shortName()
         {
             return shortName;
+        }
+
+        public static Txn.Kind forShortName(char ch)
+        {
+            for (Txn.Kind kind : VALUES)
+            {
+                if (kind.shortName == ch)
+                    return kind;
+            }
+            return null;
         }
     }
 

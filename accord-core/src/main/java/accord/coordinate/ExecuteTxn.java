@@ -60,7 +60,6 @@ import accord.primitives.Timestamp;
 import accord.primitives.TimestampWithUniqueHlc;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
-import accord.primitives.Unseekables;
 import accord.primitives.Writes;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
@@ -163,7 +162,7 @@ public class ExecuteTxn extends ReadCoordinator<Result, ReadReply>
 
     ExecuteTxn(Node node, SequentialAsyncExecutor executor, Topologies topologies, FullRoute<?> route, Ballot ballot, ExecutePath path, CoordinationFlags flags, TxnId txnId, Txn txn, Timestamp executeAt, Deps stableDeps, Deps sendDeps, BiConsumer<? super Result, Throwable> callback)
     {
-        super(node, executor, topologies.forEpoch(executeAt.epoch()), txnId, callback);
+        super(node, executor, topologies.forEpoch(executeAt.epoch()), txnId, route, callback);
         this.path = ballot == Ballot.ZERO ? path : RECOVER;
         this.txn = txn;
         this.route = route;
@@ -565,7 +564,7 @@ public class ExecuteTxn extends ReadCoordinator<Result, ReadReply>
     }
 
     @Override
-    public Unseekables<?> scope()
+    public Participants<?> scope()
     {
         return route;
     }

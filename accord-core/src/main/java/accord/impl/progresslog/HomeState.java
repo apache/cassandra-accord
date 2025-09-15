@@ -37,7 +37,7 @@ import accord.primitives.Status.Durability.HasOutcome;
 import accord.primitives.TxnId;
 import accord.utils.Invariants;
 
-import static accord.api.TraceEventType.HOME_PROGRESS;
+import static accord.coordinate.Coordination.CoordinationKind.HomeProgress;
 import static accord.impl.progresslog.CallbackInvoker.invokeHomeCallback;
 import static accord.impl.progresslog.CoordinatePhase.Done;
 import static accord.impl.progresslog.Progress.NoneExpected;
@@ -140,9 +140,9 @@ abstract class HomeState extends WaitingState
     final void runHome(DefaultProgressLog instance, SafeCommandStore safeStore, SafeCommand safeCommand)
     {
         incrementHomeRunCounter();
-        Tracing tracing = instance.node.agent().trace(txnId, HOME_PROGRESS);
         Invariants.require(!isHomeDoneOrUninitialised());
         Command command = safeCommand.current();
+        Tracing tracing = instance.node.agent().trace(txnId, command.participants().max(), HomeProgress);
         // note: we may truncate locally based on shard-specific criteria, but this doesn't mean we're globally persisted
 
         if (command.saveStatus() == SaveStatus.Erased // TODO (expected): improve progressLog.clear() so we can expect these to be cleared from the progress log
@@ -180,16 +180,12 @@ abstract class HomeState extends WaitingState
 
     static void recoverCallback(SafeCommandStore safeStore, SafeCommand safeCommand, DefaultProgressLog instance, TxnId txnId, @Nullable ProgressToken prevProgressToken, Outcome success, Throwable fail)
     {
-        Tracing tracing = instance.node.agent().trace(safeCommand.txnId(), HOME_PROGRESS);
         HomeState state = instance.get(txnId);
         if (state == null)
-        {
-            if (tracing != null)
-                tracing.trace(safeStore.commandStore(), "No HomeState to process recovery callback");
             return;
-        }
 
         Command command = safeCommand.current();
+        Tracing tracing = instance.node.agent().trace(safeCommand.txnId(), command.participants().max(), HomeProgress);
         CoordinatePhase status = state.phase();
         if (status.isAtMostReadyToExecute() && state.homeProgress() == Querying)
         {
@@ -197,7 +193,7 @@ abstract class HomeState extends WaitingState
             {
                 if (tracing != null)
                 {
-                    tracing.trace(safeStore.commandStore(), "Failed to recover: " + Tracing.format(fail));
+                    tracing.trace(safeStore.commandStore(), "Failed to recover: %s", fail);
                     tracing.trace(safeStore.commandStore(), "Waiting to retry (%d) with progress token %s", state.homeRunCounter(), prevProgressToken);
                 }
 

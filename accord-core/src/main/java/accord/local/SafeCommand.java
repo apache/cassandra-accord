@@ -19,12 +19,14 @@
 package accord.local;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import accord.api.Result;
 import accord.local.Command.Truncated;
 import accord.primitives.Ballot;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
+import accord.primitives.Participants;
 import accord.primitives.SaveStatus;
 import accord.primitives.Status;
 import accord.primitives.Timestamp;
@@ -197,5 +199,15 @@ public abstract class SafeCommand
         if (!current.saveStatus().isUninitialised())
             return current;
         return incidentalUpdate(Command.NotDefined.notDefined(current, current.promised()));
+    }
+
+    public static @Nullable Participants<?> maxParticipants(@Nullable SafeCommand safeCommand)
+    {
+        if (safeCommand == null)
+            return null;
+        Command command = safeCommand.current();
+        if (command == null)
+            return null;
+        return command.maxParticipants();
     }
 }

@@ -19,6 +19,7 @@
 package accord.local;
 
 import accord.primitives.Participants;
+import accord.primitives.Unseekables;
 import accord.utils.MapReduce;
 import accord.utils.async.AsyncChain;
 
@@ -65,4 +66,10 @@ public abstract class MapReduceCommandStores<P extends Participants<?>, O> imple
     }
 
     protected abstract O applyInternal(SafeCommandStore safeStore);
+
+    @Override
+    public Unseekables<?> keys()
+    {
+        return scope;
+    }
 }

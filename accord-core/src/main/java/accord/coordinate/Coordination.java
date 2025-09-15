@@ -24,34 +24,41 @@ import accord.coordinate.tracking.AbstractTracker;
 import accord.local.Node.Id;
 import accord.local.SequentialAsyncExecutor;
 import accord.primitives.Ballot;
+import accord.primitives.Participants;
 import accord.primitives.TxnId;
-import accord.primitives.Unseekables;
 import accord.utils.SortedList;
 import accord.utils.SortedListMap;
 import accord.utils.TinyEnumSet;
 
 public interface Coordination
 {
+    // approximately ordered, that is we should ordinarily move forwards in the state machine
     enum CoordinationKind
     {
-        PreAccept, Propose, ProposeInvalidate, Stabilise, Execute, ExecuteSyncPoint, Persist,
-        MaybeRecover, PrepareRecovery, BeginRecovery, RecoverAwait, BeginInvalidate,
-        AsyncAwait, SyncAwait,
+        HomeProgress, WaitProgress,  // not strictly coordinations, but for tracing simplicity we treat them as such here (maybe make this a more general enum)
         Fetch, FetchRoute,
-        CollectLatestDeps, Bootstrap,
-        Other;
+        BeginInvalidate, MaybeRecover, PrepareRecovery, BeginRecovery, RecoverAwait, CollectLatestDeps,
+        PreAccept, Propose, ProposeInvalidate, Stabilise, Execute, ExecuteSyncPoint, Persist,
+        AsyncAwait, SyncAwait, Bootstrap, Other;
 
+        private static final CoordinationKind[] LOOKUP = values();
         public static final TinyEnumSet<CoordinationKind> COORDINATES_STATE_MACHINE = TinyEnumSet.of(
             PreAccept, Propose, ProposeInvalidate, Stabilise, Execute, ExecuteSyncPoint, Persist,
             MaybeRecover, PrepareRecovery, BeginRecovery, RecoverAwait, BeginInvalidate
         );
+        public static final TinyEnumSet<CoordinationKind> ALL = TinyEnumSet.of(LOOKUP);
+
+        public static CoordinationKind forOrdinal(int ordinal)
+        {
+            return LOOKUP[ordinal];
+        }
     }
 
     long coordinationId();
 
     TxnId txnId();
     CoordinationKind kind();
-    Unseekables<?> scope();
+    Participants<?> scope();
 
     default @Nullable Ballot ballot() { return null; }
 

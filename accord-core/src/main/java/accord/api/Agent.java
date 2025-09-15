@@ -23,10 +23,12 @@ import java.util.concurrent.TimeUnit;
 import javax.annotation.Nullable;
 
 import accord.api.ProgressLog.BlockedUntil;
+import accord.coordinate.Coordination.CoordinationKind;
 import accord.local.Node;
 import accord.local.SafeCommandStore;
 import accord.local.TimeService;
 import accord.messages.ReplyContext;
+import accord.primitives.Participants;
 import accord.primitives.Routable.Domain;
 import accord.primitives.Status.Phase;
 import accord.primitives.Txn;
@@ -40,7 +42,7 @@ import accord.utils.async.AsyncChain;
  */
 public interface Agent extends UncaughtExceptionListener
 {
-    default @Nullable Tracing trace(TxnId txnId, TraceEventType eventType) { return null; }
+    default @Nullable Tracing trace(@Nullable TxnId txnId, @Nullable Participants<?> participants, CoordinationKind eventType) { return null; }
 
     OwnershipEventListener ownershipEvents();
 

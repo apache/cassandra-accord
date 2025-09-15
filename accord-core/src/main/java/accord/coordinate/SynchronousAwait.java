@@ -31,7 +31,6 @@ import accord.local.SequentialAsyncExecutor;
 import accord.messages.Await;
 import accord.primitives.Participants;
 import accord.primitives.TxnId;
-import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
@@ -42,17 +41,15 @@ import accord.utils.async.Cancellable;
  * This may or may not be a condition we expect to reach promptly, but we will wait only until the timeout passes
  * at which point we will report failure.
  */
-public class SynchronousAwait extends AbstractCoordination<Boolean, Await.AwaitOk, Void>
+public class SynchronousAwait extends AbstractCoordination<Participants<?>, Boolean, Await.AwaitOk, Void>
 {
-    final Participants<?> participants;
     final SimpleTracker<?> tracker;
     final Await.Until until;
     final boolean notifyProgressLog;
 
     public SynchronousAwait(Node node, SequentialAsyncExecutor executor, TxnId txnId, Participants<?> participants, SimpleTracker<?> tracker, Await.Until until, boolean notifyProgressLog, BiConsumer<? super Boolean, Throwable> callback)
     {
-        super(node, executor, txnId, tracker.nodes(), callback);
-        this.participants = participants;
+        super(node, executor, txnId, participants, tracker.nodes(), callback);
         this.until = until;
         this.notifyProgressLog = notifyProgressLog;
         this.tracker = tracker;
@@ -62,7 +59,7 @@ public class SynchronousAwait extends AbstractCoordination<Boolean, Await.AwaitO
     void start()
     {
         super.start();
-        contact(to -> new Await(to, tracker.topologies(), txnId, participants, until, notifyProgressLog));
+        contact(to -> new Await(to, tracker.topologies(), txnId, scope, until, notifyProgressLog));
     }
 
     public static AsyncChain<Boolean> awaitQuorum(Node node, SequentialAsyncExecutor executor, Topologies topologies, TxnId txnId, Participants<?> participants, Await.Until until, boolean notifyProgressLog)
@@ -106,12 +103,6 @@ public class SynchronousAwait extends AbstractCoordination<Boolean, Await.AwaitO
     public CoordinationKind kind()
     {
         return CoordinationKind.SyncAwait;
-    }
-
-    @Override
-    public Unseekables<?> scope()
-    {
-        return participants;
     }
 
     @Override

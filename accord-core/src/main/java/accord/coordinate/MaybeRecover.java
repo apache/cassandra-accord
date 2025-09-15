@@ -20,7 +20,6 @@ package accord.coordinate;
 
 import java.util.function.BiConsumer;
 
-import accord.api.Tracing;
 import accord.local.CommandStores.LatentStoreSelector;
 import accord.local.SequentialAsyncExecutor;
 import accord.messages.InformDurable;
@@ -32,7 +31,6 @@ import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
 import accord.utils.UnhandledEnum;
 
-import static accord.api.TraceEventType.RECOVER;
 import static accord.coordinate.Infer.InvalidateAndCallback.locallyInvalidateAndCallback;
 import static accord.messages.Commit.Invalidate.commitInvalidate;
 import static accord.primitives.Known.Outcome.Unknown;
@@ -50,7 +48,7 @@ public class MaybeRecover extends CheckShards<Outcome, Route<?>>
     MaybeRecover(Node node, SequentialAsyncExecutor executor, TxnId txnId, Infer.InvalidIf invalidIf, Route<?> someRoute, ProgressToken prevProgress, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback)
     {
         // we only want to enquire with the home shard, but we prefer maximal route information for running Invalidation against, if necessary
-        super(node, executor, txnId, someRoute.withHomeKey(), IncludeInfo.Route, null, invalidIf, callback, node.agent().trace(txnId, RECOVER));
+        super(node, executor, txnId, someRoute.withHomeKey(), IncludeInfo.Route, null, invalidIf, callback);
         this.prevProgress = prevProgress;
         this.reportTo = reportTo;
     }
@@ -82,8 +80,6 @@ public class MaybeRecover extends CheckShards<Outcome, Route<?>>
         //  this can be helpful in mitigating flakiness and helping forward progress for large transactions spanning many shards
         if (fail != null)
         {
-            if (tracing != null)
-                tracing.trace(null, "MaybeRecover failed: " + Tracing.format(fail));
             invokeCallback(null, fail);
         }
         else
@@ -91,7 +87,7 @@ public class MaybeRecover extends CheckShards<Outcome, Route<?>>
             Invariants.require(merged != null);
             CheckStatusOk full = merged.finish(this.query, this.query, this.query, success.withQuorum, previouslyKnownToBeInvalidIf);
             if (tracing != null)
-                tracing.trace(null, "MaybeRecover merged: " + full);
+                tracing.trace(null, "merged: " + full);
 
             Known known = full.maxKnown();
             Route<?> someRoute = full.route;
@@ -113,7 +109,7 @@ public class MaybeRecover extends CheckShards<Outcome, Route<?>>
                     if (success.withQuorum == HasQuorum && known.canProposeInvalidation() && !Route.isFullRoute(full.route))
                     {
                         if (tracing != null)
-                            tracing.trace(null, "MaybeRecover found quorum permitting invalidation: " + known);
+                            tracing.trace(null, "found quorum permitting invalidation: " + known);
 
                         // for correctness reasons, we have not necessarily preempted the initial pre-accept round and
                         // may have raced with it, so we must attempt to recover anything we see pre-accepted.
@@ -121,7 +117,7 @@ public class MaybeRecover extends CheckShards<Outcome, Route<?>>
                         break;
                     }
                     if (tracing != null)
-                        tracing.trace(null, "MaybeRecover found quorum of Unknown that did not permit invalidation; falling through.");
+                        tracing.trace(null, "found quorum of Unknown that did not permit invalidation; falling through.");
                     // fall through otherwise to recovery
                 }
                 case WasApply:
@@ -130,7 +126,7 @@ public class MaybeRecover extends CheckShards<Outcome, Route<?>>
                     {
                         ProgressToken progressToken = full.toProgressToken();
                         if (tracing != null)
-                            tracing.trace(null, "MaybeRecover found %s which need not be recovered; reporting %s", known.outcome(), progressToken);
+                            tracing.trace(null, "found %s which need not be recovered; reporting %s", known.outcome(), progressToken);
                         invokeCallback(progressToken, null);
                         break;
                     }
@@ -142,7 +138,7 @@ public class MaybeRecover extends CheckShards<Outcome, Route<?>>
                     {
                         ProgressToken progressToken = full.toProgressToken();
                         if (tracing != null)
-                            tracing.trace(null, "MaybeRecover found %s; reporting progress token %s", hasMadeProgress(full) ? "progress" : "no route", progressToken);
+                            tracing.trace(null, "found %s; reporting progress token %s", hasMadeProgress(full) ? "progress" : "no route", progressToken);
                         if (full.durability.isDurable())
                             InformDurable.informDefault(node, topologies, txnId, query, bumpBallot, full.executeAtIfKnown(), full.durability);
                         invokeCallback(full.toProgressToken(), null);
@@ -151,8 +147,8 @@ public class MaybeRecover extends CheckShards<Outcome, Route<?>>
                     {
                         Invariants.expect(!full.durability.isDurableOrInvalidated());
                         if (tracing != null)
-                            tracing.trace(null, "MaybeRecover invoking RecoverWithRoute");
-                        node.recover(txnId, full.invalidIf, Route.castToFullRoute(someRoute), reportTo, tracing).begin(takeCallback());
+                            tracing.trace(null, "invoking RecoverWithRoute");
+                        node.recover(txnId, full.invalidIf, Route.castToFullRoute(someRoute), reportTo).begin(takeCallback());
                     }
                     break;
                 }
@@ -169,14 +165,14 @@ public class MaybeRecover extends CheckShards<Outcome, Route<?>>
                     }
                     ProgressToken progressToken = full.toProgressToken();
                     if (tracing != null)
-                        tracing.trace(null, "MaybeRecover found %s which cannot be recovered; reporting %s", known.outcome(), progressToken);
+                        tracing.trace(null, "found %s which cannot be recovered; reporting %s", known.outcome(), progressToken);
                     invokeCallback(progressToken, null);
                     break;
                 }
                 case Abort:
                 {
                     if (tracing != null)
-                        tracing.trace(null, "MaybeRecover found Abort; invalidating locally", known.outcome());
+                        tracing.trace(null, "found Abort; invalidating locally");
 
                     commitInvalidate(node, txnId, Route.merge(full.route, (Route) query), txnId.epoch());
                     locallyInvalidateAndCallback(node, txnId, txnId.epoch(), txnId.epoch(), someRoute, full.toProgressToken(), takeCallback(), null);

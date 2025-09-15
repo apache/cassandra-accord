@@ -20,14 +20,12 @@ package accord.messages;
 
 import javax.annotation.Nonnull;
 
-import accord.local.LoadKeys;
 import accord.local.Node;
 import accord.local.SafeCommandStore;
 import accord.primitives.FullRoute;
 import accord.primitives.Route;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
-import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 import accord.utils.async.Cancellable;
@@ -102,18 +100,6 @@ public class GetMaxConflict extends RouteRequest.WithUnsynced<GetMaxConflict.Get
     public String reason()
     {
         return toString();
-    }
-
-    @Override
-    public Unseekables<?> keys()
-    {
-        return scope;
-    }
-
-    @Override
-    public LoadKeys loadKeys()
-    {
-        return LoadKeys.NONE;
     }
 
     public static class GetMaxConflictOk implements Reply

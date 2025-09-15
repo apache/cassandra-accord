@@ -28,9 +28,14 @@ public enum ExecuteFlag
 {
     READY_TO_EXECUTE, HAS_UNIQUE_HLC;
 
+    private static final ExecuteFlag[] LOOKUP = values();
+    public static ExecuteFlag forOrdinal(int ordinal)
+    {
+        return LOOKUP[ordinal];
+    }
+
     public static final class ExecuteFlags extends TinyEnumSet<ExecuteFlag>
     {
-        private static final ExecuteFlag[] UNIVERSE = ExecuteFlag.values();
         private static final ExecuteFlags[] LOOKUP = new ExecuteFlags[1 << ExecuteFlag.values().length];
         static
         {
@@ -46,14 +51,13 @@ public enum ExecuteFlag
         public ExecuteFlags without(ExecuteFlag a) { return LOOKUP[bitset & ~encode(a)]; }
         public ExecuteFlags or(ExecuteFlags that) { return LOOKUP[this.bitset | that.bitset]; }
         public ExecuteFlags and(ExecuteFlags that) { return LOOKUP[this.bitset & that.bitset]; }
-        public boolean isEmpty() { return bitset == 0; }
         public int bits() { return bitset; }
         private ExecuteFlags(int bits) { super(bits); }
 
         @Override
         public String toString()
         {
-            return toString(UNIVERSE);
+            return toString(ExecuteFlag::forOrdinal);
         }
 
         public static void collect(CoordinationFlags into, Node.Id id, ExecuteFlags add, Object expectIfReadyToExecute, Object actualReadyToExecute)

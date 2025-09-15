@@ -42,7 +42,6 @@ import accord.primitives.Status;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
-import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 import accord.utils.SortedArrays;
@@ -58,12 +57,11 @@ import static accord.primitives.Status.AcceptedInvalidate;
 import static accord.primitives.TxnId.MediumPath.TrackStable;
 import static accord.topology.Topologies.SelectNodeOwnership.SHARE;
 
-abstract class Propose<R> extends AbstractCoordination<R, AcceptReply, AcceptReply>
+abstract class Propose<R> extends AbstractCoordination<FullRoute<?>, R, AcceptReply, AcceptReply>
 {
     final Accept.Kind kind;
     final Ballot ballot;
     final Txn txn;
-    final FullRoute<?> route;
     final Route<?> require;
     final Deps deps;
 
@@ -72,12 +70,11 @@ abstract class Propose<R> extends AbstractCoordination<R, AcceptReply, AcceptRep
 
     Propose(Node node, SequentialAsyncExecutor executor, Topologies topologies, Accept.Kind kind, Ballot ballot, TxnId txnId, Txn txn, Route<?> require, FullRoute<?> route, Timestamp executeAt, Deps deps, BiConsumer<? super R, Throwable> callback)
     {
-        super(node, executor, txnId, topologies.nodes(), callback);
+        super(node, executor, txnId, route, topologies.nodes(), callback);
         this.kind = kind;
         this.ballot = ballot;
         this.txn = txn;
         this.require = require;
-        this.route = route;
         this.deps = deps;
         this.executeAt = executeAt;
         this.tracker = new QuorumTracker(topologies);
@@ -97,7 +94,7 @@ abstract class Propose<R> extends AbstractCoordination<R, AcceptReply, AcceptRep
         else
         {
             super.start();
-            contact(to -> new Accept(to, tracker.topologies(), kind, ballot, txnId, route, executeAt, deps, require != route));
+            contact(to -> new Accept(to, tracker.topologies(), kind, ballot, txnId, scope, executeAt, deps, require != scope));
         }
     }
 
@@ -108,23 +105,23 @@ abstract class Propose<R> extends AbstractCoordination<R, AcceptReply, AcceptRep
         {
             default: throw new AssertionError("Unhandled AcceptOutcome: " + reply.outcome());
             case RejectedBallot:
-                finishWithFailureOverride(Preempted.preempted(node.agent(), txnId, route.homeKey()));
+                finishWithFailureOverride(Preempted.preempted(node.agent(), txnId, scope.homeKey()));
                 break;
 
             case Truncated:
             case Redundant:
-                if (require == route || !isSufficientPartialReply(reply, from))
+                if (require == scope || !isSufficientPartialReply(reply, from))
                 {
                     Throwable failNow = null;
                     if (reply.outcome == AcceptOutcome.Truncated)
-                        failNow = new Truncated(txnId, route.homeKey());
+                        failNow = new Truncated(txnId, scope.homeKey());
                     else if (reply.supersededBy != null || ballot.equals(Ballot.ZERO))
-                        failNow = Preempted.preempted(node.agent(), txnId, route.homeKey());
+                        failNow = Preempted.preempted(node.agent(), txnId, scope.homeKey());
 
                     if (failNow != null)
                         finishWithFailureOverride(failNow);
                     else
-                        onFailureInternal(from, fromIndex, reply.committedExecuteAt == null ? null : new Redundant(txnId, route.homeKey(), reply.committedExecuteAt));
+                        onFailureInternal(from, fromIndex, reply.committedExecuteAt == null ? null : new Redundant(txnId, scope.homeKey(), reply.committedExecuteAt));
                     break;
                 }
 
@@ -158,8 +155,8 @@ abstract class Propose<R> extends AbstractCoordination<R, AcceptReply, AcceptRep
         Deps newDeps = mergeNewDeps();
         Deps deps = mergeDeps(newDeps);
         node.agent().coordinatorEvents().onAccepted(txnId, ballot);
-        if (kind == Accept.Kind.MEDIUM) adapter().execute(node, executor, tracker.topologies(), route, ballot, ExecutePath.MEDIUM, CoordinationFlags.none(), txnId, txn, executeAt, deps, newDeps, finishAndTakeCallback());
-        else adapter().stabilise(node, executor, tracker.topologies(), route, ballot, txnId, txn, executeAt, deps, finishAndTakeCallback());
+        if (kind == Accept.Kind.MEDIUM) adapter().execute(node, executor, tracker.topologies(), scope, ballot, ExecutePath.MEDIUM, CoordinationFlags.none(), txnId, txn, executeAt, deps, newDeps, finishAndTakeCallback());
+        else adapter().stabilise(node, executor, tracker.topologies(), scope, ballot, txnId, txn, executeAt, deps, finishAndTakeCallback());
     }
 
     Deps mergeDeps()
@@ -201,12 +198,6 @@ abstract class Propose<R> extends AbstractCoordination<R, AcceptReply, AcceptRep
     }
 
     @Override
-    public Unseekables<?> scope()
-    {
-        return route;
-    }
-
-    @Override
     public Ballot ballot()
     {
         return ballot;
@@ -225,30 +216,28 @@ abstract class Propose<R> extends AbstractCoordination<R, AcceptReply, AcceptRep
     }
 
     // A special version for proposing the invalidation of a transaction; only needs to succeed on one shard
-    static class NotAccept extends AbstractCoordination<Void, AcceptReply, Void> implements Callback<AcceptReply>
+    static class NotAccept extends AbstractCoordination<Participants<?>, Void, AcceptReply, Void> implements Callback<AcceptReply>
     {
         final Status status;
         final Ballot ballot;
         final TxnId txnId;
-        final Participants<?> someParticipants;
 
         private final SimpleTracker<?> tracker;
 
         NotAccept(Node node, SequentialAsyncExecutor executor, Status status, Topologies topologies, Ballot ballot, TxnId txnId, Participants<?> someParticipants, BiConsumer<Void, Throwable> callback)
         {
-            super(node, executor, txnId, topologies.nodes(), callback);
+            super(node, executor, txnId, someParticipants, topologies.nodes(), callback);
             this.status = status;
             this.tracker = new QuorumTracker(topologies);
             this.ballot = ballot;
             this.txnId = txnId;
-            this.someParticipants = someParticipants;
         }
 
         @Override
         void start()
         {
             super.start();
-            contact(to -> new Accept.NotAccept(status, ballot, txnId, someParticipants));
+            contact(to -> new Accept.NotAccept(status, ballot, txnId, scope));
         }
 
         public static void proposeInvalidate(Node node, SequentialAsyncExecutor executor, Ballot ballot, TxnId txnId, RoutingKey invalidateWithParticipant, BiConsumer<Void, Throwable> callback)
@@ -314,12 +303,6 @@ abstract class Propose<R> extends AbstractCoordination<R, AcceptReply, AcceptRep
         public CoordinationKind kind()
         {
             return CoordinationKind.ProposeInvalidate;
-        }
-
-        @Override
-        public Unseekables<?> scope()
-        {
-            return someParticipants;
         }
 
         @Override

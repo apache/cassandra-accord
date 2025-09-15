@@ -36,8 +36,8 @@ import accord.api.OwnershipEventListener;
 import accord.api.ProgressLog.BlockedUntil;
 import accord.api.Result;
 import accord.api.Scheduler;
-import accord.api.TraceEventType;
 import accord.api.Tracing;
+import accord.coordinate.Coordination;
 import accord.coordinate.CoordinationFailed;
 import accord.coordinate.ExecuteSyncPoint;
 import accord.impl.InMemoryAgent;
@@ -56,6 +56,7 @@ import accord.local.TimeService;
 import accord.messages.ReplyContext;
 import accord.primitives.Ballot;
 import accord.primitives.Keys;
+import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Routable.Domain;
 import accord.primitives.Status;
@@ -126,10 +127,11 @@ public class ListAgent implements InMemoryAgent, CoordinatorEventListener, Owner
 
     @Nullable
     @Override
-    public Tracing trace(TxnId txnId, TraceEventType eventType)
+    public Tracing trace(TxnId txnId, Participants<?> participants, Coordination.CoordinationKind eventType)
     {
         if (rnd.nextFloat() < 0.01f)
-            return (i1, i2) -> {};
+            return (store, message) -> {};
+
         return null;
     }
 

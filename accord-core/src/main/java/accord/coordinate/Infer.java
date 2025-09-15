@@ -113,9 +113,9 @@ public class Infer
         final StoreSelector reportTo;
         final T param;
         final BiConsumer<T, Throwable> callback;
-        final Tracing tracing;
+        final @Nullable Tracing tracing;
 
-        private CleanupAndCallback(Node node, TxnId txnId, StoreSelector reportTo, Participants<?> participants, T param, BiConsumer<T, Throwable> callback, Tracing tracing)
+        private CleanupAndCallback(Node node, TxnId txnId, StoreSelector reportTo, Participants<?> participants, T param, BiConsumer<T, Throwable> callback, @Nullable Tracing tracing)
         {
             super(participants);
             this.node = node;

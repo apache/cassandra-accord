@@ -42,7 +42,6 @@ import accord.utils.UnhandledEnum;
 
 import javax.annotation.Nullable;
 
-import static accord.api.TraceEventType.RECOVER;
 import static accord.coordinate.Infer.InvalidIf.NotKnownToBeInvalid;
 import static accord.coordinate.Propose.NotAccept.proposeInvalidate;
 import static accord.primitives.Status.AcceptedMedium;
@@ -52,10 +51,9 @@ import static accord.primitives.ProgressToken.TRUNCATED_DURABLE_OR_INVALIDATED;
 import static accord.topology.Topologies.SelectNodeOwnership.SHARE;
 import static accord.utils.Invariants.illegalState;
 
-public class Invalidate extends AbstractCoordination<Outcome, InvalidateReply, InvalidateReply>
+public class Invalidate extends AbstractCoordination<Participants<?>, Outcome, InvalidateReply, InvalidateReply>
 {
     private final Ballot ballot;
-    private final Participants<?> invalidateWith;
 
     private final boolean transitivelyInvokedByPriorInvalidation;
     private final InvalidationTracker tracker;
@@ -67,10 +65,9 @@ public class Invalidate extends AbstractCoordination<Outcome, InvalidateReply, I
     }
     private Invalidate(Node node, SequentialAsyncExecutor executor, Topologies topologies, Ballot ballot, TxnId txnId, Participants<?> invalidateWith, boolean transitivelyInvokedByPriorInvalidation, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback)
     {
-        super(node, executor, txnId, topologies.nodes(), callback);
+        super(node, executor, txnId, invalidateWith, topologies.nodes(), callback);
         Invariants.require(topologies.size() == 1);
         this.ballot = ballot;
-        this.invalidateWith = invalidateWith;
         this.transitivelyInvokedByPriorInvalidation = transitivelyInvokedByPriorInvalidation;
         this.reportTo = reportTo;
         this.tracker = new InvalidationTracker(topologies, txnId);
@@ -105,7 +102,7 @@ public class Invalidate extends AbstractCoordination<Outcome, InvalidateReply, I
         else
         {
             super.start();
-            contact(to -> new BeginInvalidation(to, tracker.topologies(), txnId, invalidateWith, ballot));
+            contact(to -> new BeginInvalidation(to, tracker.topologies(), txnId, scope, ballot));
         }
     }
 
@@ -114,7 +111,7 @@ public class Invalidate extends AbstractCoordination<Outcome, InvalidateReply, I
     {
         recordOk(fromIndex, reply);
         Participants<?> truncated = reply.truncated;
-        Participants<?> notTruncated = truncated == null ? invalidateWith : invalidateWith.without(truncated);
+        Participants<?> notTruncated = truncated == null ? scope : scope.without(truncated);
         Participants<?> promised = reply.isPromiseRejected() ? null : notTruncated;
         handle(tracker.recordSuccess(from, promised, notTruncated, truncated, reply.hasDecision(), reply.acceptedFastPath));
     }
@@ -183,7 +180,7 @@ public class Invalidate extends AbstractCoordination<Outcome, InvalidateReply, I
                 case Stable:
                 case Committed:
                 case PreCommitted:
-                    Invariants.require(maxNotTruncated.maxKnowledgeStatus.status == PreAccepted || !invalidateWith.contains(someRoute.homeKey()) || fullRoute != null);
+                    Invariants.require(maxNotTruncated.maxKnowledgeStatus.status == PreAccepted || !scope.contains(someRoute.homeKey()) || fullRoute != null);
 
                 case AcceptedMedium:
                 case AcceptedSlow:
@@ -205,11 +202,10 @@ public class Invalidate extends AbstractCoordination<Outcome, InvalidateReply, I
                     if (!witnessedByInvalidation.hasBeen(AcceptedMedium))
                     {
                         Invariants.require(tracker.all(InvalidationShardTracker::isPromised));
-                        if (!invalidateWith.containsAll(fullRoute))
+                        if (!scope.containsAll(fullRoute))
                             witnessedByInvalidation = null;
                     }
-                    PrepareRecovery.recover(node, executor, txnId, NotKnownToBeInvalid, fullRoute, witnessedByInvalidation, reportTo, finishAndTakeCallback(),
-                                            node.agent().trace(txnId, RECOVER));
+                    PrepareRecovery.recover(node, executor, txnId, NotKnownToBeInvalid, fullRoute, witnessedByInvalidation, reportTo, finishAndTakeCallback());
                     return;
 
                 case Invalidated:
@@ -244,7 +240,7 @@ public class Invalidate extends AbstractCoordination<Outcome, InvalidateReply, I
         // Probably simplest to do so, but perhaps better for user if we don't.
         Ranges ranges = Ranges.of(tracker.promisedShard().range);
         // we look up by TxnId at the target node, so it's fine to pick a RoutingKey even if it's a range transaction
-        RoutingKey someKey = invalidateWith.slice(ranges).get(0).someIntersectingRoutingKey(ranges);
+        RoutingKey someKey = scope.slice(ranges).get(0).someIntersectingRoutingKey(ranges);
         BiConsumer<? super Outcome, Throwable> callback = finishAndTakeCallback();
         proposeInvalidate(node, executor, ballot, txnId, someKey, (success, fail) -> {
             /*
@@ -263,12 +259,12 @@ public class Invalidate extends AbstractCoordination<Outcome, InvalidateReply, I
         try
         {
             @Nullable Route<?> route = InvalidateReply.mergeRoutes(oks.valuesAsNullableList());
-            if (route == null && Route.isRoute(invalidateWith)) route = Route.castToRoute(invalidateWith);
+            if (route == null && Route.isRoute(scope)) route = Route.castToRoute(scope);
             if (route != null) route = route.withHomeKey();
 
             // TODO (desired, efficiency): commitInvalidate (and others) should skip the network for local applications,
             //  so we do not need to explicitly do so here before notifying the waiter
-            Participants<?> commitTo = Participants.merge(route, (Participants) invalidateWith);
+            Participants<?> commitTo = Participants.merge(route, (Participants) scope);
             Commit.Invalidate.commitInvalidate(node, txnId, commitTo, txnId);
             commitInvalidateLocal(commitTo, reportTo.refine(txnId, null, commitTo), callback);
         }
@@ -324,12 +320,6 @@ public class Invalidate extends AbstractCoordination<Outcome, InvalidateReply, I
     public CoordinationKind kind()
     {
         return CoordinationKind.BeginInvalidate;
-    }
-
-    @Override
-    public Unseekables<?> scope()
-    {
-        return invalidateWith;
     }
 
     @Override

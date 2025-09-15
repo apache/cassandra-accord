@@ -22,15 +22,12 @@ import javax.annotation.Nullable;
 
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.local.PreLoadContext;
-import accord.local.SafeCommandStore;
 import accord.primitives.Route;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
-import accord.utils.MapReduceConsume;
 import accord.utils.async.Cancellable;
 
-public abstract class RouteRequest<R extends Reply> extends ParticipantsRequest<Route<?>, R> implements Request, PreLoadContext, MapReduceConsume<SafeCommandStore, R>
+public abstract class RouteRequest<R extends Reply> extends ParticipantsRequest<Route<?>, R>
 {
     public static abstract class WithUnsynced<R extends Reply> extends RouteRequest<R>
     {

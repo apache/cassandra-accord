@@ -28,8 +28,6 @@ import javax.annotation.Nullable;
 
 import accord.api.Result;
 import accord.api.RoutingKey;
-import accord.api.TraceEventType;
-import accord.api.Tracing;
 import accord.coordinate.ExecuteFlag.CoordinationFlags;
 import accord.coordinate.tracking.AbstractTracker;
 import accord.coordinate.tracking.RecoveryTracker;
@@ -57,7 +55,6 @@ import accord.primitives.ProgressToken;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
-import accord.primitives.Unseekables;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.topology.Topology;
@@ -96,7 +93,7 @@ import static accord.utils.SortedArrays.Search.FLOOR;
 
 // TODO (expected): lifetime of Recovery currently overlaps with follow-up work (and we callback to the Recovery).
 //   this is suboptimal - should setDone() and takeCallback() before passing onto next step
-public class Recover extends AbstractCoordination<Outcome, RecoverReply, RecoverOk> implements Callback<RecoverReply>
+public class Recover extends AbstractCoordination<FullRoute<?>, Outcome, RecoverReply, RecoverOk> implements Callback<RecoverReply>
 {
     public enum InferredFastPath
     {
@@ -111,61 +108,57 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
     private final CoordinationAdapter<Result> adapter;
     private final Ballot ballot;
     private final Txn txn;
-    private final FullRoute<?> route;
     private final @Nullable Timestamp committedExecuteAt;
     private final boolean isFastPathDecided;
     private final LatentStoreSelector reportTo;
-    private final @Nullable Tracing tracing;
 
     private final RecoveryTracker tracker;
 
     private Recover(Node node, SequentialAsyncExecutor executor, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route,
                     @Nullable Timestamp committedExecuteAt, boolean isFastPathDecided, LatentStoreSelector reportTo,
-                    BiConsumer<? super Outcome, Throwable> callback, @Nullable Tracing tracing)
+                    BiConsumer<? super Outcome, Throwable> callback)
     {
-        super(node, executor, txnId, topologies.nodes(), callback);
+        super(node, executor, txnId, route, topologies.nodes(), callback);
         this.isFastPathDecided = isFastPathDecided;
         Invariants.require(txnId.isVisible());
         this.adapter = node.coordinationAdapter(txnId, Recovery);
         this.ballot = ballot;
         this.txn = txn;
-        this.route = route;
         this.committedExecuteAt = committedExecuteAt;
         this.reportTo = reportTo;
-        this.tracing = tracing;
         this.tracker = new RecoveryTracker(topologies);
     }
 
-    public static Recover recover(Node node, TxnId txnId, Txn txn, FullRoute<?> route, boolean isFastPathDecided, BiConsumer<? super Outcome, Throwable> callback, @Nullable Tracing tracing)
+    public static Recover recover(Node node, TxnId txnId, Txn txn, FullRoute<?> route, boolean isFastPathDecided, BiConsumer<? super Outcome, Throwable> callback)
     {
-        return recover(node, txnId, txn, route, isFastPathDecided, LatentStoreSelector.standard(), callback, tracing);
+        return recover(node, txnId, txn, route, isFastPathDecided, LatentStoreSelector.standard(), callback);
     }
 
-    public static Recover recover(Node node, TxnId txnId, Txn txn, FullRoute<?> route, boolean isFastPathDecided, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback, @Nullable Tracing tracing)
+    public static Recover recover(Node node, TxnId txnId, Txn txn, FullRoute<?> route, boolean isFastPathDecided, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback)
     {
         Ballot ballot = node.uniqueTimestamp(Ballot::fromValues);
-        return recover(node, ballot, txnId, txn, route, isFastPathDecided, reportTo, callback, tracing);
+        return recover(node, ballot, txnId, txn, route, isFastPathDecided, reportTo, callback);
     }
 
-    private static Recover recover(Node node, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, boolean isFastPathDecided, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback, @Nullable Tracing tracing)
+    private static Recover recover(Node node, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, boolean isFastPathDecided, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback)
     {
-        return recover(node, ballot, txnId, txn, route, null, isFastPathDecided, reportTo, callback, tracing);
+        return recover(node, ballot, txnId, txn, route, null, isFastPathDecided, reportTo, callback);
     }
 
-    public static Recover recover(Node node, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, @Nullable Timestamp committedExecuteAt, boolean isFastPathDecided, BiConsumer<? super Outcome, Throwable> callback, @Nullable Tracing tracing)
+    public static Recover recover(Node node, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, @Nullable Timestamp committedExecuteAt, boolean isFastPathDecided, BiConsumer<? super Outcome, Throwable> callback)
     {
-        return recover(node, ballot, txnId, txn, route, committedExecuteAt, isFastPathDecided, null, callback, tracing);
+        return recover(node, ballot, txnId, txn, route, committedExecuteAt, isFastPathDecided, null, callback);
     }
 
-    public static Recover recover(Node node, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, @Nullable Timestamp committedExecuteAt, boolean isFastPathDecided, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback, @Nullable Tracing tracing)
+    public static Recover recover(Node node, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, @Nullable Timestamp committedExecuteAt, boolean isFastPathDecided, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback)
     {
         Topologies topologies = node.topology().select(route, txnId, committedExecuteAt == null ? txnId : committedExecuteAt, SHARE, QuorumEpochIntersections.recover);
-        return recover(node, topologies, ballot, txnId, txn, route, committedExecuteAt, isFastPathDecided, reportTo, callback, tracing);
+        return recover(node, topologies, ballot, txnId, txn, route, committedExecuteAt, isFastPathDecided, reportTo, callback);
     }
 
-    private static Recover recover(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp committedExecuteAt, boolean isFastPathDecided, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback, @Nullable Tracing tracing)
+    private static Recover recover(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp committedExecuteAt, boolean isFastPathDecided, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback)
     {
-        Recover recover = new Recover(node, node.someSequentialExecutor(), topologies, ballot, txnId, txn, route, committedExecuteAt, isFastPathDecided, reportTo, callback, tracing);
+        Recover recover = new Recover(node, node.someSequentialExecutor(), topologies, ballot, txnId, txn, route, committedExecuteAt, isFastPathDecided, reportTo, callback);
         recover.start();
         return recover;
     }
@@ -175,15 +168,12 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
     {
         super.start();
         node.agent().coordinatorEvents().onRecoveryStarted(txnId, ballot);
-        contact(to -> new BeginRecovery(to, tracker.topologies(), txnId, committedExecuteAt, isFastPathDecided, txn, route, ballot));
+        contact(to -> new BeginRecovery(to, tracker.topologies(), txnId, committedExecuteAt, isFastPathDecided, txn, scope, ballot));
     }
 
     @Override
     public void onSuccessInternal(Id from, int fromIndex, RecoverReply reply)
     {
-        if (tracing != null)
-            tracing.trace(null, "Recover received from %s: %s", from, reply);
-
         boolean acceptsFastPath;
         switch (reply.kind())
         {
@@ -191,7 +181,7 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
             case Reject:
             case Truncated:
                 // TODO (required): handle partial truncations (both within a shard e.g. pre-bootstrap, and for some shards)
-                finishWithFailureOverride(Preempted.preempted(node.agent(), txnId, route.homeKey()));
+                finishWithFailureOverride(Preempted.preempted(node.agent(), txnId, scope.homeKey()));
                 return;
 
             case Ok:
@@ -242,7 +232,7 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
             {
                 Timestamp committedExecuteAt = ((Redundant) failure).committedExecuteAt;
                 if (tracing != null)
-                    tracing.trace(null, "Recover found Redundant; retrying with known committedExecuteAt " + committedExecuteAt);
+                    tracing.trace(null, "found Redundant; retrying with known committedExecuteAt " + committedExecuteAt);
                 retry(committedExecuteAt, callback);
             }
             else
@@ -283,7 +273,7 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
                 case Invalidated:
                 {
                     if (tracing != null)
-                        tracing.trace(null, "Recover found Invalidated: committing to all shards.");
+                        tracing.trace(null, "found Invalidated: committing to all shards.");
 
                     commitInvalidate(invalidateUntil(oks), finishAndTakeCallback());
                     return;
@@ -292,7 +282,7 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
                 case AcceptedInvalidate:
                 {
                     if (tracing != null)
-                        tracing.trace(null, "Recover found AcceptedInvalidate: continuing Invalidate.");
+                        tracing.trace(null, "found AcceptedInvalidate: continuing Invalidate.");
 
                     invalidate(oks);
                     return;
@@ -304,7 +294,7 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
             }
 
             LatestDeps.Merge merge = mergeDeps(okList);
-            Participants<?> await = merge.notAccepted(route);
+            Participants<?> await = merge.notAccepted(scope);
             awaitPartialEarlier(okList, await, () -> {
                 BiConsumer<Result, Throwable> callback = finishAndTakeResultCallback();
                 switch (status)
@@ -314,10 +304,10 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
                     case PreApplied:
                     {
                         if (tracing != null)
-                            tracing.trace(null, "Recover found Applied; persisting.");
+                            tracing.trace(null, "found Applied; persisting.");
 
                         withStableDeps(merge, executeAt, (i, t) -> node.agent().acceptAndWrap(i, t), stableDeps -> {
-                            adapter.persist(node, executor, tracker.topologies(), route, ballot, CoordinationFlags.none(), txnId, txn, executeAt, stableDeps, acceptOrCommitNotTruncated.writes, acceptOrCommitNotTruncated.result, (i, t) -> node.agent().acceptAndWrap(i, t));
+                            adapter.persist(node, executor, tracker.topologies(), scope, ballot, CoordinationFlags.none(), txnId, txn, executeAt, stableDeps, acceptOrCommitNotTruncated.writes, acceptOrCommitNotTruncated.result, (i, t) -> node.agent().acceptAndWrap(i, t));
                         });
                         callback.accept(acceptOrCommitNotTruncated.result, null);
                         return;
@@ -326,10 +316,10 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
                     case Stable:
                     {
                         if (tracing != null)
-                            tracing.trace(null, "Recover found Stable; executing.");
+                            tracing.trace(null, "found Stable; executing.");
 
                         withStableDeps(merge, executeAt, callback, stableDeps -> {
-                            adapter.execute(node, executor, tracker.topologies(), route, ballot, RECOVER, CoordinationFlags.none(), txnId, txn, executeAt, stableDeps, stableDeps, callback);
+                            adapter.execute(node, executor, tracker.topologies(), scope, ballot, RECOVER, CoordinationFlags.none(), txnId, txn, executeAt, stableDeps, stableDeps, callback);
                         });
                         return;
                     }
@@ -338,10 +328,10 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
                     case Committed:
                     {
                         if (tracing != null)
-                            tracing.trace(null, "Recover found Committed; stabilising.");
+                            tracing.trace(null, "found Committed; stabilising.");
 
                         withCommittedDeps(merge, executeAt, callback, committedDeps -> {
-                            adapter.stabilise(node, executor, tracker.topologies(), route, ballot, txnId, txn, executeAt, committedDeps, callback);
+                            adapter.stabilise(node, executor, tracker.topologies(), scope, ballot, txnId, txn, executeAt, committedDeps, callback);
                         });
                         return;
                     }
@@ -350,7 +340,7 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
                     case AcceptedMedium:
                     {
                         if (tracing != null)
-                            tracing.trace(null, "Recover found Accepted; re-proposing.");
+                            tracing.trace(null, "found Accepted; re-proposing.");
 
                         // TODO (desired): if we have a quorum of Accept with matching ballot or proposal we can go straight to Commit
                         // TODO (desired): if we didn't find Accepted in *every* shard, consider invalidating for consistency of behaviour
@@ -379,7 +369,7 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
                 if (allShardsTruncated)
                 {
                     if (tracing != null)
-                        tracing.trace(null, "Recover found all shards truncated; terminating.");
+                        tracing.trace(null, "found all shards truncated; terminating.");
                     // TODO (required, correctness): this is not a safe inference in the case of an ErasedOrInvalidOrVestigial response.
                     //   We need to tighten up the inference and spread of truncation/invalid outcomes.
                     //   In this case, at minimum this can lead to liveness violations as the home shard stops coordinating
@@ -399,7 +389,7 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
         boolean coordinatorInRecoveryQuorum = oks.get(txnId.node) != null;
         Participants<?> extraCoordVotes = extraCoordinatorVotes(txnId, coordinatorInRecoveryQuorum, okList);
         Participants<?> extraRejects = Deps.merge(okList, okList.size(), List::get, ok -> ok.laterCoordRejects)
-                                           .intersecting(route, id -> !oks.containsKey(id.node));
+                                           .intersecting(scope, id -> !oks.containsKey(id.node));
         InferredFastPath fastPath;
         if (txnId.hasPrivilegedCoordinator() && coordinatorInRecoveryQuorum) fastPath = Reject;
         else if (txnId.isSyncPoint()) fastPath = Reject;
@@ -413,7 +403,7 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
             case Reject:
             {
                 if (tracing != null)
-                    tracing.trace(null, "Recover found fast path rejection; invoking Invalidate.");
+                    tracing.trace(null, "found fast path rejection; invoking Invalidate.");
 
                 invalidate(oks);
                 return;
@@ -448,21 +438,21 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
                                               case Accept:
                                               {
                                                   if (tracing != null)
-                                                      tracing.trace(null, "Recover found accepted fast path; proposing.");
+                                                      tracing.trace(null, "found accepted fast path; proposing.");
                                                   propose(SLOW, txnId, okList);
                                                   break;
                                               }
                                               case Unknown:
                                               {
                                                   if (tracing != null)
-                                                      tracing.trace(null, "Recover found unknown fast path decision; retrying.");
+                                                      tracing.trace(null, "found unknown fast path decision; retrying.");
                                                   retry(committedExecuteAt, finishAndUnwrapCallback());
                                                   break;
                                               }
                                               case Reject:
                                               {
                                                   if (tracing != null)
-                                                      tracing.trace(null, "Recover found fast path rejection; invoking Invalidate.");
+                                                      tracing.trace(null, "found fast path rejection; invoking Invalidate.");
 
                                                   invalidate(oks);
                                                   break;
@@ -473,7 +463,7 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
                 else
                 {
                     if (tracing != null)
-                        tracing.trace(null, "Recover found unknown fast path decision, but no preceding or superseding transactions awaiting decisions; proposing.");
+                        tracing.trace(null, "found unknown fast path decision, but no preceding or superseding transactions awaiting decisions; proposing.");
                     propose(SLOW, txnId, okList);
                 }
             }
@@ -543,19 +533,19 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
 
     private void withCommittedDeps(LatestDeps.Merge merge, Timestamp executeAt, BiConsumer<?, Throwable> failureCallback, Consumer<Deps> withDeps)
     {
-        LatestDeps.withCommitted(adapter, node, executor, merge, route, ballot, txnId, executeAt, txn, failureCallback, withDeps);
+        LatestDeps.withCommitted(adapter, node, executor, merge, scope, ballot, txnId, executeAt, txn, failureCallback, withDeps);
     }
 
     private void withStableDeps(LatestDeps.Merge merge, Timestamp executeAt, BiConsumer<?, Throwable> failureCallback, Consumer<Deps> withDeps)
     {
-        LatestDeps.withStable(adapter, node, executor, merge, Deps.NONE, route, null, null, route, ballot, txnId, executeAt, txn, failureCallback, withDeps);
+        LatestDeps.withStable(adapter, node, executor, merge, Deps.NONE, scope, null, null, scope, ballot, txnId, executeAt, txn, failureCallback, withDeps);
     }
 
     private void invalidate(SortedListMap<Id, RecoverOk> recoverOks)
     {
         Timestamp invalidateUntil = invalidateUntil(recoverOks);
         BiConsumer<? super Outcome, Throwable> callback = finishAndTakeCallback();
-        proposeInvalidate(node, executor, ballot, txnId, route.homeKey(), (success, fail) -> {
+        proposeInvalidate(node, executor, ballot, txnId, scope.homeKey(), (success, fail) -> {
             if (fail != null) callback.accept(null, fail);
             else commitInvalidate(invalidateUntil, callback);
         });
@@ -572,9 +562,9 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
 
     private void commitInvalidate(Timestamp invalidateUntil, BiConsumer<? super Outcome, Throwable> callback)
     {
-        locallyInvalidateAndCallback(node, txnId, reportTo.refine(txnId, null, route), route, ProgressToken.INVALIDATED, callback, null);
+        locallyInvalidateAndCallback(node, txnId, reportTo.refine(txnId, null, scope), scope, ProgressToken.INVALIDATED, callback, tracing);
         node.withEpochAtLeast(invalidateUntil.epoch(), executor, node.agent(), () -> {
-            Commit.Invalidate.commitInvalidate(node, txnId, route, invalidateUntil);
+            Commit.Invalidate.commitInvalidate(node, txnId, scope, invalidateUntil);
         });
     }
 
@@ -594,7 +584,7 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
             return;
         }
         node.withEpochAtLeast(executeAt.epoch(), executor, callback, () -> {
-            adapter.propose(node, executor, null, route, kind, ballot, txnId, txn, executeAt, proposeDeps, callback);
+            adapter.propose(node, executor, null, scope, kind, ballot, txnId, txn, executeAt, proposeDeps, callback);
         });
     }
 
@@ -602,17 +592,16 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
     {
         Topologies topologies = tracker.topologies();
         if (executeAt != null && executeAt.epoch() != (this.committedExecuteAt == null ? txnId : this.committedExecuteAt).epoch())
-            topologies = node.topology().select(route, txnId, executeAt, SHARE, QuorumEpochIntersections.recover);
+            topologies = node.topology().select(scope, txnId, executeAt, SHARE, QuorumEpochIntersections.recover);
 
         Ballot ballot = node.uniqueTimestamp(Ballot::fromValues);
-        Tracing tracing = node.agent().trace(txnId, TraceEventType.RECOVER);
-        Recover.recover(node, topologies, ballot, txnId, txn, route, executeAt, isFastPathDecided, reportTo, callback, tracing);
+        Recover.recover(node, topologies, ballot, txnId, txn, scope, executeAt, isFastPathDecided, reportTo, callback);
     }
 
     AsyncChain<InferredFastPath> awaitEarlier(Node node, Deps waitOn, Await.Until awaitUntil)
     {
         if (tracing != null)
-            tracing.trace(null, "Recover awaiting earlier decisions: " + waitOn.txnIds());
+            tracing.trace(null, "awaiting earlier decisions: " + waitOn.txnIds());
 
         long requireEpoch = waitOn.maxTxnId(txnId).epoch();
         return node.withEpochAtLeast(requireEpoch, executor, () -> {
@@ -638,22 +627,22 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
     AsyncChain<InferredFastPath> awaitLater(Node node, Deps waitOn, Await.Until awaitUntil, @Nullable Participants<?> selfCoordVotes)
     {
         if (tracing != null)
-            tracing.trace(null, "Recover awaiting later decisions or recoveries: " + waitOn.txnIds());
+            tracing.trace(null, "awaiting later decisions or recoveries: " + waitOn.txnIds());
 
         if (waitOn.isEmpty())
             return AsyncChains.success(InferredFastPath.Accept);
 
         Participants<?> reliesOnAwaitIdCoordVote;
         Topology topology = tracker.topologies().current();
-        switch (route.domain())
+        switch (scope.domain())
         {
-            default: throw new UnhandledEnum(route.domain());
+            default: throw new UnhandledEnum(scope.domain());
             case Key:
                 try (BufferList<RoutingKey> tmp = new BufferList<>())
                 {
-                    for (int j = 0 ; j < route.size() ; ++j)
+                    for (int j = 0; j < scope.size() ; ++j)
                     {
-                        RoutingKey key = (RoutingKey)route.get(j);
+                        RoutingKey key = (RoutingKey) scope.get(j);
                         RecoveryTracker.RecoveryShardTracker shardTracker = tracker.get(0, topology.indexForKey(key));
                         if (shardTracker.fastPathReliesOnUnwitnessedCoordinatorVote(txnId, selfCoordVotes))
                             tmp.add(key);
@@ -664,9 +653,9 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
             case Range:
                 try (BufferList<Range> tmp = new BufferList<>())
                 {
-                    for (int j = 0 ; j < route.size() ; ++j)
+                    for (int j = 0; j < scope.size() ; ++j)
                     {
-                        Range range = (Range)route.get(j);
+                        Range range = (Range) scope.get(j);
                         for (int k = topology.indexForRange(range, CEIL), maxk = topology.indexForRange(range, FLOOR); k <= maxk ; k++)
                         {
                             RecoveryTracker.RecoveryShardTracker shardTracker = tracker.get(0, k);
@@ -717,12 +706,6 @@ public class Recover extends AbstractCoordination<Outcome, RecoverReply, Recover
     public CoordinationKind kind()
     {
         return CoordinationKind.BeginRecovery;
-    }
-
-    @Override
-    public Unseekables<?> scope()
-    {
-        return route;
     }
 
     @Override

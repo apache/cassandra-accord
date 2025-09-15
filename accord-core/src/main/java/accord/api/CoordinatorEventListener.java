@@ -20,15 +20,19 @@ package accord.api;
 
 import javax.annotation.Nullable;
 
+import accord.coordinate.Coordination;
 import accord.coordinate.ExecutePath;
 import accord.local.Node;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
+import accord.primitives.Participants;
 import accord.primitives.Status.Durability;
 import accord.primitives.TxnId;
 
 public interface CoordinatorEventListener
 {
+    default void onFailed(Throwable failure, TxnId txnId, Participants<?> participants, Coordination coordination) {}
+
     default void onPreAccepted(TxnId txnId) {}
     default void onAccepted(TxnId txnId, Ballot ballot) {}
     default void onExecuting(TxnId txnId, @Nullable Ballot ballot, Deps deps, @Nullable ExecutePath path) {}

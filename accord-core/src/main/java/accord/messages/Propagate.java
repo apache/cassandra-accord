@@ -122,7 +122,8 @@ public class Propagate extends MapReduceConsumeCommandStores<Route<?>, Void>
     @Nullable Timestamp committedExecuteAt,
     @Nullable Writes writes,
     @Nullable Result result,
-    BiConsumer<? super FetchResult, Throwable> callback, @Nullable Tracing tracing)
+    BiConsumer<? super FetchResult, Throwable> callback,
+    @Nullable Tracing tracing)
     {
         super(route);
         this.node = node;
@@ -537,7 +538,7 @@ public class Propagate extends MapReduceConsumeCommandStores<Route<?>, Void>
         if (null != callback)
             callback.accept(failure != null ? null : finaliseFetchResult(), failure);
         if (failure != null && tracing != null)
-            tracing.trace(null, "Failed propagate: %s", Tracing.format(failure));
+            tracing.trace(null, "Failed propagate: %s", failure);
     }
 
     private static void confirm(Commands.CommitOutcome outcome)

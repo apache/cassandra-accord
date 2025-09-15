@@ -40,10 +40,10 @@ import accord.messages.ReadData;
 import accord.messages.ReadData.CommitOrReadNack;
 import accord.messages.ReadData.ReadReply;
 import accord.messages.SetShardDurable;
+import accord.primitives.FullRoute;
 import accord.primitives.Range;
 import accord.primitives.SyncPoint;
 import accord.primitives.Txn;
-import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.UnhandledEnum;
@@ -56,7 +56,7 @@ import static accord.primitives.Status.Durability.HasOutcome.Quorum;
 import static accord.primitives.Status.Durability.HasOutcome.Universal;
 import static accord.topology.Topologies.SelectNodeOwnership.SHARE;
 
-public class ExecuteSyncPoint extends AbstractCoordination<DurabilityResult, ReadReply, Void> implements Callback<ReadReply>
+public class ExecuteSyncPoint extends AbstractCoordination<FullRoute<?>, DurabilityResult, ReadReply, Void> implements Callback<ReadReply>
 {
     public static class SyncPointErased extends Throwable implements WrappableException<SyncPointErased>
     {
@@ -116,7 +116,7 @@ public class ExecuteSyncPoint extends AbstractCoordination<DurabilityResult, Rea
 
     ExecuteSyncPoint(Node node, SyncPoint<Range> syncPoint, Topologies topologies, Set<Node.Id> excludeSuccess, SequentialAsyncExecutor executor, int attempt, DurabilityResult partialResult, DurabilityResults callback)
     {
-        super(node, executor, syncPoint.syncId, topologies.nodes(), callback);
+        super(node, executor, syncPoint.syncId, syncPoint.route, topologies.nodes(), callback);
         this.syncPoint = syncPoint;
         this.partialResult = partialResult;
         this.excludeSuccess = excludeSuccess;
@@ -315,12 +315,6 @@ public class ExecuteSyncPoint extends AbstractCoordination<DurabilityResult, Rea
     {
         // TODO (desired): better name? to not confuse with normal execution, as this execution implies durability
         return CoordinationKind.ExecuteSyncPoint;
-    }
-
-    @Override
-    public Unseekables<?> scope()
-    {
-        return syncPoint.route;
     }
 
     @Override

@@ -44,10 +44,10 @@ import accord.messages.SafeCallback;
 import accord.messages.StableThenRead;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
+import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
-import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 import accord.utils.UnhandledEnum;
@@ -77,7 +77,7 @@ public class ExecuteEphemeralRead extends ReadCoordinator<Result, ReadReply>
     {
         // we need to send Stable to the origin epoch as well as the execution epoch
         // TODO (desired): permit slicing Topologies by key (though unnecessary if we eliminate the concept of non-participating home keys)
-        super(node, executor, topologies, txnId, callback);
+        super(node, executor, topologies, txnId, route, callback);
         Invariants.requireArgument(txnId.kind() == EphemeralRead);
         Invariants.require(topologies.currentEpoch() == txnId.epoch());
         this.txn = txn;
@@ -252,7 +252,7 @@ public class ExecuteEphemeralRead extends ReadCoordinator<Result, ReadReply>
     }
 
     @Override
-    public Unseekables<?> scope()
+    public Participants<?> scope()
     {
         return route;
     }

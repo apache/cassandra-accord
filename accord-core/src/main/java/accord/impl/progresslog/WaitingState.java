@@ -52,7 +52,7 @@ import static accord.api.ProgressLog.BlockedUntil.CanApply;
 import static accord.api.ProgressLog.BlockedUntil.HasDecidedExecuteAt;
 import static accord.api.ProgressLog.BlockedUntil.Query.HOME;
 import static accord.api.ProgressLog.BlockedUntil.Query.SHARD;
-import static accord.api.TraceEventType.WAIT_PROGRESS;
+import static accord.coordinate.Coordination.CoordinationKind.WaitProgress;
 import static accord.impl.progresslog.CallbackInvoker.invokeWaitingCallback;
 import static accord.impl.progresslog.PackedKeyTracker.bitSet;
 import static accord.impl.progresslog.PackedKeyTracker.clearRoundState;
@@ -71,6 +71,7 @@ import static accord.impl.progresslog.TxnStateKind.Waiting;
 import static accord.impl.progresslog.WaitingState.CallbackKind.AwaitHome;
 import static accord.impl.progresslog.WaitingState.CallbackKind.AwaitSlice;
 import static accord.impl.progresslog.WaitingState.CallbackKind.Fetch;
+import static accord.local.SafeCommand.maxParticipants;
 import static accord.primitives.Known.KnownExecuteAt.ExecuteAtErased;
 import static accord.topology.Topologies.SelectNodeOwnership.SHARE;
 
@@ -302,7 +303,7 @@ abstract class WaitingState extends BaseTxnState
         if (offset >= 3)
         {
             offset = 3;
-            lowEpoch = safeStore.ranges().latestEarlierEpochThatFullyCovers(lowEpoch, command.maxContactable());
+            lowEpoch = safeStore.ranges().latestEarlierEpochThatFullyCovers(lowEpoch, command.maxParticipants());
         }
         encodedState = encodedState & ~(0x3L << AWAIT_EPOCH_SHIFT);
         encodedState |= ((long)offset) << AWAIT_EPOCH_SHIFT;
@@ -345,7 +346,7 @@ abstract class WaitingState extends BaseTxnState
         if (offset >= 3)
         {
             offset = 3;
-            highEpoch = safeStore.ranges().earliestLaterEpochThatFullyCovers(highEpoch, command.maxContactable());
+            highEpoch = safeStore.ranges().earliestLaterEpochThatFullyCovers(highEpoch, command.maxParticipants());
         }
         encodedState = encodedState & ~(0xCL << AWAIT_EPOCH_SHIFT);
         encodedState |= ((long)offset) << (AWAIT_EPOCH_SHIFT + 2);
@@ -444,7 +445,7 @@ abstract class WaitingState extends BaseTxnState
 
     final void runWaiting(DefaultProgressLog owner, SafeCommandStore safeStore, SafeCommand safeCommand)
     {
-        runInternal(safeStore, safeCommand, owner, owner.node.agent().trace(txnId, WAIT_PROGRESS));
+        runInternal(safeStore, safeCommand, owner, owner.node.agent().trace(txnId, maxParticipants(safeCommand), WaitProgress));
     }
 
     private void runInternal(SafeCommandStore safeStore, SafeCommand safeCommand, DefaultProgressLog owner, @Nullable Tracing tracing)
@@ -463,7 +464,7 @@ abstract class WaitingState extends BaseTxnState
         TxnId txnId = safeCommand.txnId();
         // first make sure we have enough information to obtain the command locally
         Timestamp executeAt = command.executeAtIfKnown();
-        Participants<?> maxContactable = Invariants.nonNull(command.maxContactable());
+        Participants<?> maxContactable = Invariants.nonNull(command.maxParticipants());
 
         if (!Route.isRoute(maxContactable))
         {
@@ -486,7 +487,7 @@ abstract class WaitingState extends BaseTxnState
                 tracing.trace(owner.commandStore, "Blocked until %s. Waiting for home key %s to satisfy %s.", blockedUntil, route.homeKey(), next);
             clearAwaitState();
             set(safeStore, owner, next, Querying);
-            awaitHomeKey(owner, next, txnId, executeAt, route);
+            awaitHomeKey(owner, next, txnId, executeAt, route, tracing);
             return;
         }
 
@@ -555,7 +556,7 @@ abstract class WaitingState extends BaseTxnState
         if (tracing != null)
             tracing.trace(owner.commandStore, "Blocked until %s. Waiting for %s to satisfy %s; round %d of %d.", blockedUntil, awaitRoute, querying, roundIndex, (awaitRoute.size() + (roundSize - 1))/roundSize);
         setAwaitStarted();
-        awaitSlice(owner, querying, txnId, executeAt, awaitRoute, (roundIndex << 1) | 1);
+        awaitSlice(owner, querying, txnId, executeAt, awaitRoute, (roundIndex << 1) | 1, tracing);
     }
 
     // note that ready and notReady may include keys not requested by this progressLog
@@ -569,7 +570,7 @@ abstract class WaitingState extends BaseTxnState
 
         Command command = safeCommand.current();
         Route<?> route = command.route();
-        Tracing tracing = owner.node.agent().trace(txnId, WAIT_PROGRESS);
+        Tracing tracing = owner.node.agent().trace(txnId, command.participants().max(), WaitProgress);
 
         if (fail == null)
         {
@@ -782,7 +783,9 @@ abstract class WaitingState extends BaseTxnState
         if ((callbackId & 1) != 1)
             return;
 
-        Tracing tracing = owner.node.agent().trace(txnId, WAIT_PROGRESS);
+        SafeCommand safeCommand = safeStore.unsafeGet(txnId);
+        Tracing tracing = owner.node.agent().trace(txnId, maxParticipants(safeCommand), WaitProgress);
+
         BlockedUntil querying = querying();
         if (callbackId == AWAITING_HOME_KEY_CALLBACKID)
         {
@@ -806,7 +809,6 @@ abstract class WaitingState extends BaseTxnState
                 return;
             }
 
-            SafeCommand safeCommand = safeStore.unsafeGet(txnId);
             if (safeCommand != null)
             {
                 if (tracing != null)
@@ -831,8 +833,8 @@ abstract class WaitingState extends BaseTxnState
             }
 
             callbackId >>= 1;
-            SafeCommand safeCommand = Invariants.nonNull(safeStore.unsafeGet(txnId));
-            Route<?> route = Route.castToRoute(safeCommand.current().maxContactable());
+            Invariants.nonNull(safeCommand);
+            Route<?> route = Route.castToRoute(safeCommand.current().maxParticipants());
             long lowEpoch = readLowEpoch(safeStore, txnId, route);
             long highEpoch = readHighEpoch(safeStore, txnId, route);
             Route<?> slicedRoute = slicedRoute(safeStore, txnId, route, lowEpoch, highEpoch);
@@ -902,20 +904,20 @@ abstract class WaitingState extends BaseTxnState
         owner.start(invoker, FetchData.fetchSpecific(querying.unblockedFrom.known, owner.node(), txnId, invalidIf, executeAt, fetchRoute, maxRoute, new IncludingSpecificStoreSelector(owner.commandStore.id()), invoker));
     }
 
-    void awaitHomeKey(DefaultProgressLog owner, BlockedUntil blockedUntil, TxnId txnId, Timestamp executeAt, Route<?> route)
+    void awaitHomeKey(DefaultProgressLog owner, BlockedUntil blockedUntil, TxnId txnId, Timestamp executeAt, Route<?> route, @Nullable Tracing tracing)
     {
         // TODO (expected): special-case when this shard is home key to avoid remote messages
-        await(owner, blockedUntil, txnId, executeAt, route.homeKeyOnlyRoute(), AWAITING_HOME_KEY_CALLBACKID, WaitingState::synchronousAwaitHomeCallback);
+        await(owner, blockedUntil, txnId, executeAt, route.homeKeyOnlyRoute(), AWAITING_HOME_KEY_CALLBACKID, WaitingState::synchronousAwaitHomeCallback, tracing);
     }
 
-    void awaitSlice(DefaultProgressLog owner, BlockedUntil blockedUntil, TxnId txnId, Timestamp executeAt, Route<?> route, int callbackId)
+    void awaitSlice(DefaultProgressLog owner, BlockedUntil blockedUntil, TxnId txnId, Timestamp executeAt, Route<?> route, int callbackId, @Nullable Tracing tracing)
     {
         Invariants.require(blockedUntil.waitsOn == SHARD);
         // TODO (expected): special-case when this shard is home key to avoid remote messages
-        await(owner, blockedUntil, txnId, executeAt, route, callbackId, WaitingState::synchronousAwaitSliceCallback);
+        await(owner, blockedUntil, txnId, executeAt, route, callbackId, WaitingState::synchronousAwaitSliceCallback, tracing);
     }
 
-    void await(DefaultProgressLog owner, BlockedUntil blockedUntil, TxnId txnId, Timestamp executeAt, Route<?> route, int callbackId, Callback<BlockedUntil, AsynchronousAwait.SynchronousResult> callback)
+    void await(DefaultProgressLog owner, BlockedUntil blockedUntil, TxnId txnId, Timestamp executeAt, Route<?> route, int callbackId, Callback<BlockedUntil, AsynchronousAwait.SynchronousResult> callback, @Nullable Tracing tracing)
     {
         long epoch = blockedUntil.fetchEpoch(txnId, executeAt);
         Await.Until awaitUntil = blockedUntil.toAwait();

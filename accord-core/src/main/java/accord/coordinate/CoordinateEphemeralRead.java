@@ -118,7 +118,7 @@ public class CoordinateEphemeralRead extends AbstractCoordinatePreAccept<Result,
     void start()
     {
         super.start();
-        contact(to -> new GetEphemeralReadDeps(to, topologies, route, txnId, executeAtEpoch));
+        contact(to -> new GetEphemeralReadDeps(to, topologies, scope, txnId, executeAtEpoch));
     }
 
     @Override
@@ -160,7 +160,7 @@ public class CoordinateEphemeralRead extends AbstractCoordinatePreAccept<Result,
 
     private void retry()
     {
-        awaitEpochExactToFinish(retryInEpoch, () -> coordinate(node, route, txnId.withEpoch(retryInEpoch), txn, finishAndTakeCallback()));
+        awaitEpochExactToFinish(retryInEpoch, () -> coordinate(node, scope, txnId.withEpoch(retryInEpoch), txn, finishAndTakeCallback()));
     }
 
     @Override
@@ -174,12 +174,12 @@ public class CoordinateEphemeralRead extends AbstractCoordinatePreAccept<Result,
     {
         SortedListMap<Node.Id, GetEphemeralReadDepsOk> oks = finishOks();
         Deps deps = Deps.merge(oks, oks.domainSize(), SortedListMap::getValue, ok -> ok.deps);
-        topologies = node.topology().reselect(topologies, QuorumEpochIntersections.preaccept.include, route, executeAtEpoch, executeAtEpoch, SHARE, Owned);
+        topologies = node.topology().reselect(topologies, QuorumEpochIntersections.preaccept.include, scope, executeAtEpoch, executeAtEpoch, SHARE, Owned);
         CoordinationFlags flags = oks.foldlNonNull((d, k, v, out) -> {
             ExecuteFlags.collect(out, k, v.flags, d, v.deps);
             return out;
         }, deps, empty(oks.domain()));
-        new ExecuteEphemeralRead(node, executor, topologies, route, txnId.withEpoch(executeAtEpoch), txn, deps, flags, finishAndTakeCallback()).start();
+        new ExecuteEphemeralRead(node, executor, topologies, scope, txnId.withEpoch(executeAtEpoch), txn, deps, flags, finishAndTakeCallback()).start();
         if (!Invariants.debug()) oks.clear();
     }
 

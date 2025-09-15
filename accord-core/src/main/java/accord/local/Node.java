@@ -51,7 +51,6 @@ import accord.api.RoutingKey;
 import accord.api.Scheduler;
 import accord.api.Timeouts;
 import accord.api.TopologySorter;
-import accord.api.Tracing;
 import accord.coordinate.CoordinateEphemeralRead;
 import accord.coordinate.CoordinateTransaction;
 import accord.coordinate.Coordination;
@@ -763,17 +762,11 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
 
     private AsyncChain<Result> initiateCoordination(TxnId txnId, Txn txn)
     {
+        FullRoute<?> route = computeRoute(txnId, txn.keys());
         if (txnId.kind() == Txn.Kind.EphemeralRead)
-        {
-            // TODO (expected): once non-participating home keys are removed, this can be simplified to share computeRoute
-            FullRoute<?> route = txn.keys().toRoute(txn.keys().get(0).someIntersectingRoutingKey(null));
             return CoordinateEphemeralRead.coordinate(this, route, txnId, txn);
-        }
         else
-        {
-            FullRoute<?> route = computeRoute(txnId, txn.keys());
             return CoordinateTransaction.coordinate(this, route, txnId, txn);
-        }
     }
 
     public FullRoute<?> computeRoute(TxnId txnId, Routables<?> keysOrRanges)
@@ -798,7 +791,7 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
         return keysOrRanges.get(random.nextInt(keysOrRanges.size())).someIntersectingRoutingKey(null);
     }
 
-    public AsyncChain<? extends Outcome> recover(TxnId txnId, InvalidIf invalidIf, FullRoute<?> route, LatentStoreSelector reportTo, @Nullable Tracing tracing)
+    public AsyncChain<? extends Outcome> recover(TxnId txnId, InvalidIf invalidIf, FullRoute<?> route, LatentStoreSelector reportTo)
     {
         SequentialAsyncExecutor executor = someSequentialExecutor();
         return withEpochExact(txnId.epoch(), executor, () -> new AsyncChains.Head<>()
@@ -806,7 +799,7 @@ public class Node implements ConfigurationService.Listener, NodeCommandStoreServ
             @Override
             protected Cancellable start(BiConsumer<? super Outcome, Throwable> callback)
             {
-                PrepareRecovery.recover(Node.this, executor, txnId, invalidIf, route, null, reportTo, callback, tracing);
+                PrepareRecovery.recover(Node.this, executor, txnId, invalidIf, route, null, reportTo, callback);
                 return null;
             }
         });

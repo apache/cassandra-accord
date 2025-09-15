@@ -51,7 +51,7 @@ import static accord.coordinate.tracking.RequestStatus.Success;
  *
  * Asynchronous awaits will not time out if the wait is longer than message/request timeouts.
  */
-public class AsynchronousAwait extends AbstractCoordination<AsynchronousAwait.SynchronousResult, AwaitOk, Void> implements Callback<AwaitOk>
+public class AsynchronousAwait extends AbstractCoordination<Participants<?>, AsynchronousAwait.SynchronousResult, AwaitOk, Void> implements Callback<AwaitOk>
 {
     // TODO (desired, efficiency): this should collect the executeAt of any commit, and terminate as soon as one is found
     //                             that is earlier than TxnId for the Txn we are recovering; if all commits we wait for
@@ -69,7 +69,6 @@ public class AsynchronousAwait extends AbstractCoordination<AsynchronousAwait.Sy
         }
     }
 
-    final Participants<?> contact;
     final AwaitTracker tracker;
     final Await.Until until;
     final int asynchronousCallbackId;
@@ -77,8 +76,7 @@ public class AsynchronousAwait extends AbstractCoordination<AsynchronousAwait.Sy
 
     public AsynchronousAwait(Node node, SequentialAsyncExecutor executor, Participants<?> contact, TxnId txnId, AwaitTracker tracker, Await.Until until, boolean notifyProgressLog, int asynchronousCallbackId, BiConsumer<SynchronousResult, Throwable> synchronousCallback)
     {
-        super(node, executor, txnId, tracker.nodes(), synchronousCallback);
-        this.contact = contact;
+        super(node, executor, txnId, contact, tracker.nodes(), synchronousCallback);
         this.tracker = tracker;
         this.until = until;
         this.asynchronousCallbackId = asynchronousCallbackId;
@@ -107,7 +105,7 @@ public class AsynchronousAwait extends AbstractCoordination<AsynchronousAwait.Sy
     void start()
     {
         super.start();
-        contact(to -> new Await(to, tracker.topologies(), txnId, contact, until, asynchronousCallbackId, notifyProgressLog));
+        contact(to -> new Await(to, tracker.topologies(), txnId, scope, until, asynchronousCallbackId, notifyProgressLog));
     }
 
     @Override
@@ -136,8 +134,8 @@ public class AsynchronousAwait extends AbstractCoordination<AsynchronousAwait.Sy
 
     private void onSuccess()
     {
-        Unseekables<?> ready = tracker.ready(contact);
-        Unseekables<?> notReady = tracker.notReady(contact);
+        Unseekables<?> ready = tracker.ready(scope);
+        Unseekables<?> notReady = tracker.notReady(scope);
         if (notReady.isEmpty())
             notReady = null;
 
@@ -148,12 +146,6 @@ public class AsynchronousAwait extends AbstractCoordination<AsynchronousAwait.Sy
     public CoordinationKind kind()
     {
         return CoordinationKind.AsyncAwait;
-    }
-
-    @Override
-    public Unseekables<?> scope()
-    {
-        return contact;
     }
 
     @Override

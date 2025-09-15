@@ -31,7 +31,6 @@ import accord.messages.RecoverAwait;
 import accord.messages.RecoverAwait.RecoverAwaitOk;
 import accord.primitives.Participants;
 import accord.primitives.TxnId;
-import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 import accord.utils.UnhandledEnum;
@@ -59,7 +58,7 @@ public class SynchronousRecoverAwait extends ReadCoordinator<InferredFastPath, R
     private Participants<?> waitingOn;
     public SynchronousRecoverAwait(Node node, SequentialAsyncExecutor executor, Topologies topologies, TxnId txnId, Participants<?> participants, Await.Until until, boolean notifyProgressLog, TxnId recoverId, BiConsumer<? super InferredFastPath, Throwable> callback)
     {
-        super(node, executor, topologies, txnId, callback);
+        super(node, executor, topologies, txnId, participants, callback);
         this.participants = participants;
         this.until = until;
         this.notifyProgressLog = notifyProgressLog;
@@ -134,7 +133,7 @@ public class SynchronousRecoverAwait extends ReadCoordinator<InferredFastPath, R
     }
 
     @Override
-    public Unseekables<?> scope()
+    public Participants<?> scope()
     {
         return participants;
     }

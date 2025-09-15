@@ -78,12 +78,12 @@ abstract class CoordinatePreAccept<T> extends AbstractCoordinatePreAccept<T, Pre
 
     void contact(@Nullable Deps deps, boolean hasCoordinatorVote)
     {
-        contact(to -> new PreAccept(to, topologies, txnId, txn, deps, hasCoordinatorVote, route));
+        contact(to -> new PreAccept(to, topologies, txnId, txn, deps, hasCoordinatorVote, scope));
     }
 
     void contactNotSelf(@Nullable Deps deps, boolean hasCoordinatorVote)
     {
-        contact(to -> new PreAccept(to, topologies, txnId, txn, deps, hasCoordinatorVote, route), id -> !id.equals(node.id()));
+        contact(to -> new PreAccept(to, topologies, txnId, txn, deps, hasCoordinatorVote, scope), id -> !id.equals(node.id()));
     }
 
     @Override
@@ -115,7 +115,7 @@ abstract class CoordinatePreAccept<T> extends AbstractCoordinatePreAccept<T, Pre
         if (!reply.isOk())
         {
             // we've been preempted by a recovery coordinator; defer to it, and wait to hear any result
-            finishWithFailureOverride(Preempted.preempted(node.agent(), txnId, route.homeKey()));
+            finishWithFailureOverride(Preempted.preempted(node.agent(), txnId, scope.homeKey()));
         }
         else
         {
@@ -143,7 +143,7 @@ abstract class CoordinatePreAccept<T> extends AbstractCoordinatePreAccept<T, Pre
          * participating keys/ranges, so we propose that the transaction is invalidated in its coordination epoch
          */
         BiConsumer<? super T, Throwable> callback = finishAndTakeCallback();
-        proposeInvalidate(node, executor, node.uniqueTimestamp(Ballot::fromValues), txnId, route.homeKey(), (outcome, failure) -> {
+        proposeInvalidate(node, executor, node.uniqueTimestamp(Ballot::fromValues), txnId, scope.homeKey(), (outcome, failure) -> {
             if (failure != null)
                 mismatch.addSuppressed(failure);
             callback.accept(null, mismatch);

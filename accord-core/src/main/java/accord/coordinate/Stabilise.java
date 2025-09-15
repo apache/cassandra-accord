@@ -37,7 +37,6 @@ import accord.primitives.Route;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
-import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.UnhandledEnum;
@@ -48,10 +47,9 @@ import static accord.messages.Commit.Kind.CommitSlowPath;
 import static accord.messages.Commit.Kind.CommitWithTxn;
 import static accord.topology.Topologies.SelectNodeOwnership.SHARE;
 
-public abstract class Stabilise<R> extends AbstractCoordination<R, ReadReply, Void> implements Callback<ReadReply>
+public abstract class Stabilise<R> extends AbstractCoordination<FullRoute<?>, R, ReadReply, Void> implements Callback<ReadReply>
 {
     final Txn txn;
-    final FullRoute<?> route;
     final Route<?> sendTo;
     final Ballot ballot;
     final Timestamp executeAt;
@@ -62,10 +60,9 @@ public abstract class Stabilise<R> extends AbstractCoordination<R, ReadReply, Vo
 
     public Stabilise(Node node, SequentialAsyncExecutor executor, Topologies coordinates, Topologies allTopologies, Route<?> sendTo, FullRoute<?> route, TxnId txnId, Ballot ballot, Txn txn, Timestamp executeAt, Deps stabiliseDeps, BiConsumer<? super R, Throwable> callback)
     {
-        super(node, executor, txnId, coordinates.nodes(), callback);
+        super(node, executor, txnId, route, coordinates.nodes(), callback);
         this.txn = txn;
         this.sendTo = sendTo;
-        this.route = route;
         this.ballot = ballot;
         this.executeAt = executeAt;
         this.stabiliseDeps = stabiliseDeps;
@@ -88,7 +85,7 @@ public abstract class Stabilise<R> extends AbstractCoordination<R, ReadReply, Vo
         else
         {
             super.start();
-            contact(to -> new Commit(CommitSlowPath, to, allTopologies, txnId, txn, route, ballot, executeAt, stabiliseDeps));
+            contact(to -> new Commit(CommitSlowPath, to, allTopologies, txnId, txn, scope, ballot, executeAt, stabiliseDeps));
         }
     }
 
@@ -107,18 +104,18 @@ public abstract class Stabilise<R> extends AbstractCoordination<R, ReadReply, Vo
             {
                 default: throw new UnhandledEnum(nack.kind);
                 case Redundant:
-                    finishWithFailureOverride(new Redundant(txnId, route.homeKey(), executeAt));
+                    finishWithFailureOverride(new Redundant(txnId, scope.homeKey(), executeAt));
                     break;
                 case Rejected:
-                    recordFailure(from, Preempted.preempted(node.agent(), txnId, route.homeKey()));
+                    recordFailure(from, Preempted.preempted(node.agent(), txnId, scope.homeKey()));
                     break;
                 case Insufficient:
                     node.send(from, new Commit(CommitWithTxn, from, allTopologies,
-                                               txnId, txn, route, ballot, executeAt, stabiliseDeps));
+                                               txnId, txn, scope, ballot, executeAt, stabiliseDeps));
                     break;
                 case InsufficientEpochs:
-                    node.send(from, new Commit(CommitWithTxn, from, node.topology().preciseEpochs(route, Math.min(allTopologies.oldestEpoch(), nack.minEpoch()), allTopologies.currentEpoch(), SHARE),
-                                               txnId, txn, route, ballot, executeAt, stabiliseDeps));
+                    node.send(from, new Commit(CommitWithTxn, from, node.topology().preciseEpochs(scope, Math.min(allTopologies.oldestEpoch(), nack.minEpoch()), allTopologies.currentEpoch(), SHARE),
+                                               txnId, txn, scope, ballot, executeAt, stabiliseDeps));
                     break;
             }
         }
@@ -139,19 +136,13 @@ public abstract class Stabilise<R> extends AbstractCoordination<R, ReadReply, Vo
 
     protected void onStabilised()
     {
-        adapter().execute(node, executor, allTopologies, route, ballot, SLOW, CoordinationFlags.none(), txnId, txn, executeAt, stabiliseDeps, stabiliseDeps, finishAndTakeCallback());
+        adapter().execute(node, executor, allTopologies, scope, ballot, SLOW, CoordinationFlags.none(), txnId, txn, executeAt, stabiliseDeps, stabiliseDeps, finishAndTakeCallback());
     }
 
     @Override
     public CoordinationKind kind()
     {
         return CoordinationKind.Stabilise;
-    }
-
-    @Override
-    public Unseekables<?> scope()
-    {
-        return route;
     }
 
     @Override

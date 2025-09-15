@@ -446,12 +446,12 @@ public class TxnId extends Timestamp
 
     private static Kind kind(int flags)
     {
-        return Kind.ofOrdinal(kindOrdinal(flags));
+        return Kind.forOrdinal(kindOrdinal(flags));
     }
 
     private static Domain domain(int flags)
     {
-        return Domain.ofOrdinal(domainOrdinal(flags));
+        return Domain.forOrdinal(domainOrdinal(flags));
     }
 
     public static int kindOrdinal(int flags)
