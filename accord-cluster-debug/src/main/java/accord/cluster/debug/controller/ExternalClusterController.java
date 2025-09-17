@@ -18,8 +18,11 @@
 
 package accord.cluster.debug.controller;
 
+import accord.cluster.debug.server.ExclusiveConnection;
 import accord.debug.Response;
+import accord.debug.controller.Controller;
 import accord.debug.model.*;
+import com.datastax.driver.core.Cluster;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Row;
 import com.datastax.driver.core.Session;
@@ -35,10 +38,58 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
-public class ExternalClusterController
+public class ExternalClusterController implements Controller
 {
     private static final Logger logger = LoggerFactory.getLogger(ExternalClusterController.class);
+
+    private final DebugServerConfig config;
+    private final Map<String, Cluster> exclusiveConnections = new ConcurrentHashMap<>();
+
+    public ExternalClusterController(DebugServerConfig config)
+    {
+        this.config = config;
+        initializeExclusiveConnections();
+    }
+
+    private void initializeExclusiveConnections()
+    {
+        if (config == null || config.getHosts() == null)
+        {
+            logger.warn("No host configuration found, skipping exclusive connections setup");
+            return;
+        }
+
+        for (DebugServerConfig.HostConfig hostConfig : config.getHosts())
+        {
+            try
+            {
+                Cluster exclusiveCluster = ExclusiveConnection.session(builder -> builder.withPort(hostConfig.port), hostConfig.host);
+                exclusiveConnections.put(hostConfig.toString(), exclusiveCluster);
+                logger.info("Created exclusive connection to {} ({}:{})",
+                            hostConfig, hostConfig.host, hostConfig.port);
+            }
+            catch (Exception e)
+            {
+                logger.error("Failed to create exclusive connection to {} ({}:{}): {}",
+                             hostConfig.toString(), hostConfig.host, hostConfig.port, e.getMessage());
+            }
+        }
+    }
+
+    @Override
+    public List<NodeInfo> getNodes()
+    {
+        for (Map.Entry<String, Cluster> e : exclusiveConnections.entrySet())
+        {
+
+            new NodeInfo(e.getKey(),
+                         new StoreInfo())
+        }
+        return List.of();
+    }
+
     private static final String REDUNDANT_BEFORE_QUERY =
         "SELECT keyspace_name, table_name, table_id, token_start, token_end, " +
         "command_store_id, start_epoch, end_epoch, gc_before, shard_applied, " +
@@ -51,6 +102,7 @@ public class ExternalClusterController
         "SELECT txn_id, kind, coordination_id, description, nodes, " +
         "nodes_inflight, nodes_contacted, participants, replies, tracker " +
         "FROM system_accord_debug.coordinations";
+
     private static final String TRANSACTION_SEARCH_QUERY =
         "SELECT command_store_id, txn_id, save_status, route, durability, " +
         "execute_at, executes_at_least, txn, deps, waiting_on, writes, result, " +
@@ -79,7 +131,7 @@ public class ExternalClusterController
         "FROM system_accord_debug.durability_service";
 
     private static final String COMMAND_STORE_QUERY =
-        "SELECT command_store_id, safe_to_read, ranges_for_epoch " +
+        "SELECT command_store_id, ranges " +
         "FROM system_accord_debug.command_store";
 
     private static final String DURABLE_BEFORE_QUERY =
@@ -365,8 +417,7 @@ public class ExternalClusterController
             {
                 CommandStoreInfo commandStore = new CommandStoreInfo(
                     row.getInt("command_store_id"),
-                    getMap(row, "safe_to_read"),
-                    getMap(row, "ranges_for_epoch")
+                    getList(row, "ranges")
                 );
                 results.add(commandStore);
             }
@@ -378,6 +429,15 @@ public class ExternalClusterController
             logger.error("Caught an exception in controller", e);
             return Response.failure("Failed to query command_store table: " + e.getMessage());
         }
+    }
+
+    private static List<String> getList(Row row, String column)
+    {
+        Object safeToReadObj = row.getObject(column);
+        if (safeToReadObj instanceof List)
+            return (List<String>) safeToReadObj;
+
+        throw new IllegalStateException();
     }
 
     private static Map<String, List<String>> getMap(Row row, String column)

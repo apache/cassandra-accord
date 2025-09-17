@@ -302,6 +302,30 @@ limitations under the License.
             font-size: 10px;
             color: #7f8c8d;
         }
+        
+        .correlate-toggle {
+            margin-top: 10px;
+            padding: 8px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .correlate-toggle label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            font-size: 12px;
+            color: #2c3e50;
+            margin: 0;
+        }
+        
+        .correlate-toggle input[type="checkbox"] {
+            margin-right: 8px;
+            cursor: pointer;
+        }
 
         .input-content {
             display: none;
@@ -466,6 +490,18 @@ limitations under the License.
                         <div class="drag-drop-text">
                             {{ isDragOver ? 'Drop JSON file here' : 'Drop JSON file here' }}
                         </div>
+                    </div>
+                    
+                    <!-- Correlate Request/Response Toggle -->
+                    <div class="correlate-toggle">
+                        <label>
+                            <input 
+                                type="checkbox" 
+                                v-model="corellateReqRsp" 
+                                @change="processMessages"
+                            />
+                            Correlate Request/Response
+                        </label>
                     </div>
                 </div>
             </div>

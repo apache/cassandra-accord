@@ -21,6 +21,7 @@ const { createApp } = Vue;
 createApp({
     data() {
         return {
+            corellateReqRsp: true,
             messageInput: '',
             messages: [],
             filteredMessages: [],
@@ -50,7 +51,7 @@ createApp({
             headerHeight: 50,
             footerHeight: 30,
             processSpacing: 500,
-            timeStep: 50,
+            timeStep: 40,
             selfLoopWidth: 100
         };
     },
@@ -149,8 +150,6 @@ createApp({
                         return false;
                 }
 
-                // while (seenSent.has(msg.sent_at)) msg.sent_at++;
-                // while (seenReceived.has(msg.received_at)) msg.received_at++;
                 seenSent.add(msg.sent_at);
                 seenReceived.add(msg.received_at);
                 return true;
@@ -176,8 +175,8 @@ createApp({
             const allTimestamps = new Set();
             const reqReceivedAt = new Map();
             filteredMessages.forEach(msg => {
-                if (msg && msg.message_kind.endsWith("_REQ"))
-                    reqReceivedAt.set([msg.to, msg.id], msg.received_at);
+                // if (this.corellateReqRsp && msg && msg.message_kind.endsWith("_REQ"))
+                //     reqReceivedAt.set([msg.to, msg.id], msg.received_at);
                 allTimestamps.add(msg.sent_at);
                 allTimestamps.add(msg.received_at);
             });
@@ -191,12 +190,12 @@ createApp({
             // Process filtered messages with normalized timestamps
             this.processedMessages = filteredMessages.map(msg => {
                 var sent_at = msg.sent_at;
-                var received_at = msg.sent_at;
-                if (msg && msg.message_kind.endsWith("_RSP") && reqReceivedAt.has([msg.from, msg.id]))
-                {
-                    sent_at = reqReceivedAt.get([msg.from, msg.id]);
-                    received_at = sent_at + 1;
-                }
+                var received_at = (this.corellateReqRsp && msg.received_at) ? msg.received_at + 1 : msg.sent_at;
+                // if (this.corellateReqRsp && msg && msg.message_kind.endsWith("_RSP") && reqReceivedAt.has([msg.from, msg.id]))
+                // {
+                //     sent_at = reqReceivedAt.get([msg.from, msg.id]);
+                //     received_at = sent_at + 1;
+                // }
                 return {
                     ...msg,
                     normalizedSentAt: timeMap.get(sent_at),
@@ -344,20 +343,25 @@ createApp({
         
         getSelfMessagePath(message) {
             const x = this.getProcessX(message.from);
-            const y = this.getMessageY(message.normalizedSentAt);
+            const startY = this.getMessageY(message.normalizedSentAt);
+            const endY = startY + this.timeStep; // Land at next tick
             const width = this.selfLoopWidth;
-            const height = 20;
             
-            // Create oval path for self-message
-            return `M ${x + 4} ${y} Q ${x + width} ${y - height} ${x + 4} ${y - 2}`;
+            // Create an arc that goes from current tick to next tick
+            // Arc goes out to the right and curves back to the process line
+            return `M ${x + 4} ${startY} 
+                    C ${x + width} ${startY} ${x + width} ${endY} ${x + 4} ${endY}`;
         },
         
         getSelfMessageArrowPoints(message) {
-            const x = this.getProcessX(message.from);
-            const y = this.getMessageY(message.normalizedSentAt);
+            const x = this.getProcessX(message.from) - 3;
+            const startY = this.getMessageY(message.normalizedSentAt);
+            const endY = startY + this.timeStep; // Arrow moved 5px down from end point
             
-            // Arrow pointing back to the circle
-            return `${x + 4},${y - 2} ${x + 12},${y - 6} ${x + 12},${y + 2}`;
+            // Arrow pointing left (rotated 90 degrees from downward)
+            const arrowX = x + 4;
+            const arrowY = endY;
+            return `${arrowX},${arrowY} ${arrowX + 8},${arrowY - 4} ${arrowX + 8},${arrowY + 4}`;
         },
         
         onMessageClick(message) {

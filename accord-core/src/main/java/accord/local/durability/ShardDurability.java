@@ -94,6 +94,15 @@ public class ShardDurability
         {
             return next;
         }
+
+        public String toString()
+        {
+            return "Waiting{" +
+                   "request=" + request +
+                   ", ranges=" + ranges +
+                   ", next=" + next +
+                   '}';
+        }
     }
 
     // TODO (expected): support intra-shard parallelism
