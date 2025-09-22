@@ -38,16 +38,18 @@ public class AllTracker extends SimpleTracker<AllTracker.AllShardTracker> implem
             waitingOn = shard.rf();
         }
 
-        public ShardOutcomes onSuccess(Object ignore)
+        public ShardOutcomes onSuccess(Node.Id id)
         {
             return --waitingOn == 0 ? Success : NoChange;
         }
 
         // return true iff hasFailed()
-        public ShardOutcomes onFailure(Object ignore)
+        public ShardOutcomes onFailure(Node.Id id)
         {
             if (waitingOn < 0)
                 return NoChange;
+            if (shard.hardRemoved.contains(id))
+                return onSuccess(id);
             waitingOn = -1;
             return Fail;
         }

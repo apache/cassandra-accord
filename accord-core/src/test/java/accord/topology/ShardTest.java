@@ -148,9 +148,9 @@ public class ShardTest
         SortedArrayList<Node.Id> nodes = ids(0, 3);
         Set<Node.Id> fpNodes = new HashSet<>(ids(0, 2));
         // pending nodes are part of electorate
-        Shard.create(range(0, 100), nodes, fpNodes, new HashSet<>(ids(3, 3)));
+        Shard.create(range(0, 100), nodes, fpNodes);
         // pending nodes are not part of electorate
-        assertIllegalArgument(() -> Shard.create(range(0, 100), nodes, fpNodes, new HashSet<>(ids(4, 4))),
+        assertIllegalArgument(() -> Shard.create(range(0, 100), nodes, fpNodes),
                               "Expected exception for non-electorate pending nodes");
     }
 }

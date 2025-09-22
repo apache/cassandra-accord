@@ -338,7 +338,7 @@ public abstract class AbstractCoordination<P extends Participants<?>, Result, Re
         AbstractTracker<?> tracker = tracker();
         SortedListMap<Node.Id, ?> replies = replies();
         return kind().name() + ':' + txnId
-               + "scope:" + scope()
+               + " scope:" + scope()
                + " inflight:" + inflight()
                + (tracker == null ? "" : " tracker:" + tracker.summariseTracker())
                + (describe.isEmpty() ? "" : ' ' + describe)

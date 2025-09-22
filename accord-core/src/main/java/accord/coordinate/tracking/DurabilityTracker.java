@@ -63,11 +63,11 @@ public class DurabilityTracker extends SimpleTracker<DurabilityTracker.Durabilit
         {
             super(shard);
             IntHashSet doNotCountSuccess = null;
-            if (!excludeSuccess.isEmpty())
+            if (!excludeSuccess.isEmpty() || !shard.hardRemoved.isEmpty())
             {
                 for (Node.Id id : shard.nodes)
                 {
-                    if (excludeSuccess.contains(id))
+                    if (excludeSuccess.contains(id) || shard.hardRemoved.contains(id))
                     {
                         if (doNotCountSuccess == null)
                             doNotCountSuccess = new IntHashSet();

@@ -91,7 +91,8 @@ public class InformDurable extends RouteRequest<Reply> implements PreLoadContext
     public static void informHome(Node node, Topologies any, TxnId txnId, Route<?> route, @Nullable Timestamp executeAt, Durability durability)
     {
         Shard homeShard = homeShard(node, any, txnId, route.homeKey());
-        Topologies homeTopology = new Topologies.Single(any, new Topology(txnId.epoch(), homeShard));
+        Topology latest = any.current();
+        Topologies homeTopology = new Topologies.Single(any, new Topology(txnId.epoch(), latest.removedIds(), latest.hardRemovedIds(), latest.staleIds(), homeShard));
         node.send(homeShard.nodes, to -> new InformDurable(to, homeTopology, route.homeKeyOnlyRoute(), txnId, executeAt, txnId.epoch(), txnId.epoch(), durability));
     }
 

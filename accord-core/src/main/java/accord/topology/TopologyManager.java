@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
 import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
@@ -140,7 +141,6 @@ public class TopologyManager
             this.self = node;
             this.global = Invariants.requireArgument(global, !global.isSubset());
             this.local = global.forNode(node).trim();
-            Invariants.requireArgument(local.epoch == global.epoch);
             this.curShardSyncComplete = new BitSet(global.shards.length);
             if (!global().isEmpty())
                 this.syncTracker = new QuorumTracker(new Single(sorter, global()));
@@ -150,6 +150,21 @@ public class TopologyManager
             this.addedRanges = global.ranges.without(prevRanges).mergeTouching();
             this.removedRanges = prevRanges.mergeTouching().without(global.ranges);
             this.synced = addedRanges;
+        }
+
+        EpochState(Id node, Topology global, BitSet curShardSyncComplete, QuorumTracker syncTracker, Ranges addedRanges, Ranges removedRanges, EpochReady ready, Ranges synced, Ranges closed, Ranges retired)
+        {
+            this.self = node;
+            this.global = Invariants.requireArgument(global, !global.isSubset());
+            this.local = global.forNode(node).trim();
+            this.curShardSyncComplete = curShardSyncComplete;
+            this.syncTracker = syncTracker;
+            this.addedRanges = addedRanges;
+            this.removedRanges = removedRanges;
+            this.ready = ready;
+            this.synced = synced;
+            this.closed = closed;
+            this.retired = retired;
         }
 
         public boolean hasReachedQuorum()
@@ -740,6 +755,17 @@ public class TopologyManager
                 {
                     nextEpochs[0].recordClosed(notifications.closed);
                     nextEpochs[0].recordRetired(notifications.retired);
+                }
+            }
+            if (prev.epochs.length > 0 && !prev.epochs[0].global.hardRemoved.containsAll(topology.hardRemoved))
+            {
+                IdentityHashMap<Shard, Shard> cache = new IdentityHashMap<>();
+                for (int i = nextEpochs.length - 1 ; i >= 0 ; --i)
+                {
+                    EpochState cur = nextEpochs[i];
+                    Topology newGlobal = nextEpochs[i].global.withHardRemoved(topology.hardRemoved, cache);
+                    if (newGlobal != cur.global)
+                        nextEpochs[i] = new EpochState(self, newGlobal, cur.curShardSyncComplete, cur.syncTracker, cur.addedRanges, cur.removedRanges, cur.ready, cur.synced, cur.closed, cur.retired);
                 }
             }
 

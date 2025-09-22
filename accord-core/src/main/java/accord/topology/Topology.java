@@ -28,12 +28,14 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.IntStream;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import accord.local.Node;
 import accord.local.Node.Id;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
@@ -47,6 +49,7 @@ import accord.utils.IndexedBiFunction;
 import accord.utils.IndexedConsumer;
 import accord.utils.IndexedIntFunction;
 import accord.utils.IndexedTriFunction;
+import accord.utils.Invariants;
 import accord.utils.LargeBitSet;
 import accord.utils.SortedArrays;
 import accord.utils.SortedArrays.SortedArrayList;
@@ -64,15 +67,13 @@ public class Topology
     public static final long EMPTY_EPOCH = 0;
     private static final int[] EMPTY_SUBSET = new int[0];
     public static final SortedArrayList<Id> NO_IDS = new SortedArrayList<>(new Id[0]);
-    public static final Topology EMPTY = new Topology(null, EMPTY_EPOCH, new Shard[0], Ranges.EMPTY, NO_IDS, NO_IDS, NO_IDS, new Int2ObjectHashMap<>(0, 0.9f), Ranges.EMPTY, EMPTY_SUBSET);
+    public static final Topology EMPTY = new Topology(null, EMPTY_EPOCH, new Shard[0], Ranges.EMPTY, NO_IDS, NO_IDS, NO_IDS, NO_IDS, new Int2ObjectHashMap<>(0, 0.9f), Ranges.EMPTY, EMPTY_SUBSET);
 
     final long epoch;
-    final SortedArrayList<Id> removedIds;
-    final SortedArrayList<Id> staleIds;
+    final SortedArrayList<Id> removed, hardRemoved, stale, nodes;
     final Shard[] shards;
     final Ranges ranges;
 
-    final SortedArrayList<Id> nodeIds;
     final Int2ObjectHashMap<NodeInfo> nodeLookup;
 
     /**
@@ -137,15 +138,16 @@ public class Topology
     @VisibleForTesting
     public Topology(long epoch, Shard... shards)
     {
-        this(epoch, NO_IDS, NO_IDS, shards);
+        this(epoch, NO_IDS, NO_IDS, NO_IDS, shards);
     }
     
-    public Topology(long epoch, SortedArrayList<Id> removedIds, SortedArrayList<Id> staleIds, Shard... shards)
+    public Topology(long epoch, SortedArrayList<Id> removed, SortedArrayList<Id> hardRemoved, SortedArrayList<Id> stale, Shard... shards)
     {
         this.global = null;
         this.epoch = epoch;
-        this.removedIds = removedIds;
-        this.staleIds = staleIds;
+        this.removed = removed;
+        this.hardRemoved = hardRemoved;
+        this.stale = stale;
         this.ranges = Ranges.ofSortedAndDeoverlapped(Arrays.stream(shards).map(shard -> shard.range).toArray(Range[]::new));
         this.shards = shards;
         this.subsetOfRanges = ranges;
@@ -167,19 +169,20 @@ public class Topology
             nodeIds[count++] = e.getKey();
         }
         Arrays.sort(nodeIds);
-        this.nodeIds = new SortedArrayList<>(nodeIds);
+        this.nodes = new SortedArrayList<>(nodeIds);
     }
 
     @VisibleForTesting
-    Topology(@Nullable Topology global, long epoch, Shard[] shards, Ranges ranges, SortedArrayList<Id> removedIds, SortedArrayList<Id> staleIds, SortedArrayList<Id> nodeIds, Int2ObjectHashMap<NodeInfo> nodeById, Ranges subsetOfRanges, int[] supersetIndexes)
+    Topology(@Nullable Topology global, long epoch, Shard[] shards, Ranges ranges, SortedArrayList<Id> removed, SortedArrayList<Id> hardRemoved, SortedArrayList<Id> stale, SortedArrayList<Id> nodes, Int2ObjectHashMap<NodeInfo> nodeById, Ranges subsetOfRanges, int[] supersetIndexes)
     {
         this.global = global;
         this.epoch = epoch;
-        this.removedIds = removedIds;
-        this.staleIds = staleIds;
+        this.removed = removed;
+        this.hardRemoved = hardRemoved;
+        this.stale = stale;
+        this.nodes = nodes;
         this.shards = shards;
         this.ranges = ranges;
-        this.nodeIds = nodeIds;
         this.nodeLookup = nodeById;
         this.subsetOfRanges = subsetOfRanges;
         this.supersetIndexes = supersetIndexes;
@@ -188,7 +191,43 @@ public class Topology
     @VisibleForTesting
     public Topology withEpoch(long epoch)
     {
-        return new Topology(global, epoch, shards, ranges, removedIds, staleIds, nodeIds, nodeLookup, subsetOfRanges, supersetIndexes);
+        if (epoch == this.epoch)
+            return this;
+        return new Topology(global == null ? null : global.withEpoch(epoch), epoch, shards, ranges, removed, hardRemoved, stale, nodes, nodeLookup, subsetOfRanges, supersetIndexes);
+    }
+
+    public Topology withHardRemoved(SortedArrayList<Node.Id> hardRemoved, Map<Shard, Shard> cache)
+    {
+        if (this.hardRemoved.containsAll(hardRemoved))
+            return this;
+
+        Invariants.require(global == null && subsetOfRanges == ranges && supersetIndexes.length == shards.length);
+        Function<Shard, Shard> mapper = shard -> {
+            Invariants.require(hardRemoved.containsAll(shard.hardRemoved));
+            return new Shard(shard.range, shard.nodes, shard.notInFastPath, shard.nodes.intersecting(hardRemoved), shard.flags());
+        };
+
+        int count = 0;
+        Shard[] newShards = new Shard[shards.length];
+        for (int i = 0 ; i < shards.length ; ++i)
+        {
+            if (shards[i].nodes.intersects(hardRemoved))
+            {
+                shards[i] = cache.computeIfAbsent(shards[i], mapper);
+                ++count;
+            }
+        }
+
+        if (count == 0)
+            return this;
+
+        for (int i = 0 ; i < newShards.length ; ++i)
+        {
+            if (newShards[i] == null)
+                newShards[i] = shards[i];
+        }
+
+        return new Topology(null, epoch, newShards, ranges, removed, hardRemoved, stale, nodes, nodeLookup, subsetOfRanges, supersetIndexes);
     }
 
     public Topology global()
@@ -204,7 +243,7 @@ public class Topology
 
     public boolean isEquivalent(Topology topology)
     {
-        if (!staleIds.equals(topology.staleIds) || !removedIds.equals(topology.removedIds))
+        if (!stale.equals(topology.stale) || !removed.equals(topology.removed) || !hardRemoved.equals(topology.hardRemoved))
             return false;
 
         if (shards.length != topology.shards.length)
@@ -221,7 +260,7 @@ public class Topology
 
     public Topology cloneEquivalentWithEpoch(long epoch)
     {
-        return new Topology(epoch, removedIds, staleIds, shards);
+        return new Topology(epoch, removed, hardRemoved, stale, shards);
     }
 
     @Override
@@ -249,12 +288,12 @@ public class Topology
         return result;
     }
 
-    private static Topology select(long epoch, SortedArrayList<Id> removedIds, SortedArrayList<Id> staleIds, Shard[] shards, int[] indexes)
+    private static Topology select(long epoch, SortedArrayList<Id> removedIds, SortedArrayList<Id> hardRemovedIds, SortedArrayList<Id> staleIds, Shard[] shards, int[] indexes)
     {
         Shard[] subset = new Shard[indexes.length];
         for (int i = 0; i < indexes.length; i++)
             subset[i] = shards[indexes[i]];
-        return new Topology(epoch, removedIds, staleIds, subset);
+        return new Topology(epoch, removedIds, hardRemovedIds, staleIds, subset);
     }
 
     public boolean isEmpty()
@@ -279,12 +318,12 @@ public class Topology
             return Topology.EMPTY.withEpoch(epoch);
 
         SortedArrayList<Id> nodeIds = new SortedArrayList<>(new Id[] { node });
-        return new Topology(global(), epoch, shards, ranges, removedIds, staleIds, nodeIds, nodeLookup, info.ranges, info.supersetIndexes);
+        return new Topology(global(), epoch, shards, ranges, removed, hardRemoved, stale, nodeIds, nodeLookup, info.ranges, info.supersetIndexes);
     }
 
     public Topology trim()
     {
-        return select(epoch, removedIds, staleIds, shards, this.supersetIndexes);
+        return select(epoch, removed, hardRemoved, stale, shards, this.supersetIndexes);
     }
 
     public Ranges rangesForNode(Id node)
@@ -334,8 +373,8 @@ public class Topology
 
     public Topology select(SortedArrayList<Id> nodes)
     {
-        SortedArrayList<Id> keepIds = this.nodeIds.intersecting(nodes);
-        if (keepIds == this.nodeIds)
+        SortedArrayList<Id> keepIds = this.nodes.intersecting(nodes);
+        if (keepIds == this.nodes)
             return this;
 
         Int2ObjectHashMap<NodeInfo> nodeLookup = new Int2ObjectHashMap<>(keepIds.size(), 0.8f);
@@ -366,7 +405,7 @@ public class Topology
             subsetOfRanges = Ranges.ofSortedAndDeoverlapped(ranges);
         }
 
-        return new Topology(global(), epoch, this.shards, this.ranges, removedIds, staleIds, keepIds, nodeLookup, subsetOfRanges, supersetIndexes);
+        return new Topology(global(), epoch, this.shards, this.ranges, this.removed, this.hardRemoved, this.stale, keepIds, nodeLookup, subsetOfRanges, supersetIndexes);
     }
 
     @VisibleForTesting
@@ -377,7 +416,7 @@ public class Topology
             return this;
 
         boolean reselectNodeOwnership = selectNodeOwnership == SLICE;
-        LargeBitSet nodes = new LargeBitSet(nodeIds.size());
+        LargeBitSet nodes = new LargeBitSet(this.nodes.size());
         Int2ObjectHashMap<NodeInfo> nodeLookup = reselectNodeOwnership ? new Int2ObjectHashMap<>(nodes.size(), 0.8f) : this.nodeLookup;
         for (int shardIndex : newSubset)
         {
@@ -385,7 +424,7 @@ public class Topology
             int i = 0;
             for (Id id : shard.nodes)
             {
-                i = nodeIds.findNext(i, id);
+                i = this.nodes.findNext(i, id);
                 if (i >= 0) nodes.set(i++);
                 else i = -1 - i;
                 if (reselectNodeOwnership)
@@ -396,9 +435,9 @@ public class Topology
         Id[] nodeIds = new Id[nodes.getSetBitCount()];
         int count = 0;
         for (int i = nodes.firstSetBit() ; i >= 0 ; i = nodes.nextSetBit(i + 1, -1))
-            nodeIds[count++] = this.nodeIds.get(i);
+            nodeIds[count++] = this.nodes.get(i);
 
-        return new Topology(global(), epoch, shards, ranges, removedIds, staleIds, new SortedArrayList<>(nodeIds), nodeLookup, rangeSubset, newSubset);
+        return new Topology(global(), epoch, shards, ranges, removed, hardRemoved, stale, new SortedArrayList<>(nodeIds), nodeLookup, rangeSubset, newSubset);
     }
 
     private int[] subsetFor(Routables<?> select, boolean permitMissing)
@@ -660,7 +699,7 @@ public class Topology
 
     public SortedArrayList<Id> nodes()
     {
-        return nodeIds;
+        return nodes;
     }
 
     public Ranges ranges()
@@ -668,16 +707,21 @@ public class Topology
         return subsetOfRanges;
     }
 
-    public SortedArrayList<Id> staleIds()
-    {
-        return staleIds;
-    }
-    
     public SortedArrayList<Id> removedIds()
     {
-        return staleIds;
+        return removed;
     }
 
+    public SortedArrayList<Id> hardRemovedIds()
+    {
+        return hardRemoved;
+    }
+
+    public SortedArrayList<Id> staleIds()
+    {
+        return stale;
+    }
+    
     public Shard[] unsafeGetShards()
     {
         return shards;

@@ -31,6 +31,7 @@ import java.util.function.IntBinaryOperator;
 import java.util.function.IntFunction;
 import java.util.function.Predicate;
 
+import accord.primitives.Range;
 import accord.utils.ArrayBuffers.ObjectBuffers;
 import accord.utils.ArrayBuffers.IntBufferAllocator;
 import net.nicoulaj.compilecommand.annotations.Inline;
@@ -41,6 +42,7 @@ import javax.annotation.Nullable;
 import static accord.utils.ArrayBuffers.cachedAny;
 import static accord.utils.ArrayBuffers.uncached;
 import static accord.utils.Invariants.illegalState;
+import static accord.utils.SortedArrays.Search.CEIL;
 import static accord.utils.SortedArrays.Search.FAST;
 
 // TODO (low priority, efficiency): improvements:
@@ -160,6 +162,11 @@ public class SortedArrays
         public T[] backingArrayUnsafe()
         {
             return array;
+        }
+
+        public boolean intersects(SortedArrayList<? extends T> that)
+        {
+            return findFirstIntersectionWithMultipleMatches(array, 0, that.array, 0) >= 0;
         }
 
         public static class Builder<T extends Comparable<? super T>>
@@ -1607,9 +1614,18 @@ public class SortedArrays
      * Given two sorted arrays where an item in each array may match multiple in the other, find the next
      * index in each array containing an equal item.
      */
-    public static <T1, T2 extends Comparable<T1>> long findNextIntersectionWithMultipleMatches(T1[] as, int ai, T2[] bs, int bi)
+    public static <T1, T2 extends Comparable<? super T1>> long findNextIntersectionWithMultipleMatches(T1[] as, int ai, T2[] bs, int bi)
     {
         return findNextIntersectionWithMultipleMatches(as, ai, bs, bi, (a, b) -> -b.compareTo(a), Comparable::compareTo);
+    }
+
+    /**
+     * Given two sorted arrays where an item in each array may match multiple in the other, find the next
+     * index in each array containing an equal item.
+     */
+    public static <T1, T2 extends Comparable<? super T1>> long findFirstIntersectionWithMultipleMatches(T1[] as, int ai, T2[] bs, int bi)
+    {
+        return findFirstIntersectionWithMultipleMatches(as, ai, bs, bi, (a, b) -> -b.compareTo(a), Comparable::compareTo);
     }
 
     /**
@@ -1619,6 +1635,15 @@ public class SortedArrays
     public static <T1, T2> long findNextIntersectionWithMultipleMatches(T1[] as, int ai, T2[] bs, int bi, AsymmetricComparator<T1, T2> cmp1, AsymmetricComparator<T2, T1> cmp2)
     {
         return findNextIntersection(as, ai, as.length, bs, bi, bs.length, cmp1, cmp2, Search.CEIL);
+    }
+
+    /**
+     * Given two sorted arrays where an item in each array may match multiple in the other, find the next
+     * index in each array containing an equal item.
+     */
+    public static <T1, T2> long findFirstIntersectionWithMultipleMatches(T1[] as, int ai, T2[] bs, int bi, AsymmetricComparator<T1, T2> cmp1, AsymmetricComparator<T2, T1> cmp2)
+    {
+        return findFirstIntersection(as, ai, as.length, bs, bi, bs.length, cmp1, cmp2, Search.CEIL);
     }
 
     /**
@@ -1692,6 +1717,37 @@ public class SortedArrays
                 return -1;
         }
         return ai | ((long)bi << 32);
+    }
+
+    /**
+     * Given two sorted arrays, find the next index in each array containing an equal item.
+     *
+     * Works with CEIL or FAST; FAST to be used if precisely one match for each item in either list, CEIL if one item
+     * in either list may be matched to multiple in the other list.
+     */
+    @Inline
+    private static <T1, T2> long findFirstIntersection(T1[] as, int ai, int asLength, T2[] bs, int bi, int bsLength, AsymmetricComparator<? super T1, ? super T2> cmp1, AsymmetricComparator<? super T2, ? super T1> cmp2, Search op)
+    {
+        if (ai == asLength)
+            return -1;
+
+        bi = SortedArrays.binarySearch(bs, bi, bsLength, as[ai], cmp1, op);
+        if (bi >= 0)
+            return ai | ((long)bi << 32);
+
+        bi = -1 - bi;
+        if (bi == bsLength)
+            return -1;
+
+        ai = SortedArrays.binarySearch(as, ai, asLength, bs[bi], cmp2, op);
+        if (ai >= 0)
+            return ai | ((long)bi << 32);
+
+        ai = -1 - ai;
+        if (ai == asLength)
+            return -1;
+
+        return findNextIntersection(as, ai, asLength, bs, bi, bsLength, cmp1, cmp2, op);
     }
 
     public static long swapHighLow32b(long v)

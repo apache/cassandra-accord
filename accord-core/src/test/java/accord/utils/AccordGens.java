@@ -359,7 +359,7 @@ public class AccordGens
                 //noinspection StatementWithEmptyBody
                 while (!joining.add(nodes.get(rs.nextInt(nodes.size()))));
             }
-            return Shard.create(range, nodes, fastPath, joining);
+            return Shard.create(range, nodes, fastPath);
         };
     }
 

@@ -40,9 +40,9 @@ public class Shard
 {
     public static class SerializerSupport
     {
-        public static Shard create(Range range, SortedArrayList<Id> nodes, SortedArrayList<Id> notInFastPath, SortedArrayList<Id> joining, TinyEnumSet<Flag> flags)
+        public static Shard create(Range range, SortedArrayList<Id> nodes, SortedArrayList<Id> notInFastPath, SortedArrayList<Id> hardRemoved, TinyEnumSet<Flag> flags)
         {
-            return new Shard(range, nodes, notInFastPath, joining, flags);
+            return new Shard(range, nodes, notInFastPath, hardRemoved, flags);
         }
     }
 
@@ -53,12 +53,13 @@ public class Shard
     }
 
     public static final TinyEnumSet<Flag> NO_FLAGS = new TinyEnumSet<>();
-    private static final SortedArrayList<Id> NO_NODES = SortedArrayList.ofSorted(new Id[0]);
+    public static final SortedArrayList<Id> NO_NODES = SortedArrayList.ofSorted(new Id[0]);
 
     public final Range range;
     public final SortedArrayList<Id> nodes;
     public final SortedArrayList<Id> notInFastPath;
-    public final SortedArrayList<Id> joining;
+    // nodes that have been reported as offline forever - externally guaranteed to never reply to any request
+    public final SortedArrayList<Id> hardRemoved;
     public final short rf;
     public final short fastPathElectorateSize;
 
@@ -71,32 +72,35 @@ public class Shard
 
     private final int flags;
 
-    Shard(Range range, SortedArrayList<Id> nodes, SortedArrayList<Id> notInFastPath, SortedArrayList<Id> joining, TinyEnumSet<Flag> flags)
+    Shard(Range range, SortedArrayList<Id> nodes, SortedArrayList<Id> notInFastPath, SortedArrayList<Id> hardRemoved, TinyEnumSet<Flag> flags)
     {
         this.range = range;
         this.nodes = nodes;
         this.notInFastPath = Invariants.requireArgument(notInFastPath, nodes.containsAll(notInFastPath));
-        this.joining = Invariants.requireArgument(joining, nodes.containsAll(joining),
-                                                  "joining nodes must also be present in nodes; joining=%s, nodes=%s", joining, nodes);
-        this.rf = Shorts.saturatedCast(nodes.size());
-        this.fastPathElectorateSize = Shorts.saturatedCast(nodes.size() - notInFastPath.size());
-        this.maxFailures = Shorts.saturatedCast(maxToleratedFailures(rf));
-        this.slowQuorumSize = Shorts.saturatedCast(slowQuorumSize(nodes.size()));
-        this.recoveryQuorumSize = slowQuorumSize;
-        this.simpleFastQuorumSize = Shorts.saturatedCast(simpleFastQuorumSize(rf, fastPathElectorateSize, recoveryQuorumSize));
-        this.privilegedWithoutDepsFastQuorumSize = Shorts.saturatedCast(privilegedWithoutDepsFastQuorumSize(rf, fastPathElectorateSize, recoveryQuorumSize));
-        this.privilegedWithDepsFastQuorumSize = Shorts.saturatedCast(privilegedWithDepsFastQuorumSize(rf, fastPathElectorateSize, recoveryQuorumSize));
+        this.hardRemoved = Invariants.requireArgument(hardRemoved, nodes.containsAll(hardRemoved),
+                                                  "removed nodes must also be present in nodes; hardRemoved=%s, nodes=%s", hardRemoved, nodes);
+        this.rf = Shorts.checkedCast(nodes.size());
+        this.fastPathElectorateSize = Shorts.checkedCast(nodes.size() - notInFastPath.size());
+        short maxFailures = Shorts.checkedCast(maxToleratedFailures(rf));
+        short slowQuorumSize = Shorts.checkedCast(slowQuorumSize(nodes.size()));
+        short recoveryQuorumSize = slowQuorumSize;
+        this.simpleFastQuorumSize = Shorts.checkedCast(simpleFastQuorumSize(rf, fastPathElectorateSize, recoveryQuorumSize));
+        this.privilegedWithoutDepsFastQuorumSize = Shorts.checkedCast(privilegedWithoutDepsFastQuorumSize(rf, fastPathElectorateSize, recoveryQuorumSize));
+        this.privilegedWithDepsFastQuorumSize = Shorts.checkedCast(privilegedWithDepsFastQuorumSize(rf, fastPathElectorateSize, recoveryQuorumSize));
+        if (hardRemoved.size() > maxFailures)
+        {
+            recoveryQuorumSize = slowQuorumSize = Shorts.checkedCast(rf - hardRemoved.size());
+            maxFailures = Shorts.checkedCast(rf - slowQuorumSize);
+        }
+        this.slowQuorumSize = slowQuorumSize;
+        this.recoveryQuorumSize = recoveryQuorumSize;
+        this.maxFailures = maxFailures;
         this.flags = flags.bitset();
-    }
-
-    public static Shard create(Range range, SortedArrayList<Id> nodes, Set<Id> fastPathElectorate, Set<Id> joining)
-    {
-        return create(range, nodes, fastPathElectorate, joining, NO_FLAGS);
     }
 
     public static Shard create(Range range, SortedArrayList<Id> nodes, Set<Id> fastPathElectorate)
     {
-        return create(range, nodes, fastPathElectorate, NO_FLAGS);
+        return create(range, nodes, fastPathElectorate, NO_NODES, NO_FLAGS);
     }
 
     public static Shard create(Range range, SortedArrayList<Id> nodes, Set<Id> fastPathElectorate, TinyEnumSet<Flag> flags)
@@ -104,13 +108,10 @@ public class Shard
         return create(range, nodes, fastPathElectorate, NO_NODES, flags);
     }
 
-
-    public static Shard create(Range range, SortedArrayList<Id> nodes, Set<Id> fastPathElectorate, Set<Id> joining, TinyEnumSet<Flag> flags)
+    public static Shard create(Range range, SortedArrayList<Id> nodes, Set<Id> fastPathElectorate, SortedArrayList<Id> hardRemoved, TinyEnumSet<Flag> flags)
     {
         Invariants.requireArgument(nodes.containsAll(fastPathElectorate));
-        return new Shard(range, nodes, nodes.without(fastPathElectorate::contains),
-                         joining instanceof SortedArrayList<?> ? (SortedArrayList<Id>) joining : SortedArrayList.copyUnsorted(joining, Id[]::new),
-                         flags);
+        return new Shard(range, nodes, nodes.without(fastPathElectorate::contains), hardRemoved, flags);
     }
 
     public final int minorityQuorumSize()
@@ -188,8 +189,8 @@ public class Shard
                     sb.append('f');
             }
             sb.append(')');
-            if (!joining.isEmpty())
-                sb.append(":joining=").append(joining);
+            if (!hardRemoved.isEmpty())
+                sb.append(":hardRemoved=").append(hardRemoved);
             s = sb.toString();
         }
         return s;
@@ -242,7 +243,7 @@ public class Shard
                   && range.equals(shard.range)
                   && nodes.equals(shard.nodes)
                   && notInFastPath.equals(shard.notInFastPath)
-                  && joining.equals(shard.joining);
+                  && hardRemoved.equals(shard.hardRemoved);
     }
 
     @Override

@@ -90,12 +90,12 @@ public interface Topologies extends TopologySorter
 
     default SortedArrayList<Id> staleOrRemovedIds()
     {
-        SortedArrayList<Id> cur = current().staleIds;
+        SortedArrayList<Id> cur = current().stale;
         for (int i = size() - 1 ; i >= 1 ; --i)
         {
             Topology topology = get(i);
-            if (!topology.removedIds.isEmpty())
-                cur = cur.with(topology.removedIds);
+            if (!topology.removed.isEmpty())
+                cur = cur.with(topology.removed);
         }
         return cur;
     }
