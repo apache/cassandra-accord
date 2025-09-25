@@ -86,16 +86,8 @@ abstract class Propose<R> extends AbstractCoordination<FullRoute<?>, R, AcceptRe
     @Override
     void start()
     {
-        SortedArrays.SortedArrayList<Node.Id> contact = tracker.filterAndRecordFaulty();
-        if (contact == null)
-        {
-            finishOnExaustion();
-        }
-        else
-        {
-            super.start();
-            contact(to -> new Accept(to, tracker.topologies(), kind, ballot, txnId, scope, executeAt, deps, require != scope));
-        }
+        super.start();
+        contact(to -> new Accept(to, tracker.topologies(), kind, ballot, txnId, scope, executeAt, deps, require != scope));
     }
 
     @Override

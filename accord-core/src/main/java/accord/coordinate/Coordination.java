@@ -18,6 +18,7 @@
 
 package accord.coordinate;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import accord.coordinate.tracking.AbstractTracker;
@@ -55,19 +56,13 @@ public interface Coordination
     }
 
     long coordinationId();
-
     TxnId txnId();
     CoordinationKind kind();
     Participants<?> scope();
+    @Nullable AbstractTracker<?> tracker();
+    @Nullable SortedList<Id> nodes();
 
     default @Nullable Ballot ballot() { return null; }
-
-    default SortedList<Id> nodes()
-    {
-        AbstractTracker<?> tracker = tracker();
-        return tracker == null ? null : tracker.nodes();
-    }
-    default @Nullable AbstractTracker<?> tracker() { return null; }
 
     default String describe() { return ""; }
 

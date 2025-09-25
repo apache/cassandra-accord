@@ -20,8 +20,11 @@ package accord.impl.list;
 
 import java.util.function.Function;
 
+import javax.annotation.Nullable;
+
 import accord.api.Data;
 import accord.api.DataStore;
+import accord.coordinate.tracking.AbstractTracker;
 import accord.impl.AbstractFetchCoordinator;
 import accord.local.CommandStore;
 import accord.local.Node;
@@ -72,6 +75,13 @@ public class ListFetchCoordinator extends AbstractFetchCoordinator
     protected ListFetchRequest newFetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn)
     {
         return new ListFetchRequest(sourceEpoch, syncId, ranges, partialDeps, partialTxn);
+    }
+
+    @Nullable
+    @Override
+    public AbstractTracker<?> tracker()
+    {
+        return null;
     }
 
     static class ListFetchRequest extends FetchRequest

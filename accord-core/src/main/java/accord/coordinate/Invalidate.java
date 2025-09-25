@@ -94,16 +94,8 @@ public class Invalidate extends AbstractCoordination<Participants<?>, Outcome, I
     @Override
     void start()
     {
-        SortedArrays.SortedArrayList<Node.Id> contact = tracker.filterAndRecordFaulty();
-        if (contact == null)
-        {
-            finishOnExaustion();
-        }
-        else
-        {
-            super.start();
-            contact(to -> new BeginInvalidation(to, tracker.topologies(), txnId, scope, ballot));
-        }
+        super.start();
+        contact(to -> new BeginInvalidation(to, tracker.topologies(), txnId, scope, ballot));
     }
 
     @Override

@@ -28,7 +28,6 @@ import accord.messages.Callback;
 import accord.primitives.FullRoute;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
-import accord.utils.SortedList;
 
 import static accord.api.ProtocolModifiers.QuorumEpochIntersections;
 import static accord.topology.Topologies.SelectNodeOwnership.SHARE;
@@ -74,11 +73,5 @@ abstract class AbstractCoordinatePreAccept<Result, Reply extends accord.messages
     public CoordinationKind kind()
     {
         return CoordinationKind.PreAccept;
-    }
-
-    @Override
-    public SortedList<Id> nodes()
-    {
-        return topologies.nodes();
     }
 }

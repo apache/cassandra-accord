@@ -139,16 +139,11 @@ public class ExecuteSyncPoint extends AbstractCoordination<FullRoute<?>, Durabil
     void start()
     {
         node.agent().coordinatorEvents().onExecuting(syncPoint.syncId, null, syncPoint.waitFor, null);
-        SortedArrayList<Node.Id> contact = tracker.filterAndRecordFaulty();
         // TODO (desired): special Apply message that doesn't resend deps if path=MEDIUM
         Txn txn = node.agent().emptySystemTxn(syncPoint.syncId.kind(), syncPoint.syncId.domain());
         Result result = txn.result(syncPoint.syncId, syncPoint.executeAt, null);
-        if (contact == null) finishOnExaustion();
-        else
-        {
-            super.start();
-            contact(to -> new ApplyThenWaitUntilApplied(to, tracker.topologies(), syncPoint.executeAt, tracker.topologies().currentEpoch(), syncPoint.route, syncPoint.syncId, txn, syncPoint.waitFor, syncPoint.route, null, result));
-        }
+        super.start();
+        contact(to -> new ApplyThenWaitUntilApplied(to, tracker.topologies(), syncPoint.executeAt, tracker.topologies().currentEpoch(), syncPoint.route, syncPoint.syncId, txn, syncPoint.waitFor, syncPoint.route, null, result));
     }
 
     @Override

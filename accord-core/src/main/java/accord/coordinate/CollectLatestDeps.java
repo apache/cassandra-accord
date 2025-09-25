@@ -24,6 +24,7 @@ import java.util.function.BiConsumer;
 
 import javax.annotation.Nullable;
 
+import accord.coordinate.tracking.AbstractTracker;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.local.Node;
 import accord.local.Node.Id;
@@ -39,8 +40,6 @@ import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
-import accord.utils.SortedArrays.SortedArrayList;
-import accord.utils.SortedList;
 import accord.utils.SortedListMap;
 
 import static accord.coordinate.tracking.RequestStatus.Failed;
@@ -73,16 +72,8 @@ public class CollectLatestDeps extends AbstractCoordination<Route<?>, List<Lates
     @Override
     void start()
     {
-        SortedArrayList<Id> contact = tracker.filterAndRecordFaulty();
-        if (contact == null)
-        {
-            finishOnExaustion();
-        }
-        else
-        {
-            super.start();
-            contact(to -> new GetLatestDeps(to, tracker.topologies(), scope, txnId, ballot, executeAt));
-        }
+        super.start();
+        contact(to -> new GetLatestDeps(to, tracker.topologies(), scope, txnId, ballot, executeAt));
     }
 
     @Override
@@ -125,8 +116,8 @@ public class CollectLatestDeps extends AbstractCoordination<Route<?>, List<Lates
     }
 
     @Override
-    public SortedList<Id> nodes()
+    public AbstractTracker<?> tracker()
     {
-        return tracker.nodes();
+        return tracker;
     }
 }
