@@ -862,6 +862,9 @@ public class Gens
      */
     public static <T> Gen<Gen<T>> mixedDistribution(List<T> list)
     {
+        Invariants.require(!list.isEmpty(), "can not pick from an empty collection");
+        if (list.size() == 1)
+            return i -> constant(list.get(0));
         return rs -> {
             switch (rs.nextInt(0, 4))
             {

@@ -391,11 +391,10 @@ public class ExecuteTxn extends ReadCoordinator<Result, ReadReply>
                 executeAt = new TimestampWithUniqueHlc(executeAt, uniqueHlc);
             }
 
-            // Always compute Result before Write to provide integrations with a predictable invocation order
-            // in case there is shared state between Result and Update. This can change if really needed
-            // just make sure to check the integrations to make sure it won't break anything
-            Result result = txn.result(txnId, executeAt, data);
+            // Always compute Writes before Result to provide integrations with a predictable invocation order
+            // in case there is shared state between Result and Update.
             Writes writes = txnId.is(Txn.Kind.Write) ? txn.execute(txnId, executeAt, data) : null;
+            Result result = txn.result(txnId, executeAt, data);
             adapter().persist(node, executor, allTopologies, route, ballot, flags, txnId, txn, executeAt, stableDeps, writes, result, takeCallback());
         }
         else
