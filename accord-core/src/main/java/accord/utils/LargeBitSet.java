@@ -98,36 +98,36 @@ public class LargeBitSet implements SimpleBitSet
         return true;
     }
 
-    public void setRange(int from, int to)
+    public void setRange(int fromInclusive, int toExclusive)
     {
-        Invariants.requireArgument(from <= to, "from > to (%s > %s)", from, to);
-        if (from == to)
+        Invariants.requireArgument(fromInclusive <= toExclusive, "from > to (%s > %s)", fromInclusive, toExclusive);
+        if (fromInclusive == toExclusive)
             return;
 
-        int fromIndex = from >>> 6;
-        int toIndex = (to + 63) >>> 6;
+        int fromIndex = fromInclusive >>> 6;
+        int toIndex = (toExclusive + 63) >>> 6;
         if (fromIndex + 1 == toIndex)
         {
-            long addBits = (-1L >>> (64 - (to & 63))) & (-1L << (from & 63));
+            long addBits = (-1L >>> (64 - (toExclusive & 63))) & (-1L << (fromInclusive & 63));
             orBitsAtIndex(fromIndex,  addBits);
         }
         else if (count == 0)
         {
-            bits[toIndex - 1] = -1L >>> (64 - (to & 63));
+            bits[toIndex - 1] = -1L >>> (64 - (toExclusive & 63));
             for (int i = fromIndex + 1, maxi = toIndex - 1; i < maxi ; ++i)
                 bits[i] = -1L;
-            bits[fromIndex] = -1L << (from & 63);
-            count = to - from;
+            bits[fromIndex] = -1L << (fromInclusive & 63);
+            count = toExclusive - fromInclusive;
         }
         else
         {
-            orBitsAtIndex(fromIndex, -1L << (from & 63));
+            orBitsAtIndex(fromIndex, -1L << (fromInclusive & 63));
             for (int i = fromIndex + 1, maxi = toIndex - 1; i < maxi ; ++i)
             {
                 count += 64 - Long.bitCount(bits[i]);
                 bits[i] = -1L;
             }
-            orBitsAtIndex(toIndex - 1, -1L >>> (64 - (to & 63)));
+            orBitsAtIndex(toIndex - 1, -1L >>> (64 - (toExclusive & 63)));
         }
     }
 

@@ -49,9 +49,10 @@ public class SmallBitSet implements SimpleBitSet
     }
 
     @Override
-    public void setRange(int from, int to)
+    public void setRange(int fromInclusive, int toExclusive)
     {
-        bits |= ~(-1L << to) & (-1L << from);
+        long maskTo = (toExclusive >= 64) ? -1L : ~(-1L << toExclusive);
+        bits |= maskTo & (-1L << fromInclusive);
     }
 
     public boolean get(int i)

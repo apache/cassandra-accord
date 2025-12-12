@@ -67,7 +67,7 @@ public class ImmutableBitSet extends LargeBitSet
     }
 
     @Override
-    public void setRange(int from, int to)
+    public void setRange(int fromInclusive, int toExclusive)
     {
         throw new UnsupportedOperationException();
     }

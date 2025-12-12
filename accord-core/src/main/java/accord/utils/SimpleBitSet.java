@@ -22,7 +22,7 @@ public interface SimpleBitSet
 {
     boolean get(int i);
     boolean set(int i);
-    void setRange(int from, int to);
+    void setRange(int fromInclusive, int toExclusive);
     boolean unset(int i);
     void clear();
     boolean isEmpty();
