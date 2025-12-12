@@ -51,6 +51,10 @@ public class SmallBitSet implements SimpleBitSet
     @Override
     public void setRange(int fromInclusive, int toExclusive)
     {
+        Invariants.requireArgument(fromInclusive <= toExclusive, "from > to (%s > %s)", fromInclusive, toExclusive);
+        if (fromInclusive == toExclusive)
+            return;
+
         long maskTo = (toExclusive >= 64) ? -1L : ~(-1L << toExclusive);
         bits |= maskTo & (-1L << fromInclusive);
     }
