@@ -42,6 +42,23 @@ class SimpleBitSetTest
         return new Property.SimpleCommand<>("Set(" + idx + ')', s2 -> s2.set(idx));
     }
 
+    private static Property.Command<State, Void, ?> setRange(RandomSource rs, State state)
+    {
+        int from = rs.nextInt(0, state.size);
+        int to = rs.nextInt(0, state.size + 1);
+        while (from == to)
+            to = rs.nextInt(0, state.size + 1);
+        if (from > to)
+        {
+            int tmp = from;
+            from = to;
+            to = tmp;
+        }
+        int finalFrom = from;
+        int finalTo = to;
+        return new Property.SimpleCommand<>("setRange(" + from + ", " + to + ')', s2 -> s2.setRange(finalFrom, finalTo));
+    }
+
     private static Property.Command<State, Void, ?> unset(RandomSource rs, State state)
     {
         int idx = rs.nextInt(0, state.size);
@@ -64,16 +81,23 @@ class SimpleBitSetTest
         return new Property.SimpleCommand<>("NextSetBit(" + idx + ')', s2 -> s2.nextSetBit(idx));
     }
 
+    private static Property.Command<State, Void, ?> getSetBitCount(RandomSource rs, State state)
+    {
+        return new Property.SimpleCommand<>("getSetBitCount()", s2 -> s2.getSetBitCount());
+    }
+
     @Test
     public void test()
     {
         stateful().withExamples(1000).check(commands(() -> State::new)
                                             .add(SimpleBitSetTest::get)
                                             .add(SimpleBitSetTest::set)
+                                            .add(SimpleBitSetTest::setRange)
                                             .add(SimpleBitSetTest::unset)
                                             .add(SimpleBitSetTest::clear)
                                             .add(SimpleBitSetTest::isEmpty)
                                             .add(SimpleBitSetTest::nextSetBit)
+                                            .add(SimpleBitSetTest::getSetBitCount)
                                             .build());
     }
 
@@ -114,7 +138,10 @@ class SimpleBitSetTest
         @Override
         public void setRange(int from, int to)
         {
-            throw new UnsupportedOperationException();
+            model.set(from, to);
+            sut.setRange(from, to);
+
+            getSetBitCount();
         }
 
         @Override
@@ -167,7 +194,25 @@ class SimpleBitSetTest
         @Override
         public int getSetBitCount()
         {
+            Assertions.assertThat(sut.getSetBitCount())
+                      .describedAs(toBinaryString())
+                      .isEqualTo(model.cardinality());
             return sut.getSetBitCount();
+        }
+
+        public String toBinaryString()
+        {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < size; i++)
+            {
+                boolean m = model.get(i);
+                boolean s = sut.get(i);
+                if (m == s)
+                    sb.append(m ? 1 : 0);
+                else
+                    sb.append("(expected=").append(m ? 1 : 0).append(", actual=").append(s ? 1 : 0).append(')');
+            }
+            return sb.toString();
         }
 
         @Override
