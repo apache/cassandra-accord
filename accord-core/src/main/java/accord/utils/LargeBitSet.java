@@ -25,6 +25,8 @@ import static java.lang.Long.numberOfTrailingZeros;
 
 public class LargeBitSet implements SimpleBitSet
 {
+    private static final int UNKNOWN = -1;
+
     public static class SerializationSupport
     {
         public static long[] getArray(LargeBitSet bs)
@@ -55,7 +57,7 @@ public class LargeBitSet implements SimpleBitSet
         {
             Arrays.fill(bits, 0, size / 64, -1L);
             if ((size & 63) != 0)
-                bits[indexOf(size - 1)] = -1L >>> (64 - (size & 63));
+                bits[indexOfSafe(size - 1)] = -1L >>> (64 - (size & 63));
             count = size;
         }
     }
@@ -87,9 +89,10 @@ public class LargeBitSet implements SimpleBitSet
         Arrays.fill(bits, 0, length, 0L);
     }
 
+    @Override
     public boolean set(int i)
     {
-        int index = indexOf(i);
+        int index = indexOfSafe(i);
         long bit = bit(i);
         if (0 != (bits[index] & bit))
             return false;
@@ -98,13 +101,14 @@ public class LargeBitSet implements SimpleBitSet
         return true;
     }
 
+    @Override
     public void setRange(int fromInclusive, int toExclusive)
     {
         Invariants.requireArgument(fromInclusive <= toExclusive, "from > to (%s > %s)", fromInclusive, toExclusive);
         if (fromInclusive == toExclusive)
             return;
 
-        int fromIndex = fromInclusive >>> 6;
+        int fromIndex = indexOfSafe(fromInclusive);
         int toIndex = (toExclusive + 63) >>> 6;
         if (fromIndex + 1 == toIndex)
         {
@@ -163,9 +167,10 @@ public class LargeBitSet implements SimpleBitSet
         count += Long.bitCount(nextBits) - Long.bitCount(prevBits);
     }
 
+    @Override
     public boolean unset(int i)
     {
-        int index = indexOf(i);
+        int index = indexOfSafe(i);
         long bit = bit(i);
         if (0 == (bits[index] & bit))
             return false;
@@ -174,9 +179,12 @@ public class LargeBitSet implements SimpleBitSet
         return true;
     }
 
+    @Override
     public final boolean get(int i)
     {
         int index = indexOf(i);
+        if (index == UNKNOWN)
+            return false;
         long bit = bit(i);
         return 0 != (bits[index] & bit);
     }
@@ -320,7 +328,9 @@ public class LargeBitSet implements SimpleBitSet
     private int nextSetBitInternal(int i, int exclIndexBound, int ifNotFound)
     {
         Invariants.requireArgument(i >= 0);
-        Invariants.requireArgument(i <= size());
+
+        if (i > size())
+            return ifNotFound;
 
         if (count == 0)
             return ifNotFound;
@@ -443,6 +453,14 @@ public class LargeBitSet implements SimpleBitSet
     {
         int index = i >>> 6;
         if (index >= length)
+            return UNKNOWN;
+        return index;
+    }
+
+    private int indexOfSafe(int i)
+    {
+        int index = indexOf(i);
+        if (index == UNKNOWN)
             throw new IndexOutOfBoundsException(String.format("%d >= %d", index, length));
         return index;
     }

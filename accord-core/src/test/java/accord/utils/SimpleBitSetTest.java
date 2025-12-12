@@ -20,6 +20,7 @@ package accord.utils;
 
 
 import java.util.BitSet;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
@@ -99,6 +100,45 @@ class SimpleBitSetTest
                                             .add(SimpleBitSetTest::nextSetBit)
                                             .add(SimpleBitSetTest::getSetBitCount)
                                             .build());
+    }
+
+    @Test
+    public void outOfRange()
+    {
+        SmallBitSet model = new SmallBitSet();
+        LargeBitSet target = new LargeBitSet(64);
+
+        for (var set : List.of(model, target))
+            set.setRange(0, 64);
+
+        // get methods do not reject, but return false or -1
+        Assertions.assertThat(target.getSetBitCount()).isEqualTo(model.getSetBitCount());
+        Assertions.assertThat(target.isEmpty()).isEqualTo(model.isEmpty());
+
+        for (int index : new int[] {64, 65, Integer.MAX_VALUE})
+        {
+            Assertions.assertThat(target.get(index))
+                      .describedAs("get(%s)", index)
+                      .isEqualTo(model.get(index))
+                      .isEqualTo(false);
+            Assertions.assertThat(target.nextSetBit(index))
+                      .describedAs("nextSetBit(%s)", index)
+                      .isEqualTo(model.nextSetBit(index))
+                      .isEqualTo(-1);
+        }
+
+        // set methods reject
+        for (int index : new int[] {64, 65, Integer.MAX_VALUE})
+        {
+            Assertions.assertThatThrownBy(() -> target.set(index));
+            Assertions.assertThatThrownBy(() -> model.set(index));
+
+            Assertions.assertThatThrownBy(() -> target.setRange(index, 100));
+            Assertions.assertThatThrownBy(() -> model.setRange(index, 100));
+
+            Assertions.assertThatThrownBy(() -> target.unset(index));
+            Assertions.assertThatThrownBy(() -> model.unset(index));
+        }
     }
 
     private static class State implements SimpleBitSet

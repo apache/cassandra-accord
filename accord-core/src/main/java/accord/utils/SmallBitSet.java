@@ -40,9 +40,22 @@ public class SmallBitSet implements SimpleBitSet
         return bits;
     }
 
+    private static long bitSafe(int i)
+    {
+        validateIndex(i);
+        return bit(i);
+    }
+
+    private static void validateIndex(int i)
+    {
+        if (i >= 64 || i < 0)
+            throw new IndexOutOfBoundsException("Unable to access bit " + i + "; must be between 0 and 63");
+    }
+
+    @Override
     public boolean set(int i)
     {
-        long bit = bit(i);
+        long bit = bitSafe(i);
         boolean result = 0 == (bits & bit);
         bits |= bit;
         return result;
@@ -51,6 +64,7 @@ public class SmallBitSet implements SimpleBitSet
     @Override
     public void setRange(int fromInclusive, int toExclusive)
     {
+        validateIndex(fromInclusive);
         Invariants.requireArgument(fromInclusive <= toExclusive, "from > to (%s > %s)", fromInclusive, toExclusive);
         if (fromInclusive == toExclusive)
             return;
@@ -59,15 +73,18 @@ public class SmallBitSet implements SimpleBitSet
         bits |= maskTo & (-1L << fromInclusive);
     }
 
+    @Override
     public boolean get(int i)
     {
+        if (i >= 64) return false;
         long bit = bit(i);
         return 0 != (bits & bit);
     }
 
+    @Override
     public boolean unset(int i)
     {
-        long bit = bit(i);
+        long bit = bitSafe(i);
         boolean result = 0 != (bits & bit);
         bits &= ~bit;
         return result;
@@ -88,6 +105,8 @@ public class SmallBitSet implements SimpleBitSet
     @Override
     public int nextSetBit(int fromIndex)
     {
+        if (fromIndex >= 64)
+            return -1;
         long bits = this.bits & bitsEqualOrGreater(fromIndex);
         if (bits == 0)
             return -1;
