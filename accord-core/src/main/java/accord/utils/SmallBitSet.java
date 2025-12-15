@@ -69,8 +69,7 @@ public class SmallBitSet implements SimpleBitSet
         if (fromInclusive == toExclusive)
             return;
 
-        long maskTo = (toExclusive >= 64) ? -1L : ~(-1L << toExclusive);
-        bits |= maskTo & (-1L << fromInclusive);
+        bits |= (-1L >>> (64 - (toExclusive & 63))) & (-1L << (fromInclusive & 63));
     }
 
     @Override
