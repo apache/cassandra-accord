@@ -47,7 +47,7 @@ public class SmallBitSet implements SimpleBitSet
 
     private static void validateInclusive(int i)
     {
-        if (i >= 64 || i < 0)
+        if (i >>> 6 > 0) // i >= 64 || i < 0
             throw new IndexOutOfBoundsException("Unable to access bit " + i + "; must be between 0 and 63");
     }
 
