@@ -21,6 +21,7 @@ package accord.utils;
 
 import java.util.BitSet;
 import java.util.List;
+import java.util.function.Consumer;
 
 import org.junit.jupiter.api.Test;
 
@@ -115,30 +116,46 @@ class SimpleBitSetTest
         Assertions.assertThat(target.getSetBitCount()).isEqualTo(model.getSetBitCount());
         Assertions.assertThat(target.isEmpty()).isEqualTo(model.isEmpty());
 
-        for (int index : new int[] {64, 65, Integer.MAX_VALUE})
-        {
-            Assertions.assertThat(target.get(index))
-                      .describedAs("get(%s)", index)
-                      .isEqualTo(model.get(index))
-                      .isEqualTo(false);
-            Assertions.assertThat(target.nextSetBit(index))
-                      .describedAs("nextSetBit(%s)", index)
-                      .isEqualTo(model.nextSetBit(index))
-                      .isEqualTo(-1);
-        }
+        Assertions.assertThat(target.nextSetBit(64))
+                .describedAs("nextSetBit(%s)", 64)
+                .isEqualTo(model.nextSetBit(64))
+                .isEqualTo(-1);
 
         // set methods reject
         for (int index : new int[] {64, 65, Integer.MAX_VALUE})
         {
-            Assertions.assertThatThrownBy(() -> target.set(index));
-            Assertions.assertThatThrownBy(() -> model.set(index));
+            asertThrownSameWay(model, target, bs -> bs.get(index));
+            asertThrownSameWay(model, target, bs -> bs.set(index));
+            asertThrownSameWay(model, target, bs -> bs.setRange(index, 100)); // from/index gets rejected
+            asertThrownSameWay(model, target, bs -> bs.setRange(0, 100));     // to gets rejected
+            asertThrownSameWay(model, target, bs -> bs.unset(index));
 
-            Assertions.assertThatThrownBy(() -> target.setRange(index, 100));
-            Assertions.assertThatThrownBy(() -> model.setRange(index, 100));
-
-            Assertions.assertThatThrownBy(() -> target.unset(index));
-            Assertions.assertThatThrownBy(() -> model.unset(index));
+            if (index > 64)
+                asertThrownSameWay(model, target, bs -> bs.nextSetBit(index));
         }
+
+        asertThrownSameWay(model, target, bs -> bs.setRange(1, 0));
+    }
+
+    private static void asertThrownSameWay(SimpleBitSet model, SimpleBitSet target, Consumer<SimpleBitSet> fn)
+    {
+        Throwable expected = assertThrown(() -> fn.accept(target));
+        Throwable actual = assertThrown(() -> fn.accept(model));
+
+        Assertions.assertThat(actual).hasSameClassAs(expected).hasMessage(expected.getMessage());
+    }
+
+    private static Throwable assertThrown(Runnable fn)
+    {
+        try
+        {
+            fn.run();
+        }
+        catch (Throwable t)
+        {
+            return t;
+        }
+        throw new AssertionError("Expected logic to throw but did not");
     }
 
     private static class State implements SimpleBitSet

@@ -18,7 +18,6 @@
 
 package accord.utils;
 
-import static accord.utils.LargeBitSet.bit;
 import static accord.utils.LargeBitSet.bitsEqualOrGreater;
 import static java.lang.Long.numberOfTrailingZeros;
 
@@ -40,22 +39,28 @@ public class SmallBitSet implements SimpleBitSet
         return bits;
     }
 
-    private static long bitSafe(int i)
+    private static long bit(int i)
     {
-        validateIndex(i);
-        return bit(i);
+        validateInclusive(i);
+        return 1L << i;
     }
 
-    private static void validateIndex(int i)
+    private static void validateInclusive(int i)
     {
         if (i >= 64 || i < 0)
             throw new IndexOutOfBoundsException("Unable to access bit " + i + "; must be between 0 and 63");
     }
 
+    private static void validateExclusive(int i)
+    {
+        if (i >= 65 || i < 0)
+            throw new IndexOutOfBoundsException("Unable to access bit " + i + "; must be between 0 and 64");
+    }
+
     @Override
     public boolean set(int i)
     {
-        long bit = bitSafe(i);
+        long bit = bit(i);
         boolean result = 0 == (bits & bit);
         bits |= bit;
         return result;
@@ -64,7 +69,8 @@ public class SmallBitSet implements SimpleBitSet
     @Override
     public void setRange(int fromInclusive, int toExclusive)
     {
-        validateIndex(fromInclusive);
+        validateInclusive(fromInclusive);
+        validateExclusive(toExclusive);
         Invariants.requireArgument(fromInclusive <= toExclusive, "from > to (%s > %s)", fromInclusive, toExclusive);
         if (fromInclusive == toExclusive)
             return;
@@ -75,7 +81,6 @@ public class SmallBitSet implements SimpleBitSet
     @Override
     public boolean get(int i)
     {
-        if (i >= 64) return false;
         long bit = bit(i);
         return 0 != (bits & bit);
     }
@@ -83,7 +88,7 @@ public class SmallBitSet implements SimpleBitSet
     @Override
     public boolean unset(int i)
     {
-        long bit = bitSafe(i);
+        long bit = bit(i);
         boolean result = 0 != (bits & bit);
         bits &= ~bit;
         return result;
@@ -105,7 +110,10 @@ public class SmallBitSet implements SimpleBitSet
     public int nextSetBit(int fromIndex)
     {
         if (fromIndex >= 64)
+        {
+            validateExclusive(fromIndex);
             return -1;
+        }
         long bits = this.bits & bitsEqualOrGreater(fromIndex);
         if (bits == 0)
             return -1;
