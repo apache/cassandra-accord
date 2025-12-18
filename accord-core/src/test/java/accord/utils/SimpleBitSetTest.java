@@ -47,9 +47,7 @@ class SimpleBitSetTest
     private static Property.Command<State, Void, ?> setRange(RandomSource rs, State state)
     {
         int from = rs.nextInt(0, state.size);
-        int to = rs.nextInt(0, state.size + 1);
-        while (from == to)
-            to = rs.nextInt(0, state.size + 1);
+        int to = rs.nextInt(0, state.size + 1); // do not filter from == to as this "must" no-op
         if (from > to)
         {
             int tmp = from;
