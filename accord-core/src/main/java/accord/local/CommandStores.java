@@ -1121,4 +1121,13 @@ public abstract class CommandStores implements AsyncExecutorFactory
     {
         return current;
     }
+
+    public Ranges commandStoresOwnedRanges()
+    {
+        Ranges currentRanges = Ranges.EMPTY;
+        for (ShardHolder shard : current.shards)
+            currentRanges = currentRanges.union(AbstractRanges.UnionMode.MERGE_ADJACENT, shard.ranges.all());
+
+        return currentRanges;
+    }
 }
