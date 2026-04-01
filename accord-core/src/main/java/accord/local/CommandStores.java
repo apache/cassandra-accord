@@ -1122,12 +1122,14 @@ public abstract class CommandStores implements AsyncExecutorFactory
         return current;
     }
 
-    public Ranges commandStoresOwnedRanges()
+    public AsyncResult<List<Ranges>> getInUseRanges()
     {
-        Ranges currentRanges = Ranges.EMPTY;
-        for (ShardHolder shard : current.shards)
-            currentRanges = currentRanges.union(AbstractRanges.UnionMode.MERGE_ADJACENT, shard.ranges.all());
+        List<AsyncResult<Ranges>> results = new ArrayList<>();
+        Snapshot snapshot = current;
+        for (ShardHolder shard : snapshot.shards)
+            results.add(shard.store.submit((PreLoadContext.Empty) () -> "Get not retired ranges",
+                    safeCommandStore -> shard.ranges().notRetired(safeCommandStore)));
 
-        return currentRanges;
+        return AsyncResults.allOf(results);
     }
 }
