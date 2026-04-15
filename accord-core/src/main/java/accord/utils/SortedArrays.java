@@ -1071,13 +1071,10 @@ public class SortedArrays
 
     public static <O, I extends O> O[] linearSubtract(Comparator<? super I> comparator, I[] keep, I[] subtract, ObjectBuffers<O> buffers)
     {
-        return linearSubtract(comparator, keep, 0, keep.length, subtract, 0, subtract.length, buffers);
-    }
-
-    public static <O, I extends O> O[] linearSubtract(Comparator<? super I> comparator, I[] keep, int keepFrom, int keepTo, I[] subtract, int subtractFrom, int subtractTo, ObjectBuffers<O> buffers)
-    {
         O[] result = null;
         int resultSize = 0;
+        int keepFrom = 0, keepTo = keep.length;
+        int subtractFrom = 0, subtractTo = subtract.length;
 
         while (keepFrom < keepTo && subtractFrom < subtractTo)
         {
