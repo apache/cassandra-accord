@@ -1219,7 +1219,7 @@ public abstract class CommandStore implements AbstractAsyncExecutor, SequentialA
         return ImmutableSortedMap.copyOf(build);
     }
 
-    private static ImmutableSortedMap<Timestamp, Ranges> purgeHistory(NavigableMap<Timestamp, Ranges> in, Ranges remove)
+    protected static ImmutableSortedMap<Timestamp, Ranges> purgeHistory(NavigableMap<Timestamp, Ranges> in, Ranges remove)
     {
         return ImmutableSortedMap.copyOf(purgeHistoryIterator(in, remove));
     }
