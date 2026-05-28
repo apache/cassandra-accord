@@ -169,6 +169,8 @@ public class ShardDurability
 
         void markDefunct()
         {
+            if (stopping)
+                return;
             if (!adhoc)
                 logger.info("Marking shard durability scheduler {} for {} defunct", id, shard);
             stopping = true;
