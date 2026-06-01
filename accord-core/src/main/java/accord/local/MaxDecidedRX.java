@@ -231,6 +231,9 @@ public class MaxDecidedRX extends ReducingRangeMap<MaxDecidedRX.DecidedRX>
         @Override
         protected MaxDecidedRX buildInternal()
         {
+            if (values.isEmpty())
+                return EMPTY;
+
             return new MaxDecidedRX(starts.toArray(new RoutingKey[0]), values.toArray(new DecidedRX[0]));
         }
     }

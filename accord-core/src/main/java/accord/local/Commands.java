@@ -668,7 +668,7 @@ public class Commands
 
     public static void postApply(SafeCommandStore safeStore, TxnId txnId, boolean forceApply)
     {
-        SafeCommand safeCommand = safeStore.get(txnId);
+        SafeCommand safeCommand = safeStore.unsafeGet(txnId);
         Command command = safeCommand.current();
         logger.trace("{} applied, setting status to Applied and notifying listeners", command);
         if (command.hasBeen(Applied) && !forceApply)
@@ -745,7 +745,7 @@ public class Commands
         @Override
         public void accept(SafeCommandStore safeStore)
         {
-            SafeCommand safeCommand = safeStore.get(txnId);
+            SafeCommand safeCommand = safeStore.unsafeGet(txnId);
             Command command = safeCommand.current();
             logger.trace("{} applied, setting status to Applied and notifying listeners", command);
             if (command.hasBeen(Applied) && !force)
@@ -783,6 +783,7 @@ public class Commands
         }
         else
         {
+            Invariants.require(command.hasBeen(PreApplied));
             return command.writes()
                           .apply(safeStore, executes, command.partialTxn())
                           .then(head -> new PostApply<>(head, unsafeStore, txnId, executes, false));
@@ -994,7 +995,7 @@ public class Commands
 
     private static void notifyAfterFailedFastApply(SafeCommandStore safeStore, TxnId txnId)
     {
-        SafeCommand safeCommand = safeStore.get(txnId);
+        SafeCommand safeCommand = safeStore.unsafeGet(txnId);
         Command command = safeCommand.current();
         if (command.saveStatus().compareTo(ReadyToExecute) <= 0)
             safeStore.notifyListeners(safeCommand, null);
@@ -1411,7 +1412,7 @@ public class Commands
         // return false if done, true if continuing after loading a dependency
         boolean acceptInternal(SafeCommandStore safeStore)
         {
-            SafeCommand waitingSafe = safeStore.get(waitingId);
+            SafeCommand waitingSafe = safeStore.unsafeGet(waitingId);
             PartialDeps partialDeps;
             {
                 Command waiting = waitingSafe.current();
@@ -1564,7 +1565,7 @@ public class Commands
         static SafeCommand initialiseOrRemoveDependency(SafeCommandStore safeStore, SafeCommand waitingSafe, TxnId depId, Participants<?> executes)
         {
             depId = maybeCleanupRedundantDependency(safeStore, waitingSafe, depId, ignore -> Uninitialised, executes, depId);
-            return depId != null ? safeStore.get(depId) : null;
+            return depId != null ? safeStore.unsafeGet(depId) : null;
         }
 
         // executes is not expected to be stillExecutes, i.e. does not need to remove pre-bootstrap, stale or was-owned+redundant

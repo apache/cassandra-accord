@@ -20,6 +20,7 @@ package accord.local;
 
 import accord.api.AsyncExecutorFactory;
 import accord.api.Result;
+import accord.api.Scheduler;
 import accord.api.Timeouts;
 import accord.coordinate.Coordinations;
 import accord.local.durability.DurabilityService;
@@ -39,10 +40,12 @@ public interface NodeCommandStoreService extends TimeService, UniqueTimeService,
     DurabilityService durability();
     TopologyManager topology();
     Coordinations coordinations();
+    Scheduler scheduler();
     long currentStamp();
     void updateStamp();
     boolean isReplaying();
     void reportLocalExecution(TxnId txnId, Route<?> route, Ballot ballot, Timestamp applyAt, Writes writes, Result result);
+
     default Timestamp uniqueTimestamp()
     {
         return uniqueTimestamp(Timestamp::fromValues);
@@ -64,6 +67,18 @@ public interface NodeCommandStoreService extends TimeService, UniqueTimeService,
     {
         long epoch = Math.max(epoch(), greaterThan.epoch());
         long now = uniqueNow(greaterThan.hlc());
+        return factory.create(epoch, now, 0, id());
+    }
+
+    default Timestamp uniqueStaleTimestamp(Timestamp greaterThan)
+    {
+        return uniqueStaleTimestamp(greaterThan, Timestamp::fromValues);
+    }
+
+    default <T extends Timestamp> T uniqueStaleTimestamp(Timestamp greaterThan, Timestamp.ValueFactory<T> factory)
+    {
+        long epoch = Math.max(epoch(), greaterThan.epoch());
+        long now = uniqueStale(greaterThan.hlc());
         return factory.create(epoch, now, 0, id());
     }
 }

@@ -27,6 +27,9 @@ import javax.annotation.Nullable;
 
 import accord.api.RoutingKey;
 import accord.local.Command;
+import accord.local.CommandStore;
+import accord.local.ExecutionContext;
+import accord.local.LoadKeys;
 import accord.local.RedundantBefore.QuickBounds;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
@@ -38,13 +41,14 @@ import accord.primitives.Routable;
 import accord.primitives.RoutingKeys;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
 import accord.utils.ArrayBuffers;
 import accord.utils.Invariants;
 import accord.utils.SortedArrays;
 import accord.utils.btree.BTree;
 
 import static accord.local.CommandSummaries.SummaryStatus.APPLIED;
-import static accord.local.ExecutionContext.unsequencedWrite;
+import static accord.local.LoadKeys.SYNC;
 import static accord.local.cfk.CommandsForKey.InternalStatus.INVALIDATED;
 import static accord.local.cfk.CommandsForKey.InternalStatus.STABLE;
 import static accord.local.cfk.CommandsForKey.Unmanaged.Pending.APPLY;
@@ -95,16 +99,41 @@ abstract class PostProcess
             for (TxnId txnId : load)
             {
                 safeStore = safeStore; // make it unsafe for use in lambda
+                CommandStore commandStore = safeStore.commandStore();
                 SafeCommand safeCommand = safeStore.ifLoadedAndInitialised(txnId);
                 if (safeCommand != null && safeStore.tryRecurse())
                 {
                     try { load(safeStore, safeCommand, safeCfk, notifySink); }
                     finally { safeStore.unrecurse(); }
                 }
-                else safeStore.commandStore().execute(unsequencedWrite(txnId, RoutingKeys.of(key), "Load Pruned CommandsForKey"), safeStore0 -> {
+                else commandStore.execute(new LoadPrunedCallback(txnId, RoutingKeys.of(key)), safeStore0 -> {
                     load(safeStore0, safeStore0.unsafeGet(txnId), safeStore0.get(key), notifySink);
-                }, safeStore.agent());
+                }, (success, fail) -> {
+                    if (fail != null)
+                        commandStore.agent().onException(new RuntimeException("Failed to load pruned " + txnId + "; may prevent flushing", fail));
+                });
             }
+        }
+
+        // must be unstoppable else we can deadlock on shutdown
+        static class LoadPrunedCallback implements ExecutionContext
+        {
+            final TxnId txnId;
+            final RoutingKeys keys;
+
+            LoadPrunedCallback(TxnId txnId, RoutingKeys keys)
+            {
+                this.txnId = txnId;
+                this.keys = keys;
+            }
+
+            @Override public @Nullable TxnId primaryTxnId() { return txnId; }
+            @Override public Unseekables<?> keys() { return keys; }
+            @Override public LoadKeys loadKeys() { return SYNC; }
+            @Override public ExecutionSequence executionSequence() { return ExecutionSequence.UNSEQUENCED; }
+            @Override public String reason() { return "Load Pruned CommandsForKey"; }
+            @Override public String toString() { return describe(); }
+            @Override public boolean isUnstoppable() { return true; }
         }
 
         static void load(SafeCommandStore safeStore, SafeCommand safeCommand, SafeCommandsForKey safeCfk, NotifySink notifySink)

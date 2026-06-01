@@ -18,6 +18,8 @@
 
 package accord.coordinate;
 
+import org.junit.jupiter.api.Test;
+
 import accord.Utils;
 import accord.api.AsyncExecutor;
 import accord.api.MessageSink;
@@ -39,7 +41,6 @@ import accord.primitives.PartialDeps;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.Routable;
-import accord.primitives.MinimalSyncPoint;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
@@ -47,8 +48,6 @@ import accord.topology.Topology;
 import accord.topology.TopologyUtils;
 import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.async.AsyncChainUtils;
-import org.junit.jupiter.api.Test;
-
 import accord.utils.async.AsyncResult;
 import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
@@ -100,7 +99,7 @@ class CoordinateSyncPointTest
         awaitApplied(n1, removed);
     }
 
-    private static MinimalSyncPoint awaitApplied(Node node, Range removed)
+    private static TxnId awaitApplied(Node node, Range removed)
     {
         var await = CoordinateSyncPoint.exclusive(node, new TxnId(1, node.now(), 0, Txn.Kind.ExclusiveSyncPoint, Routable.Domain.Range, node.id()), Ranges.single(removed))
                                        .flatMap(syncPoint ->
@@ -116,7 +115,7 @@ class CoordinateSyncPointTest
                                                }
                                                ).flatMap(AsyncResult::chain).beginAsResult();
 
-        return AsyncChainUtils.getUnchecked(await).syncPoint;
+        return AsyncChainUtils.getUnchecked(await).syncId;
     }
 
     private static MessageSink happyPathMessaging()

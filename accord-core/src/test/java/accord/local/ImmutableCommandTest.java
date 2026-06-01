@@ -140,7 +140,7 @@ public class ImmutableCommandTest
                 StoreParticipants participants = StoreParticipants.update(safeStore, ROUTE, txnId.epoch(), txnId, txnId.epoch());
                 SafeCommand  safeCommand = safeStore.get(txnId, participants);
                 Commands.preaccept(safeStore, safeCommand, participants, txnId, txn.slice(FULL_RANGES, true), null, false);
-                Command command = safeStore.get(txnId).current();
+                Command command = safeStore.unsafeGet(txnId).current();
                 Assertions.assertEquals(Status.PreAccepted, command.status());
                 Assertions.assertEquals(txnId, command.executeAt());
             }
@@ -178,7 +178,7 @@ public class ImmutableCommandTest
             Commands.preaccept(safeStore, safeStore.get(txnId, participants), participants, txnId, txn.slice(FULL_RANGES, true), null, false);
         }));
         commands.chain(ExecutionContext.unsequenced(txnId, "Test"), safeStore -> {
-            Command command = safeStore.get(txnId).current();
+            Command command = safeStore.unsafeGet(txnId).current();
             Assertions.assertEquals(Status.PreAccepted, command.status());
             Assertions.assertEquals(expectedTimestamp, command.executeAt());
         }).begin(new RethrowAgent());

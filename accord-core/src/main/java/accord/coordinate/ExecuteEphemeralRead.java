@@ -201,7 +201,7 @@ public class ExecuteEphemeralRead extends ReadCoordinator<Result, ReadReply>
         @Override
         public void accept(CommitOrReadNack reply, Throwable failure)
         {
-            if (reply != null && reply.kind == CommitOrReadNack.Kind.Waiting)
+            if (reply == CommitOrReadNack.Waiting)
             {
                 // TODO (expected): share implementation with ExecuteTxn
                 long slowAt = node.agent().selfSlowAt(txnId, READ_EPHEMERAL_REQ, MICROSECONDS);

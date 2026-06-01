@@ -22,26 +22,25 @@ import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import javax.annotation.Nullable;
 
+import accord.api.ExclusiveAsyncExecutor;
 import accord.api.ProtocolModifiers;
 import accord.api.Result;
 import accord.coordinate.ExecuteFlag.CoordinationFlags;
 import accord.coordinate.tracking.PreAcceptExclusiveSyncPointTracker;
 import accord.coordinate.tracking.PreAcceptTracker;
 import accord.local.Node;
-import accord.api.ExclusiveAsyncExecutor;
-import accord.local.durability.DurabilityResult;
 import accord.local.durability.DurabilityLevel;
+import accord.local.durability.DurabilityResult;
 import accord.messages.Accept;
 import accord.messages.Apply;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.FullRangeRoute;
 import accord.primitives.FullRoute;
-import accord.primitives.SyncPoint;
-import accord.primitives.RangeRoute;
+import accord.primitives.Ranges;
 import accord.primitives.Routable;
 import accord.primitives.Route;
-import accord.primitives.MinimalSyncPoint;
+import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
@@ -50,10 +49,10 @@ import accord.topology.ActiveEpochs;
 import accord.topology.Topologies;
 import accord.topology.TopologyException;
 import accord.utils.Invariants;
+import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.UnhandledEnum;
 
 import static accord.api.ProtocolModifiers.QuorumEpochIntersections;
-import static accord.api.ProtocolModifiers.dataStoreRequiresUniqueHlcs;
 import static accord.coordinate.CoordinationAdapter.Factory.Kind.Recovery;
 import static accord.coordinate.ExecuteFlag.HAS_UNIQUE_HLC;
 import static accord.coordinate.ExecutePath.FAST;
@@ -248,10 +247,12 @@ public interface CoordinationAdapter<R>
                 {
                     Topologies all = execution(node, any, route, route, txnId, executeAt);
 
-                    if ((flags.all().contains(HAS_UNIQUE_HLC) || !dataStoreRequiresUniqueHlcs()) && txn.read().keys().isEmpty() && (path != FAST || !txnId.hasPrivilegedCoordinator()))
+                    if (flags.all().contains(HAS_UNIQUE_HLC) && txn.read().keys().isEmpty() && (path != FAST || !txnId.hasPrivilegedCoordinator()))
                     {
                         // TODO (expected): enable this optimisation with privileged coordinator to support faster blind writes
                         //   (only unsafe because we don't guarantee the stable record goes to the coordinator first)
+                        // TODO (expected): for implementations that do not require unique HLCs, we should set a separate flag
+                        //   if we encounter only unapplied single key transactions; this can also be used to set HAS_UNIQUE_HLC in more circumstances
 
                         /*
                           This optimisation is currently safe only because HAS_UNIQUE_HLC implies its dependencies are all applied.
@@ -460,9 +461,9 @@ public interface CoordinationAdapter<R>
                 }
                 if (txnId.is(Routable.Domain.Range))
                 {
-                    MinimalSyncPoint syncPoint = new MinimalSyncPoint(txnId, executeAt, (RangeRoute) route);
-                    node.topology().onEpochClosed(syncPoint.route.toRanges(), syncPoint.syncId);
-                    node.durability().report(new DurabilityResult(syncPoint, DurabilityLevel.NONE, null));
+                    Ranges ranges = route.toRanges();
+                    node.topology().onEpochClosed(ranges, txnId);
+                    node.durability().report(new DurabilityResult(txnId, ranges, DurabilityLevel.NONE, SortedArrayList.empty(), SortedArrayList.empty(), null));
                 }
             }
         }
@@ -482,7 +483,7 @@ public interface CoordinationAdapter<R>
                 if (txnId.is(Routable.Domain.Range))
                 {
                     node.topology().onEpochClosed(syncPoint.route.toRanges(), syncPoint.syncId);
-                    node.durability().report(new DurabilityResult(syncPoint, DurabilityLevel.NONE, null));
+                    node.durability().report(new DurabilityResult(syncPoint, DurabilityLevel.NONE, SortedArrayList.empty(), SortedArrayList.empty(), null));
                 }
             }
         }

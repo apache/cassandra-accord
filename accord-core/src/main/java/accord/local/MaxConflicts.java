@@ -18,6 +18,7 @@
 package accord.local;
 
 import accord.api.RoutingKey;
+import accord.primitives.AbstractRanges;
 import accord.primitives.Routables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -193,9 +194,14 @@ public class MaxConflicts extends BTreeReducingRangeMap<MaxConflicts.Entry>
         return add(this, keysOrRanges, Entry.create(any, write, reject), Entry::reduce, MaxConflicts::new);
     }
 
-    public MaxConflicts with(MaxConflicts that)
+    public MaxConflicts update(MaxConflicts that)
     {
         return merge(this, that, Entry::reduce, MaxConflicts::new);
+    }
+
+    public static MaxConflicts create(AbstractRanges ranges, MaxConflicts.Entry entry)
+    {
+        return create(ranges, entry, MaxConflicts::new);
     }
 
     public static class Builder extends BTreeReducingRangeMap.Builder<Entry, MaxConflicts>

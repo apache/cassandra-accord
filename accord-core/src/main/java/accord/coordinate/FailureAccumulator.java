@@ -40,27 +40,27 @@ public class FailureAccumulator
         return current;
     }
 
-    public static Throwable fail(Agent agent, @Nullable Throwable current, TxnId txnId)
+    public static Throwable fail(Agent agent, @Nullable Throwable current, @Nullable TxnId txnId)
     {
         return fail(agent, current, txnId, (RoutingKey) null);
     }
 
-    public static Throwable fail(Agent agent, @Nullable Throwable current, TxnId txnId, @Nullable Route<?> route)
+    public static Throwable fail(Agent agent, @Nullable Throwable current, @Nullable TxnId txnId, @Nullable Route<?> route)
     {
         RoutingKey homeKey = route == null ? null : route.homeKey();
         return fail(agent, current, txnId, homeKey, null);
     }
 
-    public static Throwable fail(Agent agent, @Nullable Throwable current, TxnId txnId, @Nullable RoutingKey homeKey)
+    public static Throwable fail(Agent agent, @Nullable Throwable current, @Nullable TxnId txnId, @Nullable RoutingKey homeKey)
     {
         return fail(agent, current, txnId, homeKey, null);
     }
 
-    public static Throwable fail(Agent agent, @Nullable Throwable current, TxnId txnId, @Nullable RoutingKey homeKey, @Nullable Ranges unavailable)
+    public static Throwable fail(Agent agent, @Nullable Throwable current, @Nullable TxnId txnId, @Nullable RoutingKey homeKey, @Nullable Ranges unavailable)
     {
         return fail(agent, current, txnId, homeKey, unavailable, null);
     }
-    public static Throwable fail(Agent agent, @Nullable Throwable current, TxnId txnId, @Nullable RoutingKey homeKey, @Nullable Ranges unavailable, @Nullable Collection<Node.Id> failed)
+    public static Throwable fail(Agent agent, @Nullable Throwable current, @Nullable TxnId txnId, @Nullable RoutingKey homeKey, @Nullable Ranges unavailable, @Nullable Collection<Node.Id> failed)
     {
         if (current == null && unavailable == null && failed == null)
             return Timeout.timeout(agent, txnId, homeKey);

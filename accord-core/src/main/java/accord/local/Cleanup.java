@@ -39,14 +39,17 @@ import static accord.local.RedundantStatus.Property.LOCALLY_APPLIED;
 import static accord.local.RedundantStatus.Property.LOCALLY_DEFUNCT;
 import static accord.local.RedundantStatus.Property.LOCALLY_DURABLE_TO_DATA_STORE;
 import static accord.local.RedundantStatus.Property.LOCALLY_REDUNDANT;
+import static accord.local.RedundantStatus.Property.LOG_INCOMPLETE;
 import static accord.local.RedundantStatus.Property.NOT_OWNED;
 import static accord.local.RedundantStatus.Property.LOG_UNAVAILABLE;
 import static accord.local.RedundantStatus.Property.SHARD_APPLIED;
 import static accord.local.RedundantStatus.Property.TRUNCATE_BEFORE;
+import static accord.local.RedundantStatus.Property.UNREADY;
 import static accord.primitives.Known.KnownExecuteAt.ApplyAtKnown;
 import static accord.primitives.Known.KnownRoute.CoveringRoute;
 import static accord.primitives.SaveStatus.Erased;
 import static accord.primitives.SaveStatus.Invalidated;
+import static accord.primitives.SaveStatus.Stable;
 import static accord.primitives.SaveStatus.TruncatedApply;
 import static accord.primitives.SaveStatus.TruncatedApplyWithOutcome;
 import static accord.primitives.SaveStatus.Uninitialised;
@@ -170,7 +173,7 @@ public enum Cleanup
 
         if (participants.hasFullRoute())
             return cleanupWithFullRoute(input, participants, txnId, executeAt, saveStatus, durability, redundantBefore, durableBefore);
-        return cleanupWithoutFullRoute(input, txnId, saveStatus, participants, redundantBefore, durableBefore);
+        return cleanupWithoutFullRoute(input, txnId, saveStatus, participants, redundantBefore);
     }
 
     private static Cleanup cleanupWithFullRoute(Input input, StoreParticipants participants, TxnId txnId, Timestamp executeAt, SaveStatus saveStatus, Durability durability, RedundantBefore redundantBefore, DurableBefore durableBefore)
@@ -182,11 +185,14 @@ public enum Cleanup
         RedundantStatus redundant = redundantBefore.status(txnId, input == FULL && saveStatus.known.is(ApplyAtKnown) ? executeAt : null, route);
         Invariants.require(redundant.none(NOT_OWNED), "Command %s that is being loaded is not owned by this shard on route %s", txnId, route);
 
-        if (redundant.all(LOG_UNAVAILABLE))
-            return logUnavailable(input);
-
         if (redundant.none(LOCALLY_REDUNDANT))
             return NO;
+
+        // we don't currently expunge any partial log based on faults -
+        // we leave this to the normal process to ensure we don't either
+        // 1) lose information we want to retain or 2) imply something we don't want to imply (e.g. TRUNCATED and ERASED imply global durability)
+        if (input == FULL && hasLogFault(redundant, saveStatus))
+            throw logFault(txnId, participants, redundant);
 
         Cleanup min = cleanupIfUndecidedWithFullRoute(input, txnId, saveStatus, redundant);
         if (!redundant.all(TRUNCATE_BEFORE))
@@ -222,35 +228,68 @@ public enum Cleanup
         return truncate(txnId, min);
     }
 
-    private static Cleanup cleanupWithoutFullRoute(Input input, TxnId txnId, SaveStatus saveStatus, StoreParticipants participants, RedundantBefore redundantBefore, DurableBefore durableBefore)
+    /**
+     * Whether a log fault forbids us from using this record.
+     *
+     * LOG_UNAVAILABLE means we treat the log as unreliable. LOG_INCOMPLETE means we may have lost writes
+     * to the log, but what we have is a valid earlier state - so any terminal states (>=Stable) can be used safely
+     *
+     * Since LOG_UNAVAILABLE and LOG_INCOMPLETE may be updated for different ranges at different times,
+     * we require that a record is FULLY defunct before throwing a faulty log exception (not fully covered by
+     * the fault, as it might be the record is partially not owned). Logically, we care that the record
+     * is fully lost|faulty - a record that is partially faulty and partially live is considered fully intact.
+     *
+     * This distinction may not matter, since for a faulty log we must mark the whole log as unreliable below the bounds
+     * at which it is unsafe, and coordinations are entirely refused that overlap those ranges until the bounds have been
+     * decided - whereas to simply catchup a subrange we do not mark the log as unreliable.
+     * However, it is the simplest formulation and logically sound.
+     */
+    private static boolean hasLogFault(RedundantStatus redundant, SaveStatus saveStatus)
+    {
+        return redundant.any(UNREADY) // efficiency - includes both unavailable sources to short-circuit test
+               && redundant.all(LOCALLY_DEFUNCT)  // includes e.g. lost ownership, so that we ignore records we have totally missing from the log via either mechanism
+               && (redundant.any(LOG_UNAVAILABLE)
+                   || (redundant.all(LOG_INCOMPLETE) && saveStatus.compareTo(Stable) < 0));
+    }
+
+    private static Cleanup cleanupWithoutFullRoute(Input input, TxnId txnId, SaveStatus saveStatus, StoreParticipants participants, RedundantBefore redundantBefore)
     {
         // TODO (expected): consider if we can truncate more aggressively partial records, although we cannot infer anything from the fact they're undecided
-        if (input == PARTIAL || saveStatus.hasBeen(Truncated) || saveStatus == Uninitialised)
+        if (input == PARTIAL)
+            return NO;
+
+        // TODO (expected): should check touches only for requests that assemble dependency responses
+        RedundantStatus touchesStatus = redundantBefore.status(txnId, null, participants.touches());
+        if (hasLogFault(touchesStatus, saveStatus))
+            throw logFault(txnId, participants, touchesStatus);
+
+        if (saveStatus.hasBeen(Truncated) || saveStatus == Uninitialised)
             return NO;
 
         Invariants.require(!saveStatus.hasBeen(PreCommitted));
         boolean isCovering = saveStatus.known.route() == CoveringRoute || txnId.compareTo(redundantBefore.minShardAndLocallyAppliedBefore()) <= 0;
 
-        if (isCovering && txnId.isSyncPoint() && participants.owns().isEmpty())
+        if (isCovering && txnId.isSyncPoint() && participants.owns().isEmpty() && touchesStatus.all(SHARD_APPLIED, LOCALLY_REDUNDANT))
         {
-            RedundantStatus redundant = redundantBefore.status(txnId, null, participants.touches());
-            if (redundant.all(LOG_UNAVAILABLE))
-                return logUnavailable(input);
-            if (redundant.all(SHARD_APPLIED, LOCALLY_REDUNDANT))
-                return vestigial(txnId);
+            // TODO (required): derive and document the reason for this logic (presumably related to how sync points interact with ranges we used to own)
+            return vestigial(txnId);
         }
 
         RedundantStatus ownStatus = redundantBefore.status(txnId, null, participants.owns());
-        if (ownStatus.all(LOG_UNAVAILABLE))
-            return logUnavailable(input);
+        if (hasLogFault(ownStatus, saveStatus))
+            throw logFault(txnId, participants, ownStatus);
         return cleanupUndecided(txnId, ownStatus, isCovering);
     }
 
-    private static Cleanup logUnavailable(Input input)
+    /**
+     * We have nothing left to answer for and may not trust what we hold, so a FULL read refuses.  Note that
+     * this is only reachable for FULL: {@code cleanupWithoutFullRoute} returns NO for PARTIAL before either
+     * of its call sites, and {@code cleanupWithFullRoute} tests {@code input == FULL} explicitly - a log
+     * fault never rewrites the log.
+     */
+    private static LogFaultException logFault(TxnId txnId, StoreParticipants participants, RedundantStatus redundant)
     {
-        if (input == FULL)
-            throw new LogUnavailableException();
-        return ERASE;
+        return new LogFaultException(txnId + ": " + participants + ' ' + redundant);
     }
 
     private static Cleanup cleanupIfUndecidedWithFullRoute(Input input, TxnId txnId, SaveStatus saveStatus, RedundantStatus redundant)

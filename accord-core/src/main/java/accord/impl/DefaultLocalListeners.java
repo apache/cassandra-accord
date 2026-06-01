@@ -580,10 +580,8 @@ public class DefaultLocalListeners implements LocalListeners
             if (listeners != null)
             {
                 if (Invariants.isParanoid()) listeners.checkIntegrity();
-                // On removal listeners contains nulls, so skip
-                for (int i = 0 ; i < listeners.length ; i++)
+                for (RegisteredComplexListener l : listeners.listeners)
                 {
-                    RegisteredComplexListener l = listeners.listeners[i];
                     if (l != null)
                         l.index = -1;
                 }

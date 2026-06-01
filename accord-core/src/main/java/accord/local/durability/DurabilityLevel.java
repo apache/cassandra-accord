@@ -24,31 +24,40 @@ import javax.annotation.Nullable;
 import accord.local.Node;
 import accord.local.durability.DurabilityService.SyncLocal;
 import accord.local.durability.DurabilityService.SyncRemote;
+import accord.local.durability.DurabilityService.SyncReadable;
 import accord.utils.SortedArrays.SortedArrayList;
 
 import static accord.local.durability.DurabilityService.SyncLocal.NoLocal;
+import static accord.local.durability.DurabilityService.SyncReadable.UnknownReadable;
 import static accord.local.durability.DurabilityService.SyncRemote.NoRemote;
+import static accord.utils.Invariants.nonNull;
+import static accord.utils.SortedArrays.SortedArrayList.intersection;
+import static accord.utils.SortedArrays.SortedArrayList.union;
 
 public class DurabilityLevel
 {
-    public static final DurabilityLevel NONE = new DurabilityLevel(NoLocal, NoRemote, null, null);
+    public static final DurabilityLevel NONE = new DurabilityLevel(NoLocal, NoRemote, UnknownReadable, null);
 
     public final SyncLocal local;
     public final SyncRemote remote;
+    public final SyncReadable readable;
     public final @Nullable SortedArrayList<Node.Id> including;
     public final @Nullable SortedArrayList<Node.Id> excluding;
+    public final @Nullable SortedArrayList<Node.Id> ineligible;
 
-    public DurabilityLevel(SyncLocal local, SyncRemote remote, @Nullable SortedArrayList<Node.Id> including)
+    public DurabilityLevel(SyncLocal local, SyncRemote remote, SyncReadable readable, @Nullable SortedArrayList<Node.Id> including)
     {
-        this(local, remote, including, null);
+        this(local, remote, readable, including, null, null);
     }
 
-    public DurabilityLevel(SyncLocal local, SyncRemote remote, @Nullable SortedArrayList<Node.Id> including, @Nullable SortedArrayList<Node.Id> excluding)
+    public DurabilityLevel(SyncLocal local, SyncRemote remote, SyncReadable readable, @Nullable SortedArrayList<Node.Id> including, @Nullable SortedArrayList<Node.Id> excluding, @Nullable SortedArrayList<Node.Id> ineligible)
     {
-        this.local = local;
-        this.remote = remote;
+        this.local = nonNull(local);
+        this.remote = nonNull(remote);
+        this.readable = nonNull(readable);
         this.including = including;
         this.excluding = excluding;
+        this.ineligible = ineligible;
     }
 
     public boolean equals(Object that)
@@ -67,11 +76,13 @@ public class DurabilityLevel
     @Override
     public String toString()
     {
-        return "{" +
+        return '{' +
                "local=" + local +
                ", remote=" + remote +
+               ", readable=" + readable +
                ", including=" + including +
                ", excluding=" + excluding +
+               ", ineligible=" + ineligible +
                '}';
     }
 
@@ -79,42 +90,28 @@ public class DurabilityLevel
     {
         SyncLocal local = min(a.local, b.local);
         SyncRemote remote = min(a.remote, b.remote);
+        SyncReadable readable = min(a.readable, b.readable);
         SortedArrayList<Node.Id> including = union(a.including, b.including);
         SortedArrayList<Node.Id> excluding = union(a.excluding, b.excluding);
         if (including != null && excluding != null)
             including = including.without(excluding);
-        return new DurabilityLevel(local, remote, including, excluding);
+        SortedArrayList<Node.Id> ineligible = intersection(a.ineligible, b.ineligible);
+        return new DurabilityLevel(local, remote, readable, including, excluding, ineligible);
     }
 
     public static DurabilityLevel max(DurabilityLevel a, DurabilityLevel b)
     {
         SyncLocal local = max(a.local, b.local);
         SyncRemote remote = max(a.remote, b.remote);
+        SyncReadable readable = max(a.readable, b.readable);
         SortedArrayList<Node.Id> including = union(a.including, b.including);
-        SortedArrayList<Node.Id> excluding = subtract(a.excluding, b.excluding);
+        SortedArrayList<Node.Id> excluding = union(a.excluding, b.excluding);
         if (including != null && excluding != null)
-            including = including.without(excluding);
-        return new DurabilityLevel(local, remote, including, excluding);
-    }
-
-    private static SortedArrayList<Node.Id> union(SortedArrayList<Node.Id> a, SortedArrayList<Node.Id> b)
-    {
-        if (a == null || b == null)
-        {
-            if (a == null && b == null)
-                return null;
-            return a == null ? b : a;
-        }
-        return a.with(b);
-    }
-
-    private static SortedArrayList<Node.Id> subtract(SortedArrayList<Node.Id> a, SortedArrayList<Node.Id> b)
-    {
-        if (a == null)
-            return null;
-        if (b == null)
-            return a;
-        return a.without(b);
+            excluding = excluding.without(including);
+        // for ineligibility we always take the weakest answer on merge, even for max,
+        // since e.g. stale nodes may be marked unstale in a later epoch and no longer be ineligible for the new bound
+        SortedArrayList<Node.Id> ineligible = intersection(a.ineligible, b.ineligible);
+        return new DurabilityLevel(local, remote, readable, including, excluding, ineligible);
     }
 
     private static <E extends Enum<E>> E min(E a, E b)
@@ -127,14 +124,18 @@ public class DurabilityLevel
         return a.compareTo(b) >= 0 ? a : b;
     }
 
-    public boolean isSatisfiedBy(DurabilityLevel satisfies)
+    public boolean isSatisfiedBy(DurabilityLevel test)
     {
-        if (satisfies.local.compareTo(local) < 0 || satisfies.remote.compareTo(remote) < 0)
+        if (test.local.compareTo(local) < 0 || test.readable.compareTo(readable) < 0)
             return false;
 
-        if (including == null)
-            return true;
+        // if we have included all eligible nodes then we satisfy remote criteria even if quorum calculation is insufficient
+        // this is to handle cases of bootstrapping a new node during a period of availability loss
+        // (where the new node is ineligible to participate in the quorum)
+        if (test.remote.compareTo(remote) < 0
+            && (ineligible == null || test.excluding == null || !union(ineligible, test.ineligible).containsAll(test.excluding)))
+                return false;
 
-        return satisfies.including != null && satisfies.including.containsAll(including);
+        return including == null || (test.including != null && test.including.containsAll(including));
     }
 }

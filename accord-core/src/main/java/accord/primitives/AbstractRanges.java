@@ -468,7 +468,8 @@ public abstract class AbstractRanges implements Iterable<Range>, Routables<Range
         }
         catch (Throwable t)
         {
-            cachedRanges.forceDiscard(buffer, bufferCount);
+            if (buffer != null)
+                cachedRanges.forceDiscard(buffer, bufferCount);
             throw t;
         }
     }

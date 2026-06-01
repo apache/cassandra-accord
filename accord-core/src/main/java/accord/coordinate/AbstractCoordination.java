@@ -201,7 +201,6 @@ public abstract class AbstractCoordination<P extends Participants<?>, Result, Re
             unsafeToReply = true;
             try
             {
-
                 AbstractTracker<?> tracker = tracker();
                 Topologies topologies = tracker.topologies();
                 if (tracing != null)
@@ -228,7 +227,7 @@ public abstract class AbstractCoordination<P extends Participants<?>, Result, Re
                             expectingReply.set(i);
                             // TODO (expected): do not cancel PreAccept, Accept, Commit, Stable or Apply to self on done
                             replyState[i] = node.send(to, request.apply(to), executor, this, tracing);
-                            Invariants.require(expectingReply.get(i) || replyState[i] == null);
+                            Invariants.require(expectingReply.get(i));
                         }
                     }
                 }
@@ -414,6 +413,11 @@ public abstract class AbstractCoordination<P extends Participants<?>, Result, Re
                 replies[i] = null;
         }
         return new SortedListMap<>(nodes, replies, replyCount);
+    }
+
+    public int inflightCount()
+    {
+        return expectingReply.getSetBitCount();
     }
 
     @Override

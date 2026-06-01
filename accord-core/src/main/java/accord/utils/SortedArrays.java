@@ -54,11 +54,26 @@ public class SortedArrays
 
     public static class SortedArrayList<T extends Comparable<? super T>> extends AbstractList<T> implements SortedList<T>
     {
+        private static final SortedArrayList EMPTY = new SortedArrayList(new Comparable[0]);
+
         final T[] array;
         public SortedArrayList(T[] array)
         {
             // implicitly checks entries are non-null
             this.array = Invariants.requireArgument(array, SortedArrays::isSortedUnique);
+        }
+
+        public static <T extends Comparable<? super T>> SortedArrayList<T> of(SortedList<T> list, IntFunction<T[]> allocator)
+        {
+            if (list instanceof SortedArrayList<?>)
+                return (SortedArrayList<T>) list;
+
+            return copySorted(list, allocator);
+        }
+
+        public static <T extends Comparable<? super T>> SortedArrayList<T> empty()
+        {
+            return EMPTY;
         }
 
         public static <T extends Comparable<? super T>> SortedArrayList<T> ofSorted(T ... items)
@@ -206,6 +221,20 @@ public class SortedArrays
         {
             T[] array = SortedArrays.linearIntersection(this.array, this.array.length, with.array, with.array.length, Comparable::compareTo, ArrayBuffers.uncached(this.array));
             return array == this.array ? this : array == with.array ? with : new SortedArrayList<>(array);
+        }
+
+        public static <T extends Comparable<T>> SortedArrayList<T> union(@Nullable SortedArrayList<T> a, @Nullable SortedArrayList<T> b)
+        {
+            if (a == null || b == null)
+                return a == null ? b : a;
+            return a.with(b);
+        }
+
+        public static <T extends Comparable<T>> SortedArrayList<T> intersection(@Nullable SortedArrayList<T> a, @Nullable SortedArrayList<T> b)
+        {
+            if (a == null || b == null)
+                return null;
+            return a.intersecting(b);
         }
 
         public SortedArrayList<T> without(Predicate<T> remove)

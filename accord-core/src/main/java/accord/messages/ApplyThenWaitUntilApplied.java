@@ -64,12 +64,10 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     }
 
     public final FullRoute<?> route;
-    private PartialTxn txn;
     private PartialDeps deps;
     private Writes writes;
     private PersistableResult result;
 
-    public PartialTxn   txn() { return txn; }
     public PartialDeps deps() { return deps; }
     public Writes    writes() { return writes; }
     public Result    result() { return result; }
@@ -84,7 +82,7 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
         super(to, topologies, txnId, readScope, executeAt, executeAtEpoch);
         Route<?> scope = computeScope(to, topologies, route);
         this.route = route;
-        this.txn = txn.intersecting(scope, true);
+        this.partialTxn = txn.intersecting(scope, true);
         this.deps = deps.intersecting(scope);
         this.writes = writes;
         this.result = result;
@@ -94,7 +92,7 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     {
         super(txnId, readScope, minEpoch, executeAt, executeAt.epoch());
         this.route = route;
-        this.txn = txn;
+        this.partialTxn = txn;
         this.deps = deps;
         this.writes = writes;
         this.result = result;
@@ -109,7 +107,7 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     @Override
     public CommitOrReadNack applyInternal(SafeCommandStore safeStore)
     {
-        PartialTxn txn = this.txn;
+        PartialTxn txn = this.partialTxn;
         PartialDeps deps = this.deps;
         Writes writes = this.writes;
         PersistableResult result = this.result;
@@ -141,7 +139,6 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     public void accept(CommitOrReadNack reply, Throwable failure)
     {
         super.accept(reply, failure);
-        txn = null;
         deps = null;
         writes = null;
         result = null;

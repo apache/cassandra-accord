@@ -80,15 +80,19 @@ public abstract class NoWaitRequest<P extends Participants<?>, R extends Reply> 
     @Override
     public final Cancellable process(Node on, Node.Id replyTo, ReplyContext replyContext)
     {
-        if (tracing() != null)
-            tracing().trace(null, "Submitting");
-        this.node = on;
         this.replyTo = replyTo;
         this.replyContext = replyContext;
+        return process(on, replyContext.expiresAt(MICROSECONDS));
+    }
+
+    public final Cancellable process(Node on, long expiresAt)
+    {
+        this.node = on;
+        if (tracing() != null)
+            tracing().trace(null, "Submitting");
         Cancellable cancel = submit();
         if (cancel != null)
         {
-            long expiresAt = replyContext.expiresAt(MICROSECONDS);
             if (expiresAt > 0)
             {
                 RegisteredTimeout timeout = node.timeouts().registerAt(this, expiresAt, MICROSECONDS);

@@ -36,6 +36,8 @@ import accord.api.ProtocolModifiers;
 import accord.api.RoutingKey;
 import accord.local.CommandStores.RangesForEpoch;
 import accord.local.CommandStores.RangesForEpochSupplier;
+import accord.local.ExecutionContext.Empty;
+import accord.local.MapReduceCommandStores.Refuse;
 import accord.local.RedundantBefore.RedundantBeforeSupplier;
 import accord.local.cfk.CommandsForKey;
 import accord.local.cfk.SafeCommandsForKey;
@@ -53,19 +55,24 @@ import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 import accord.utils.Invariants;
-import accord.utils.Reduce;
 import accord.utils.LargeBitSet;
+import accord.utils.Reduce;
+import accord.utils.ReducingRangeMap;
 import accord.utils.SortedList;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 
+import static accord.local.CommandStore.purgeHistory;
+import static accord.local.ExecutionContext.unsequenced;
 import static accord.local.ExecutionContext.unsequencedIdempotentIncrementalWrite;
 import static accord.local.LoadKeys.INCR;
 import static accord.local.LoadKeys.NONE;
 import static accord.local.RedundantStatus.Property.LOCALLY_APPLIED;
-import static accord.local.RedundantStatus.SomeStatus.LOCALLY_WITNESSED_ONLY;
 import static accord.local.RedundantStatus.Property.LOCALLY_REDUNDANT;
+import static accord.local.RedundantStatus.Property.LOG_INCOMPLETE;
+import static accord.local.RedundantStatus.Property.LOG_UNAVAILABLE;
 import static accord.local.RedundantStatus.Property.SHARD_APPLIED;
+import static accord.local.RedundantStatus.SomeStatus.LOCALLY_WITNESSED_ONLY;
 import static accord.local.cfk.UpdateUnmanagedMode.REGISTER;
 import static accord.primitives.Known.KnownRoute.MaybeRoute;
 import static accord.primitives.Routable.Domain.Range;
@@ -104,27 +111,21 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
         ++reentrancyCounter;
         return true;
     }
+
     public void unrecurse()
     {
         --reentrancyCounter;
         Invariants.require(reentrancyCounter >= 0);
     }
 
-    public final boolean refusesAnyOf(Participants<?> participants)
+    public final Refuse.MinMax refuses(Participants<?> participants)
     {
-        Ranges refuses = commandStore().refuses;
-        return refuses != null && participants.intersects(refuses);
-    }
-
-    public final boolean refusesAllOwnedOf(Participants<?> participants)
-    {
-        Ranges refuses = commandStore().refuses;
+        ReducingRangeMap<Refuse> refuses = commandStore().refuses;
         if (refuses == null)
-            return false;
+            return Refuse.MinMax.NONE_NONE;
 
-        // TODO (required): memoize this, and expose it as a standard method as we want it elsewhere
-        Ranges notRetired = redundantBefore().removeLocallyRetired(ranges().all());
-        return refuses.containsAll(participants.slice(notRetired, Minimal));
+        Unseekables<?> notRetired = redundantBefore().removeLocallyRetired(participants);
+        return refuses.foldlWithDefault(notRetired, (r, a) -> a == null ? r.asMinMax() : a.merge(r.asMinMax()), Refuse.NONE, null);
     }
 
     /**
@@ -174,7 +175,9 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
         return maybeCleanup(safeCommand, participants);
     }
 
-    protected SafeCommand get(TxnId txnId)
+    // unsafe because we pass no scope, so we rely on the command already existing and having valid scope(s) for the operations in question
+    // should only be used for internal bookkeeping
+    public SafeCommand unsafeGet(TxnId txnId)
     {
         SafeCommand safeCommand = getInternal(txnId);
         if (safeCommand == null)
@@ -183,11 +186,7 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
         return maybeCleanup(safeCommand);
     }
 
-    public SafeCommand unsafeGet(TxnId txnId)
-    {
-        return get(txnId);
-    }
-
+    // performs no cleanup and throws no log faults - to be used for debugging, and internal bookkeeping that must not fail
     public SafeCommand unsafeGetNoCleanup(TxnId txnId)
     {
         return getInternal(txnId);
@@ -460,7 +459,7 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
     private static void updateManagedCommandsForKey(SafeCommandStore safeStore, Unseekables<?> update, TxnId txnId, boolean forceNotify)
     {
         // TODO (expected): avoid reentrancy / recursion
-        SafeCommand safeCommand = safeStore.get(txnId);
+        SafeCommand safeCommand = safeStore.unsafeGet(txnId);
         for (RoutingKey key : (AbstractUnseekableKeys)update)
         {
             // we use callback and re-fetch current to guard against reentrancy causing
@@ -535,7 +534,7 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
             CommandStore unsafeStore = safeStore.commandStore();
             AsyncChain<Void> submit = unsafeStore.chain(context, safeStore0 -> { updateUnmanagedCommandsForKey(safeStore0, safeStore0.context().keys() , txnId, mode); });
             if (registerTransitive != null)
-                submit = submit.flatMap(success -> unsafeStore.chain(ExecutionContext.unsequenced(txnId, "Register Transitive Dependencies"), registerTransitive));
+                submit = submit.flatMap(success -> unsafeStore.chain(unsequenced(txnId, "Register Transitive Dependencies"), registerTransitive));
             submit.begin(safeStore.commandStore().agent);
         }
     }
@@ -581,7 +580,7 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
 
     private static void updateUnmanagedCommandsForKey(SafeCommandStore safeStore, Unseekables<?> update, TxnId txnId, UpdateUnmanagedMode mode)
     {
-        SafeCommand safeCommand = safeStore.get(txnId);
+        SafeCommand safeCommand = safeStore.unsafeGet(txnId);
         for (RoutingKey key : (AbstractUnseekableKeys)update)
         {
             safeStore.get(key).registerUnmanaged(safeStore, safeCommand, mode);
@@ -598,14 +597,31 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
         if (waitingOn.isEmpty())
             return null;
 
+        logger.debug("{}: initiating mark visible of {} with {}", commandStore, waitingOn, syncId);
         commandStore.markingVisible(syncId, waitingOn);
         return safeStore -> {
+            logger.debug("{}: registering dependencies of {} to mark visible {}", commandStore, waitingOn, syncId);
             List<AsyncChain<Void>> async = new ArrayList<>();
             RangeDeps rangeDeps = syncCommand.partialDeps().rangeDeps;
+            RedundantBefore redundantBefore = safeStore.redundantBefore();
+            TxnId checkLog = redundantBefore.foldl(waitingOn, (b, id) -> TxnId.max(TxnId.max(id, b.maxBound(LOG_UNAVAILABLE)), b.maxBound(LOG_INCOMPLETE)), TxnId.NONE);
             rangeDeps.forEachUniqueTxnId(waitingOn, null, (ignore, txnIdWithFlags) -> {
                 TxnId txnId = txnIdWithFlags.withoutNonIdentityFlags();
-                ExecutionContext context = ExecutionContext.unsequenced(txnId, "Register Transitive Range Deps");
-                Ranges ranges = rangeDeps.ranges(txnId);
+                ExecutionContext context = unsequenced(txnId, "Register Transitive Range Deps");
+
+                Ranges ranges; {
+                    Ranges tmp = rangeDeps.ranges(txnId).slice(waitingOn, Minimal);
+                    tmp = tmp.slice(safeStore.ranges().allSince(txnId.epoch()), Minimal); // never coordinated, no need to replicate for dependency or recovery calculations
+                    if (checkLog.compareTo(txnId) >= 0)
+                        tmp = redundantBefore.removeLogUnavailableOrIncomplete(txnId, tmp);
+
+                    // TODO (required): if we only part-filter we're still going to have problems, as we won't be able to update the transaction
+                    ranges = tmp;
+                }
+
+                if (ranges.isEmpty())
+                    return;
+
                 if (safeStore.canExecuteWith(context)) registerTransitive(safeStore, txnId, ranges);
                 else async.add(safeStore.commandStore().chain(context, safeStore0 -> {
                     registerTransitive(safeStore0, txnId, ranges);
@@ -614,11 +630,15 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
 
             AsyncChains.reduce(async, Reduce.toNull(), null)
                        .begin((success, fail) -> {
-                           if (fail == null) commandStore.execute((ExecutionContext.Empty)() -> "Mark Synced", (Consumer<? super SafeCommandStore>) safeStore0 -> commandStore.markVisible(safeStore0, syncId, waitingOn), commandStore.agent());
+                           if (fail == null)
+                           {
+                               logger.debug("{}: registered dependencies of {}; marking visible {}", commandStore, waitingOn, syncId);
+                               commandStore.execute((Empty)() -> "Mark Visible", (Consumer<? super SafeCommandStore>) safeStore0 -> commandStore.markVisible(safeStore0, syncId, waitingOn), commandStore.agent());
+                           }
                            else
                            {
-                               // TODO (required): reset ensureReadyToCoordinate state
-                               commandStore.execute((ExecutionContext.Empty)() -> "Unmark Syncing", (Consumer<? super SafeCommandStore>) safeStore0 -> commandStore.cancelMarkingVisible(syncId, waitingOn), commandStore.agent);
+                               logger.error("Failed to register transitive dependencies of {} for {}", syncId, waitingOn, fail);
+                               commandStore.execute((Empty)() -> "Cancel Marking Visible", (Consumer<? super SafeCommandStore>) safeStore0 -> commandStore.cancelMarkingVisible(syncId, waitingOn), commandStore.agent);
                            }
                        });
         };
@@ -627,20 +647,14 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
     private static void registerTransitive(SafeCommandStore safeStore, TxnId txnId, Ranges witnessedBy)
     {
         SafeCommand safeCommand = safeStore.unsafeGet(txnId);
-        if (safeCommand != null && safeCommand.current().known().route() != MaybeRoute)
+        Command command = safeCommand.current();
+        if (command.known().route() != MaybeRoute)
             return;
 
-        RangesForEpoch rangesForEpoch = safeStore.ranges();
-        // TODO (required): this is incompatible with rebootstrap - we need to use some additional condition
-        witnessedBy = witnessedBy.without(rangesForEpoch.coordinates(txnId));  // already coordinates, no need to replicate
-        if (witnessedBy.isEmpty())
+        if (command.participants().touches().containsAll(witnessedBy))
             return;
 
-        witnessedBy = witnessedBy.slice(rangesForEpoch.allSince(txnId.epoch()), Minimal); // never coordinated, no need to replicate for dependency or recovery calculations
-        if (witnessedBy.isEmpty())
-            return;
-
-        safeCommand.updateParticipants(safeStore, safeCommand.current().participants().supplement(null, witnessedBy));
+        safeCommand.updateParticipants(safeStore, command.participants().supplement(null, witnessedBy));
     }
 
     /**
@@ -677,6 +691,11 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
     public void setPermanentlyUnsafeToRead(Ranges newPermanentlyUnsafeToRead)
     {
         commandStore().unsafeSetPermanentlyUnsafeToRead(newPermanentlyUnsafeToRead);
+    }
+
+    public void markUnsafeToRead(Ranges ranges)
+    {
+        setSafeToRead(purgeHistory(safeToReadAt(), ranges));
     }
 
     public void setRangesForEpoch(CommandStores.RangesForEpoch rangesForEpoch)

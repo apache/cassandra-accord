@@ -24,13 +24,69 @@ import accord.api.Tracing;
 import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Unseekables;
+import accord.utils.Invariants;
 import accord.utils.MapReduce;
 import accord.utils.async.AsyncChain;
 
+import static accord.local.MapReduceCommandStores.Refuse.ALL;
 import static accord.primitives.Routables.Slice.Minimal;
 
 public abstract class MapReduceCommandStores<P extends Participants<?>, O> implements ExecutionContext, MapReduce<SafeCommandStore, O>
 {
+    public enum Refuse
+    {
+        NONE, DEPS, ALL;
+
+        public enum MinMax
+        {
+            NONE_NONE(NONE, NONE), NONE_DEPS(NONE, DEPS), NONE_ALL(NONE, ALL),
+            DEPS_DEPS(DEPS, DEPS), DEPS_ALL(DEPS, ALL),
+            ALL_ALL(ALL, ALL);
+
+            static final MinMax[] VALUES = values();
+            static final MinMax[] EQUAL = new MinMax[] { NONE_NONE, DEPS_DEPS, ALL_ALL };
+
+            public final Refuse min, max;
+
+            MinMax(Refuse min, Refuse max)
+            {
+                this.min = min;
+                this.max = max;
+            }
+
+            static MinMax get(Refuse min, Refuse max)
+            {
+                if (min == max)
+                    return EQUAL[min.ordinal()];
+
+                Invariants.require(min.compareTo(max) < 0);
+                return VALUES[max.ordinal() + (min.ordinal() << 1)];
+            }
+
+            public MinMax merge(MinMax that)
+            {
+                Refuse min = this.min.min(that.min);
+                Refuse max = this.max.max(that.max);
+                return get(min, max);
+            }
+        }
+
+        public MinMax asMinMax()
+        {
+            return MinMax.EQUAL[ordinal()];
+        }
+
+        public Refuse min(Refuse that)
+        {
+            return this.compareTo(that) <= 0 ? this : that;
+        }
+
+        public Refuse max(Refuse that)
+        {
+            return this.compareTo(that) >= 0 ? this : that;
+        }
+    }
+
     public final P scope;
     private Tracing tracing;
 
@@ -41,7 +97,8 @@ public abstract class MapReduceCommandStores<P extends Participants<?>, O> imple
 
     public final O apply(SafeCommandStore safeStore)
     {
-        if (refuses(safeStore))
+        Refuse.MinMax refuses = safeStore.refuses(scope);
+        if (refuses != Refuse.MinMax.NONE_NONE && abort(refuses))
         {
             if (tracing != null)
                 tracing.trace(safeStore.commandStore(), "Refused");
@@ -63,20 +120,14 @@ public abstract class MapReduceCommandStores<P extends Participants<?>, O> imple
         return commandStore.chain(slice(ranges, Minimal), this);
     }
 
-    protected boolean supportsPartialRefusal()
+    protected boolean abort(Refuse.MinMax refuses)
     {
-        return false;
-    }
-
-    private boolean refuses(SafeCommandStore safeStore)
-    {
-        if (supportsPartialRefusal()) return safeStore.refusesAllOwnedOf(scope);
-        else return safeStore.refusesAnyOf(scope);
+        return refuses.max == ALL;
     }
 
     protected O refuseInternal(SafeCommandStore safeStore)
     {
-        throw new LogUnavailableException();
+        throw new LogFaultException(toString());
     }
 
     protected abstract O applyInternal(SafeCommandStore safeStore);

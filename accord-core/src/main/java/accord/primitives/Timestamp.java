@@ -292,6 +292,11 @@ public class Timestamp implements Comparable<Timestamp>, EpochSupplier
         return removeFlags(this, NON_IDENTITY_FLAGS, Timestamp::fromBits);
     }
 
+    public Timestamp withoutFlags()
+    {
+        return removeFlags(this, MAX_FLAGS, Timestamp::fromBits);
+    }
+
     public final Timestamp addFlags(Timestamp merge)
     {
         return addFlags(this, merge, Timestamp::new);

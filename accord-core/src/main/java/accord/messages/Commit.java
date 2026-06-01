@@ -378,9 +378,9 @@ public class Commit extends RouteRequest.WithUnsynced<CommitOrReadNack>
         }
 
         @Override
-        protected boolean supportsPartialRefusal()
+        protected boolean abort(Refuse.MinMax refuses)
         {
-            return true;
+            return refuses.min == Refuse.ALL;
         }
 
         @Override

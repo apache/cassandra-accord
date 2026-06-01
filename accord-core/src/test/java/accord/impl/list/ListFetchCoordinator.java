@@ -19,7 +19,6 @@
 package accord.impl.list;
 
 import java.util.function.Function;
-
 import javax.annotation.Nullable;
 
 import accord.api.Data;
@@ -30,31 +29,21 @@ import accord.local.CommandStore;
 import accord.local.ExecutionContext.Empty;
 import accord.local.Node;
 import accord.local.SafeCommandStore;
-import accord.primitives.SyncPoint;
-import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
-import accord.primitives.Participants;
 import accord.primitives.Ranges;
-import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.TopologyException;
-import accord.utils.async.AsyncChain;
+import accord.utils.SortedArrays;
 
 public class ListFetchCoordinator extends AbstractFetchCoordinator
 {
     private final ListStore listStore;
 
-    public ListFetchCoordinator(Node node, Ranges ranges, SyncPoint syncPoint, DataStore.FetchRanges fetchRanges, CommandStore commandStore, ListStore listStore) throws TopologyException
+    public ListFetchCoordinator(Node node, TxnId atLeast, Ranges ranges, SortedArrays.SortedArrayList<Node.Id> readable, DataStore.FetchRanges fetchRanges, CommandStore commandStore, ListStore listStore) throws TopologyException
     {
-        super(node, node.someExclusiveExecutor(), ranges, syncPoint, fetchRanges, commandStore);
+        super(node, node.someExclusiveExecutor(), ranges, atLeast, readable, fetchRanges, commandStore);
         this.listStore = listStore;
-    }
-
-    @Override
-    protected PartialTxn rangeReadTxn(Ranges ranges)
-    {
-        return new PartialTxn.InMemory(Txn.Kind.Read, ranges, new ListRead(Function.identity(), false, ranges, ranges), new ListQuery(Node.Id.NONE, Long.MIN_VALUE, false), null);
     }
 
     @Override
@@ -65,7 +54,7 @@ public class ListFetchCoordinator extends AbstractFetchCoordinator
 
         ListData listData = (ListData) data;
         persisting.add(commandStore.chain((Empty) () -> "List Fetch", safeStore -> {
-            listData.forEach((key, value) -> listStore.writeUnsafe(key, value));
+            listData.forEach(listStore::writeUnsafe);
         }).flatMapResult(ignore -> listStore.snapshot(true)).invoke((success, fail) -> {
             if (fail == null) success(from, received);
             else fail(from, received, fail);
@@ -73,9 +62,14 @@ public class ListFetchCoordinator extends AbstractFetchCoordinator
     }
 
     @Override
-    protected ListFetchRequest newFetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn)
+    protected AbstractFetchCoordinator.FetchRequest newFetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges)
     {
-        return new ListFetchRequest(sourceEpoch, syncId, ranges, partialDeps, partialTxn);
+        return new ListFetchRequest(sourceEpoch, syncId, ranges, rangeReadTxn(ranges));
+    }
+
+    private PartialTxn rangeReadTxn(Ranges ranges)
+    {
+        return new PartialTxn.InMemory(Txn.Kind.Read, ranges, new ListRead(Function.identity(), false, ranges, ranges), new ListQuery(Node.Id.NONE, Long.MIN_VALUE, false), null);
     }
 
     @Nullable
@@ -87,16 +81,9 @@ public class ListFetchCoordinator extends AbstractFetchCoordinator
 
     static class ListFetchRequest extends FetchRequest
     {
-        public ListFetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn)
+        public ListFetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialTxn partialTxn)
         {
-            super(sourceEpoch, syncId, ranges, partialDeps, partialTxn);
-        }
-
-        @Override
-        protected AsyncChain<Data> beginRead(SafeCommandStore safeStore, Timestamp executeAt, PartialTxn txn, Participants<?> executes)
-        {
-            readStarted(safeStore);
-            return super.beginRead(safeStore, executeAt, txn, executes);
+            super(sourceEpoch, syncId, ranges, partialTxn);
         }
     }
 }

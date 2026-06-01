@@ -496,6 +496,12 @@ public class Node implements NodeCommandStoreService
     }
 
     @Override
+    public long uniqueStaleReserved(long greaterThan)
+    {
+        return uniqueTime.uniqueStaleReserved(greaterThan);
+    }
+
+    @Override
     public long now()
     {
         return time.now();
@@ -632,9 +638,9 @@ public class Node implements NodeCommandStoreService
         return nextTxnIdWithFlags(keys, kind, domain, Any, defaultMediumPath().bit());
     }
 
-    public TxnId nextStaleTxnIdWithDefaultFlags(long minEpoch, long minHlc, Seekables<?, ?> keys, Txn.Kind kind, Domain domain)
+    public TxnId nextStaleReservedTxnIdWithDefaultFlags(long minEpoch, long minHlc, Seekables<?, ?> keys, Txn.Kind kind, Domain domain)
     {
-        return nextStaleTxnIdWithFlags(minEpoch, minHlc, keys, kind, domain, Any, defaultMediumPath().bit());
+        return nextStaleReservedTxnIdWithFlags(minEpoch, minHlc, keys, kind, domain, Any, defaultMediumPath().bit());
     }
 
     public TxnId nextTxnIdWithDefaultFlags(Seekables<?, ?> keys, Txn.Kind kind, Domain domain, Cardinality cardinality)
@@ -665,10 +671,11 @@ public class Node implements NodeCommandStoreService
         return newTxnId(epoch(Long.MIN_VALUE, keys, kind), uniqueNow(), kind, domain, cardinality, flags, id);
     }
 
-    public TxnId nextStaleTxnIdWithFlags(long minEpoch, long minHlc, Seekables<?, ?> keys, Txn.Kind kind, Domain domain, Cardinality cardinality, int flags)
+    public TxnId nextStaleReservedTxnIdWithFlags(long minEpoch, long minHlc, Seekables<?, ?> keys, Txn.Kind kind, Domain domain, Cardinality cardinality, int flags)
     {
         long epoch = epoch(minEpoch, keys, kind);
-        long hlc = uniqueStale(minHlc);
+        // sync point ids are low traffic and always ask for a fixed (large) staleness, so use the reserved bucket
+        long hlc = uniqueStaleReserved(minHlc);
         return newTxnId(epoch, hlc, kind, domain, cardinality, flags, id);
     }
 
@@ -769,6 +776,11 @@ public class Node implements NodeCommandStoreService
     public FullRoute<?> computeRoute(TxnId txnId, Routables<?> keysOrRanges) throws TopologyException
     {
         return computeRoute(txnId.epoch(), keysOrRanges, topology.active());
+    }
+
+    public FullRoute<?> computeRoute(long epoch, Routables<?> keysOrRanges) throws TopologyException
+    {
+        return computeRoute(epoch, keysOrRanges, topology.active());
     }
 
     public FullRoute<?> computeRoute(long epoch, Routables<?> keysOrRanges, ActiveEpochs active) throws TopologyException
