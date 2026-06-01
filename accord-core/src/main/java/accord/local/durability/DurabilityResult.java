@@ -18,58 +18,88 @@
 
 package accord.local.durability;
 
+import javax.annotation.Nullable;
+
 import accord.coordinate.FailureAccumulator;
-import accord.primitives.Ranges;
+import accord.local.Node;
 import accord.primitives.MinimalSyncPoint;
+import accord.primitives.Ranges;
+import accord.primitives.TxnId;
 import accord.utils.Invariants;
 import accord.utils.ReducingRangeMap;
+import accord.utils.SortedArrays.SortedArrayList;
 
 public class DurabilityResult
 {
-    public final MinimalSyncPoint syncPoint;
+    public final TxnId syncId;
+    public final Ranges ranges;
     public final ReducingRangeMap<DurabilityLevel> achieved;
     public final DurabilityLevel min;
+    public final SortedArrayList<Node.Id> including;
+    public final @Nullable SortedArrayList<Node.Id> readable;
     public final Throwable failure;
 
-    public DurabilityResult(MinimalSyncPoint syncPoint, DurabilityLevel result, Throwable failure)
+    public DurabilityResult(MinimalSyncPoint syncPoint, DurabilityLevel result, SortedArrayList<Node.Id> including, SortedArrayList<Node.Id> readable, Throwable failure)
     {
-        this(syncPoint, ReducingRangeMap.create(syncPoint.route, result), failure);
+        this(syncPoint.syncId, syncPoint.route.toRanges(), result, including, readable, failure);
     }
 
-    public DurabilityResult(MinimalSyncPoint syncPoint, ReducingRangeMap<DurabilityLevel> achieved, Throwable failure)
+    public DurabilityResult(TxnId syncId, Ranges ranges, DurabilityLevel result, SortedArrayList<Node.Id> including, SortedArrayList<Node.Id> readable, Throwable failure)
     {
-        this.syncPoint = syncPoint;
+        this(syncId, ranges, ReducingRangeMap.create(ranges, result), including, readable, failure);
+    }
+
+    public DurabilityResult(MinimalSyncPoint syncPoint, ReducingRangeMap<DurabilityLevel> achieved, SortedArrayList<Node.Id> including, SortedArrayList<Node.Id> readable, Throwable failure)
+    {
+        this(syncPoint.syncId, syncPoint.route.toRanges(), achieved, including, readable, failure);
+    }
+
+    public DurabilityResult(TxnId syncId, Ranges ranges, ReducingRangeMap<DurabilityLevel> achieved, SortedArrayList<Node.Id> including, SortedArrayList<Node.Id> readable, Throwable failure)
+    {
+        this.syncId = syncId;
+        this.ranges = ranges;
         this.achieved = achieved;
-        this.failure = failure;
         this.min = achieved.foldl(DurabilityLevel::min);
+        this.including = including;
+        this.readable = readable;
+        this.failure = failure;
     }
 
     public DurabilityResult min(DurabilityResult that)
     {
-        Invariants.require(this.syncPoint.syncId.equals(that.syncPoint.syncId));
+        Invariants.require(this.syncId.equals(that.syncId));
         Throwable failure = this.failure == null ? that.failure
                                                  : that.failure == null ? this.failure
                                                                         : FailureAccumulator.append(this.failure, that.failure);
-        return new DurabilityResult(syncPoint, ReducingRangeMap.merge(this.achieved, that.achieved, DurabilityLevel::min), failure);
+        SortedArrayList<Node.Id> including = this.including.intersecting(that.including);
+        SortedArrayList<Node.Id> readable = SortedArrayList.intersection(this.readable, that.readable);
+        return new DurabilityResult(syncId, ranges,
+                                    ReducingRangeMap.merge(this.achieved, that.achieved, DurabilityLevel::min),
+                                    including, readable, failure);
     }
 
     public DurabilityResult max(DurabilityResult that)
     {
-        Invariants.require(this.syncPoint.syncId.equals(that.syncPoint.syncId));
+        Invariants.require(this.syncId.equals(that.syncId));
         Throwable failure = this.failure == null || that.failure == null ? null : FailureAccumulator.append(this.failure, that.failure);
-        return new DurabilityResult(syncPoint, ReducingRangeMap.merge(this.achieved, that.achieved, DurabilityLevel::max), failure);
+        SortedArrayList<Node.Id> including = this.including.with(that.including);
+        SortedArrayList<Node.Id> readable = SortedArrayList.union(this.readable, that.readable);
+        return new DurabilityResult(syncId, ranges,
+                                    ReducingRangeMap.merge(this.achieved, that.achieved, DurabilityLevel::max),
+                                    including, readable, failure);
     }
 
     @Override
     public String toString()
     {
-        return syncPoint.syncId + " achieved " + achieved;
+        return syncId + " achieved " + achieved;
     }
 
     public Ranges satisfies(DurabilityLevel require)
     {
         if (require.isSatisfiedBy(min))
-            return syncPoint.route.toRanges();
+            return ranges;
+
         return achieved.foldlWithBounds((l, rs, s, e) -> {
             if (require.isSatisfiedBy(l))
                 rs = rs.with(Ranges.of(s.rangeFactory().newRange(s, e)));

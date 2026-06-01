@@ -20,6 +20,7 @@ package accord.coordinate;
 
 import java.util.function.BiConsumer;
 
+import accord.api.TopologySorter.NodeStatus;
 import accord.coordinate.ExecuteFlag.CoordinationFlags;
 import accord.coordinate.tracking.AbstractTracker;
 import accord.coordinate.tracking.QuorumTracker;
@@ -77,12 +78,19 @@ public abstract class Stabilise<R> extends AbstractCoordination<FullRoute<?>, R,
     void start()
     {
         super.start();
-        contact(to -> new Commit(commitKind(to), to, allTopologies, txnId, txn, scope, ballot, executeAt, stabiliseDeps));
+        contact((to, nodeStatus) -> new Commit(commitKind(to, nodeStatus), to, allTopologies, txnId, txn, scope, ballot, executeAt, stabiliseDeps));
         if (allTopologies.size() > 1)
         {
-            SortedArrayList<Node.Id> extra = allTopologies.nodes().without(tracker.nodes()).without(allTopologies::isFaulty);
+            // one-way Commit to replicas we are not tracking: deliver unless we cannot address them at all
+            SortedArrayList<Node.Id> extra = allTopologies.nodes().without(tracker.nodes());
             for (Node.Id to : extra)
-                node.send(to, new Commit(commitKind(to), to, allTopologies, txnId, txn, scope, ballot, executeAt, stabiliseDeps), tracing);
+            {
+                NodeStatus status = allTopologies.status(to);
+                if (status.isUnavailable())
+                    continue;
+
+                node.send(to, new Commit(commitKind(to, status), to, allTopologies, txnId, txn, scope, ballot, executeAt, stabiliseDeps), tracing);
+            }
         }
     }
 
@@ -126,9 +134,12 @@ public abstract class Stabilise<R> extends AbstractCoordination<FullRoute<?>, R,
         }
     }
 
-    private Commit.Kind commitKind(Node.Id to)
+    private Commit.Kind commitKind(Node.Id to, NodeStatus status)
     {
-        return sendMinimal() && !to.equals(node.id()) ? CommitSlowPath : CommitWithTxn;
+        // an UNREADABLE recipient may not be able to process earlier phases, so we sent maximal to avoid Insufficient responses
+        if (sendMinimal() && !to.equals(node.id()) && status == NodeStatus.HEALTHY)
+            return CommitSlowPath;
+        return CommitWithTxn;
     }
 
     @Override

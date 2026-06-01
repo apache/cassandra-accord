@@ -72,6 +72,7 @@ import static accord.burn.BurnTestBase.generateIds;
 import static accord.impl.PrefixedIntHashKey.ranges;
 import static accord.local.durability.DurabilityService.SyncLocal.NoLocal;
 import static accord.local.durability.DurabilityService.SyncLocal.Self;
+import static accord.local.durability.DurabilityService.SyncReadable.UnknownReadable;
 import static accord.primitives.Routables.Slice.Minimal;
 
 public class DurabilityQueueTest
@@ -232,7 +233,7 @@ public class DurabilityQueueTest
                         }
                     }
 
-                    if (includingQuorum != null) quorum = new DurabilityResult(syncPoint, result(includingQuorum, topology), null);
+                    if (includingQuorum != null) quorum = new DurabilityResult(syncPoint, result(includingQuorum, topology), SortedArrayList.empty(), SortedArrayList.empty(), null);
                     else quorum = null;
                 }
 
@@ -248,7 +249,7 @@ public class DurabilityQueueTest
                         ((AsyncResults.SettableResult<DurabilityResult>)results.onQuorumOrDone()).trySuccess(quorum);
                     }, quorumLatencyMillis, TimeUnit.MILLISECONDS);
                 }
-                DurabilityResult result = new DurabilityResult(syncPoint, result(including, topology), null);
+                DurabilityResult result = new DurabilityResult(syncPoint, result(including, topology), SortedArrayList.empty(), SortedArrayList.empty(), null);
                 scheduler.once(() -> {
 
                     Ranges newQuorum = Ranges.EMPTY;
@@ -333,7 +334,7 @@ public class DurabilityQueueTest
                 else if (shardIncluding.size() >= shard.minorityQuorumSize()) syncRemote = SyncRemote.MinorityQuorum;
                 else syncRemote = SyncRemote.NoRemote;
 
-                builder.appendNoOverlap(shard.range.start(), new DurabilityLevel(syncLocal, syncRemote, including.intersecting(shard.nodes), shard.nodes.without(including)));
+                builder.appendNoOverlap(shard.range.start(), new DurabilityLevel(syncLocal, syncRemote, UnknownReadable, including.intersecting(shard.nodes), shard.nodes.without(including), topology.hardRemovedIds()));
                 builder.appendNoOverlap(shard.range.end(), null);
             }
             return builder.build();
@@ -383,7 +384,7 @@ public class DurabilityQueueTest
                     int count = rnd.nextInt(1, candidates.size() - 1);
                     including = select(rnd, candidates, count);
                 }
-                DurabilityLevel require = new DurabilityLevel(rnd.pick(SYNC_LOCALS), rnd.pick(SYNC_REMOTES), including, null);
+                DurabilityLevel require = new DurabilityLevel(rnd.pick(SYNC_LOCALS), rnd.pick(SYNC_REMOTES), UnknownReadable, including);
                 request = new DurabilityRequest("", kind == Txn.Kind.VisibilitySyncPoint ? kind : null, txnId, Ranges.of(ranges), require, 0, timeout);
             }
             Submission submission = new Submission(syncPoint, request, topology.shards().toArray(Shard[]::new));

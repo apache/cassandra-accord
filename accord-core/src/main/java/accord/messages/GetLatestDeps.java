@@ -75,16 +75,15 @@ public class GetLatestDeps extends RouteRequest.WithUnsynced<ReplyList<GetLatest
     }
 
     @Override
-    public Cancellable submit()
+    protected boolean abort(Refuse.MinMax refuses)
     {
-        return node.commandStores().mapReduceConsume(minEpoch, executeAt.epoch(), this);
+        return refuses.max != Refuse.NONE;
     }
 
     @Override
-    protected void acceptInternal(ReplyList<GetLatestDepsReply> replies, Throwable failure)
+    public Cancellable submit()
     {
-        if (failure != null) acceptReply(null, failure);
-        else ReplyList.invoke(replies, GetLatestDepsReply::reduce, this::acceptReply);
+        return node.commandStores().mapReduceConsume(minEpoch, executeAt.epoch(), this);
     }
 
     @Override
@@ -118,6 +117,13 @@ public class GetLatestDeps extends RouteRequest.WithUnsynced<ReplyList<GetLatest
     public ReplyList<GetLatestDepsReply> reduce(ReplyList<GetLatestDepsReply> r1, ReplyList<GetLatestDepsReply> r2)
     {
         return ReplyList.merge(r1, r2);
+    }
+
+    @Override
+    protected void acceptInternal(ReplyList<GetLatestDepsReply> replies, Throwable failure)
+    {
+        if (failure != null) acceptReply(null, failure);
+        else ReplyList.invoke(replies, GetLatestDepsReply::reduce, this::acceptReply);
     }
 
     @Override

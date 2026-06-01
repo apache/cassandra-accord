@@ -20,6 +20,7 @@ package accord.utils;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
+import java.util.concurrent.CancellationException;
 
 public interface Rethrowable<T extends Throwable & Rethrowable<T>>
 {
@@ -40,6 +41,12 @@ public interface Rethrowable<T extends Throwable & Rethrowable<T>>
                 ise.addSuppressed(t);
                 throw ise;
             }
+            return wrapped;
+        }
+        else if (t instanceof CancellationException)
+        {
+            CancellationException wrapped = new CancellationException(t.getMessage());
+            wrapped.addSuppressed(t);
             return wrapped;
         }
         else if (t instanceof AssertionError)

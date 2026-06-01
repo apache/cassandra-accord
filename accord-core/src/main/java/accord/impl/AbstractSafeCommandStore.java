@@ -211,6 +211,7 @@ extends SafeCommandStore
     // TODO (expected): cleanup the integration hooks here; they're a bit byzantine. Also clearly document behaviour.
     public void postExecute()
     {
+        commandStore().unsafeProgressLog().maybeNotify();
         flushFieldUpdates();
     }
 

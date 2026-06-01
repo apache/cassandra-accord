@@ -35,11 +35,9 @@ import accord.local.Command;
 import accord.local.Command.Committed;
 import accord.local.CommandStore;
 import accord.local.CommandStores;
-import accord.local.LoadKeys;
 import accord.local.Node;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.primitives.RoutingKeys;
 import accord.primitives.SaveStatus;
 import accord.local.StoreParticipants;
 import accord.primitives.PartialTxn;
@@ -48,7 +46,6 @@ import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
-import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 import accord.utils.UnhandledEnum;
@@ -61,7 +58,6 @@ import org.agrona.collections.IntHashSet;
 import static accord.api.ProgressLog.BlockedUntil.CanApply;
 import static accord.api.ProgressLog.BlockedUntil.HasStableDeps;
 import static accord.api.ProtocolModifiers.dataStoreDetectsFutureReads;
-import static accord.api.ProtocolModifiers.fastReadsMayBypassCommandsForKey;
 import static accord.api.ProtocolModifiers.fastReadsMayBypassSafeStore;
 import static accord.api.ProtocolModifiers.fastWritesMayBypassSafeStore;
 import static accord.coordinate.ExecuteFlag.HAS_UNIQUE_HLC;
@@ -94,7 +90,9 @@ public abstract class ReadData extends AbstractRequest<Participants<?>, ReadData
         readEphemeral(1),
         waitUntilApplied(2),
         applyThenWaitUntilApplied(3),
-        stableThenRead(4);
+        stableThenRead(4),
+        fetchRequest(5),
+        ;
 
         public final byte val;
 
@@ -346,6 +344,32 @@ public abstract class ReadData extends AbstractRequest<Participants<?>, ReadData
         return null;
     }
 
+    protected CommitOrReadNack forceApply(SafeCommandStore safeStore, PartialTxn partialTxn, Participants<?> executes)
+    {
+        synchronized (this)
+        {
+            if (!isPending())
+                return null;
+
+            int storeId = safeStore.commandStore().id();
+
+            if (requiresListenersDuringExecution)
+                listeners.put(storeId, safeStore.register(txnId, this));
+            waitingOn.add(storeId);
+            ++waitingOnCount;
+            reading.add(storeId);
+        }
+
+        CommandStore unsafeStore = safeStore.commandStore();
+        Ranges unavailable = unavailable(unsafeStore);
+        executes = executes.without(unavailable);
+
+        if (executes.isEmpty()) readComplete(unsafeStore, null, unavailable);
+        else partialTxn.read(safeStore, executeAt, executes)
+             .begin(readCallback(unsafeStore, unavailable));
+        return null;
+    }
+
     private AsyncChain<CommitOrReadNack> applyFastRead(CommandStore unsafeStore)
     {
         Invariants.require(partialTxn != null);
@@ -449,6 +473,7 @@ public abstract class ReadData extends AbstractRequest<Participants<?>, ReadData
     public void accept(CommitOrReadNack reply, Throwable failure)
     {
         partialTxn = null;
+        cancel = null;
         if (!isPending() && reply == null && failure == null)
             return; // cancelled
 
@@ -527,11 +552,11 @@ public abstract class ReadData extends AbstractRequest<Participants<?>, ReadData
         // note: we DO NOT use stillExecutes() here, as we do not know what the remote replica requires
         StoreParticipants participants = command.participants();
         Participants<?> executes = nonNull(participants.executes());
+        PartialTxn read = partialTxn != null ? partialTxn : command.partialTxn();
         if (executes != participants.stillExecutes() && !txnId.isSystemTxn())
         {
             // if stillExecutes has been filtered, we may have also filtered
-            PartialTxn txn = command.partialTxn();
-            Participants<?> covers = txn == null ? executes.slice(0, 0) : txn.keys().toParticipants();
+            Participants<?> covers = read == null ? executes.slice(0, 0) : read.keys().toParticipants();
             Participants<?> missing = executes.without(covers).without(unavailable);
             if (!missing.isEmpty())
                 unavailable = unavailable.with(missing.toRanges());
@@ -545,7 +570,7 @@ public abstract class ReadData extends AbstractRequest<Participants<?>, ReadData
 
         node.agent().replicaEvents().onReadStarted(safeStore, command);
         if (executes.isEmpty()) readComplete(unsafeStore, null, unavailable);
-        else beginRead(safeStore, executeAt, command.partialTxn(), executes)
+        else beginRead(safeStore, executeAt, read, executes)
              .begin(readCallback(unsafeStore, unavailable));
     }
 
@@ -680,8 +705,10 @@ public abstract class ReadData extends AbstractRequest<Participants<?>, ReadData
     @Nullable Cancellable clearUnsafe()
     {
         Invariants.require(state != State.PENDING);
+        Cancellable cancelSubmission = cancel;
         RegisteredTimeout cancelTimeout = timeout;
         Int2ObjectHashMap<LocalListeners.Registered> cancelListeners = listeners;
+        cancel = null;
         timeout = null;
         listeners = null;
         waitingOn.clear();
@@ -693,6 +720,8 @@ public abstract class ReadData extends AbstractRequest<Participants<?>, ReadData
             return null;
 
         return () -> {
+            if (cancelSubmission != null)
+                cancelSubmission.cancel();
             if (cancelTimeout != null)
                 cancelTimeout.cancel();
             if (cancelListeners != null)

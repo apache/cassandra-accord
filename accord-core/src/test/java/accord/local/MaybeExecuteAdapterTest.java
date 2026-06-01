@@ -258,7 +258,7 @@ public class MaybeExecuteAdapterTest
             SafeCommandStore safeStore = commands.beginOperation(ExecutionContext.unsequenced(txnId, "Test"), null);
             try
             {
-                SafeCommand safeCommand = safeStore.unsafeGet(txnId);
+                SafeCommand safeCommand = safeStore.unsafeTryGet(txnId);
                 Commands.maybeExecute(safeStore, safeCommand, command, alwaysNotifyListeners, notifyWaitingOn, rec);
             }
             finally

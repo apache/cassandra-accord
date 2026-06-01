@@ -239,7 +239,7 @@ public abstract class ReadTracker extends AbstractTracker<ReadTracker.ReadShardT
 
     public boolean initialise(@Nullable Tracing tracing)
     {
-        SortedArrayList<Id> candidates = filterAndRecordFaulty(tracing);
+        SortedArrayList<Id> candidates = filterAndRecordUnreadable(tracing);
         if (candidates == null)
             return false;
 
@@ -350,6 +350,9 @@ public abstract class ReadTracker extends AbstractTracker<ReadTracker.ReadShardT
                     break;
                 ++index;
             }
+            if (index > last)
+                return false;
+
             candidates.set(index, candidates.get(last));
             candidates.remove(last);
         }

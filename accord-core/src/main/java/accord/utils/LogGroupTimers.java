@@ -227,6 +227,30 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
         }
     }
 
+    // does not guarantee anything will be returned by advance, only that it might
+    public boolean mayAdvance(long now)
+    {
+        long nextEpoch = now & -minBucketSpan;
+        if (nextEpoch < curEpoch)
+            return false;
+
+        if (bucketsStart >= bucketsEnd)
+            return false;
+
+        Bucket<T> head = buckets[bucketsStart];
+        if (head.epoch > now)
+            return false;
+
+        if (head.epoch + head.span <= now)
+            return true;
+
+        if (head.isEmpty())
+            return false;
+
+        head.ensureHeapified();
+        return head.peekNode().deadline() <= now;
+    }
+
     /**
      * Visit IN ARBITRARY ORDER all timers expired at {@code now}
      *

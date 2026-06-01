@@ -477,7 +477,7 @@ public class Await extends AbstractRequest<Participants<?>, Void> implements Req
         @Override
         public Reply applyInternal(SafeCommandStore safeStore)
         {
-            SafeCommand safeCommand = safeStore.unsafeGet(txnId);
+            SafeCommand safeCommand = safeStore.unsafeTryGet(txnId);
             if (safeCommand == null || safeCommand.current().saveStatus() == SaveStatus.Uninitialised)
                 return null;
 

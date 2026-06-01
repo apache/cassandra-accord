@@ -73,6 +73,7 @@ import static accord.local.cfk.Pruning.removeLoadingPruned;
 import static accord.local.cfk.UpdateUnmanagedMode.REGISTER;
 import static accord.local.cfk.UpdateUnmanagedMode.REGISTER_DEPS_ONLY;
 import static accord.local.cfk.UpdateUnmanagedMode.UPDATE;
+import static accord.local.cfk.Utils.copyIfShared;
 import static accord.local.cfk.Utils.insertMissing;
 import static accord.local.cfk.Utils.mergeAndFilterMissing;
 import static accord.local.cfk.Utils.missingTo;
@@ -155,7 +156,7 @@ class Updating
 
         TxnInfo[] byId = cfk.byId;
         TxnInfo[] newById = new TxnInfo[byId.length + additionCount + (updatePos < 0 ? 1 : 0)];
-        insertOrUpdateWithAdditions(byId, insertPos, updatePos, plainTxnId, newInfo, additions, additionCount, newById, newCommittedByExecuteAt, witnessedBy, cfk.bounds);
+        newCommittedByExecuteAt = insertOrUpdateWithAdditions(byId, insertPos, updatePos, plainTxnId, newInfo, additions, additionCount, newById, newCommittedByExecuteAt, witnessedBy, cfk.bounds, cfk.committedByExecuteAt);
         if (testParanoia(SUPERLINEAR, NONE, LOW))
             validateMissing(newById, additions, additionCount, curInfo, newInfo, witnessedBy);
 
@@ -501,16 +502,16 @@ class Updating
 
         if (curInfo != null && curInfo.compareTo(COMMITTED) < 0 && newInfo.compareTo(COMMITTED) >= 0)
         {
-            Utils.removeFromMissingArrays(newById, newCommittedByExecuteAt, plainTxnId);
+            newCommittedByExecuteAt = Utils.removeFromMissingArrays(newById, newCommittedByExecuteAt, plainTxnId, cfk.committedByExecuteAt);
         }
         else if (curInfo == null && newInfo.compareTo(COMMITTED) < 0)
         {
             // TODO (desired): for consistency, move this to insertOrUpdate (without additions), while maintaining the efficiency
-            Utils.addToMissingArrays(newById, newCommittedByExecuteAt, newInfo, plainTxnId, witnessedBy);
+            newCommittedByExecuteAt = Utils.addToMissingArrays(newById, newCommittedByExecuteAt, newInfo, plainTxnId, witnessedBy, cfk.committedByExecuteAt);
         }
         else if (witnessedBy != null && newInfo.compareTo(COMMITTED) >= 0)
         {
-            Utils.removeFromWitnessMissingArrays(newById, newCommittedByExecuteAt, plainTxnId, witnessedBy);
+            newCommittedByExecuteAt = Utils.removeFromWitnessMissingArrays(newById, newCommittedByExecuteAt, plainTxnId, witnessedBy, cfk.committedByExecuteAt);
         }
 
         if (testParanoia(SUPERLINEAR, NONE, LOW) && curInfo == null && newInfo.compareTo(COMMITTED) < 0)
@@ -527,8 +528,12 @@ class Updating
     /**
      * Update newById to insert or update newInfo; insert any additions, and update any relevant missing arrays in
      * both newById and newCommittedByExecuteAt (for both deletions and insertions).
+     * {@code newCommittedByExecuteAt} is copied before its first modification if it is still {@code shared} with the
+     * {@code CommandsForKey} we are updating (i.e. when we neither insert into nor remove from it), as that instance
+     * remains reachable and must not be modified - see {@link Utils#copyIfShared}.
+     * @return the {@code newCommittedByExecuteAt} we updated (may be a copy)
      */
-    static void insertOrUpdateWithAdditions(TxnInfo[] byId, int sourceInsertPos, int sourceUpdatePos, TxnId plainTxnId, TxnInfo newInfo, TxnId[] additions, int additionCount, TxnInfo[] newById, TxnInfo[] newCommittedByExecuteAt, @Nonnull TxnId[] witnessedBy, QuickBounds bounds)
+    static TxnInfo[] insertOrUpdateWithAdditions(TxnInfo[] byId, int sourceInsertPos, int sourceUpdatePos, TxnId plainTxnId, TxnInfo newInfo, TxnId[] additions, int additionCount, TxnInfo[] newById, TxnInfo[] newCommittedByExecuteAt, @Nonnull TxnId[] witnessedBy, QuickBounds bounds, @Nullable TxnInfo[] committedByExecuteAt)
     {
         int additionInsertPos = Arrays.binarySearch(additions, 0, additionCount, plainTxnId);
         additionInsertPos = Invariants.requireArgument(-1 - additionInsertPos, additionInsertPos < 0);
@@ -612,6 +617,7 @@ class Updating
                                     ci = Arrays.binarySearch(newCommittedByExecuteAt, minByExecuteAtSearchIndex, newCommittedByExecuteAt.length, txn, TxnInfo::compareExecuteAt);
                                 }
                                 Invariants.require(newCommittedByExecuteAt[ci] == txn);
+                                newCommittedByExecuteAt = copyIfShared(newCommittedByExecuteAt, committedByExecuteAt);
                                 newCommittedByExecuteAt[ci] = newTxn;
                             }
 
@@ -657,6 +663,7 @@ class Updating
         {
             newById[targetInsertPos] = newInfo;
         }
+        return newCommittedByExecuteAt;
     }
 
     /**
@@ -874,7 +881,7 @@ class Updating
         commandStore.execute(context, safeStore -> {
             SafeCommandsForKey safeCommandsForKey = safeStore.get(key);
             CommandsForKey cur = safeCommandsForKey.current();
-            CommandsForKeyUpdate next = Updating.updateUnmanaged(cur, safeStore, safeStore.unsafeGet(txnId));
+            CommandsForKeyUpdate next = Updating.updateUnmanaged(cur, safeStore, safeStore.unsafeGetNoLogFault(txnId));
             if (cur != next)
             {
                 if (cur != next.cfk())
@@ -926,7 +933,7 @@ class Updating
         int missingCount = 0;
         // we only populate dependencies to facilitate execution, not for any distributed decision,
         // so we can filter to only transactions we need to execute locally
-        int i = txnIds.find(cfk.redundantOrBootstrappedBefore());
+        int i = txnIds.find(cfk.redundantOrUnreadyBefore());
         if (i < 0) i = -1 - i;
         int waitingFromIndex = i; // the min input index we expect to execute
         if (waitingTxnId.isSyncPoint() && waitingTxnId.is(Range) && mode == REGISTER)
@@ -1048,6 +1055,10 @@ class Updating
 
             if (toIndex < txnIds.size() && waitingTxnId.awaitsOnlyDeps())
                 effectiveExecutesAt = Timestamp.nonNullOrMax(effectiveExecutesAt, txnIds.get(txnIds.size() - 1));
+
+            // TODO (required): are there any other edge cases where we fail to propagate an executeAt we no longer know about due to bootstrap?
+            if (cfk.maxAppliedUnreadyWriteById >= 0) // propagate future executeAt that have been applied since readyAt (but whose txnId fall behind it)
+                effectiveExecutesAt = Timestamp.nonNullOrMax(effectiveExecutesAt, cfk.byId[cfk.maxAppliedUnreadyWriteById].executeAt);
 
             // TODO (required): document why we can restrict this test to sync points
             if (waitingToApply && waitingTxnId.isSyncPoint() && Pruning.isAnyPredecessorWaitingOnPruned(cfk.loadingPruned, waitingTxnId))

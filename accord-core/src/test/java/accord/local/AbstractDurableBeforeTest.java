@@ -349,6 +349,9 @@ public abstract class AbstractDurableBeforeTest
             @Override
             protected DurableBeforeLinear buildInternal()
             {
+                if (values.isEmpty())
+                    return EMPTY;
+
                 return new DurableBeforeLinear(starts.toArray(new RoutingKey[0]), values.toArray(new DurableBefore.Entry[0]));
             }
         }

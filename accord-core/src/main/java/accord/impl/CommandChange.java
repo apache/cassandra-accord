@@ -242,6 +242,11 @@ public class CommandChange
             return saveStatus;
         }
 
+        public final Cleanup cleanup()
+        {
+            return cleanup;
+        }
+
         public final Durability durability()
         {
             return durability;
@@ -382,7 +387,7 @@ public class CommandChange
             //  In particular it would be nice to avoid doing this twice for each command on load, as we also do this in SafeCommandStore.
             //  Perhaps we can special-case loading, and simply update the participants here so we can avoid doing it again on access
             SaveStatus saveStatus = this.saveStatus;
-            if (input == Input.FULL)
+            if (input.isFull())
             {
                 // During full compaction, commands without save status can be completely expunged
                 if (saveStatus == null)

@@ -100,7 +100,7 @@ public class Invalidate extends AbstractCoordination<Participants<?>, Outcome, I
     void start()
     {
         super.start();
-        contact(to -> new BeginInvalidation(to, tracker.topologies(), txnId, scope, ballot));
+        contact((to, nodeStatus) -> nodeStatus.isUnavailable() ? null : new BeginInvalidation(to, tracker.topologies(), txnId, scope, ballot));
     }
 
     @Override

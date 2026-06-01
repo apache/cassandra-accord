@@ -18,24 +18,38 @@
 
 package accord.local;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
 
 import accord.api.Agent;
 import accord.api.DataStore.FetchKind;
-import accord.coordinate.CoordinateSyncPoint;
+import accord.api.DataStore.FetchResult;
+import accord.coordinate.CoordinateMaxConflict;
+import accord.local.ExecutionContext.Empty;
+import accord.local.durability.DurabilityResults;
+import accord.local.durability.DurabilityResults.ByIdEntry;
 import accord.primitives.Ranges;
 import accord.primitives.Routable.Domain;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
-import accord.primitives.TxnId.Cardinality;
 import accord.utils.DeterministicIdentitySet;
 import accord.utils.Invariants;
+import accord.utils.Reduce;
+import accord.utils.SortedArrays.SortedArrayList;
+import accord.utils.UnhandledEnum;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
 import static accord.api.DataStore.FetchKind.Image;
+import static accord.local.BootstrapReason.CATCHUP;
+import static accord.local.durability.DurabilityService.SyncLocal.NoLocal;
+import static accord.local.durability.DurabilityService.SyncReadable.KnownReadable;
+import static accord.local.durability.DurabilityService.SyncRemote.MinorityQuorumAndWaitedForAll;
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 
@@ -70,68 +84,54 @@ import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
  */
 class Bootstrap
 {
-    static class UnsafeToRead
-    {
-        final Ranges ranges;
-
-        UnsafeToRead(Ranges ranges)
-        {
-            this.ranges = ranges;
-        }
-    }
-
     // an attempt to fetch some portion of the range we are bootstrapping
     class Attempt extends FetchAttempt
     {
-        TxnId globalSyncId;
-
-        Attempt(Ranges ranges, int attempt)
+        final DurabilityResults ready;
+        Attempt(Ranges ranges, int attempt, DurabilityResults ready)
         {
             super(ranges, attempt);
+            this.ready = ready;
         }
 
-        TxnId start(SafeCommandStore safeStore)
+        void start(SafeCommandStore safeStore)
         {
-            globalSyncId = node.nextTxnIdWithDefaultFlags(epoch, 0, valid, ExclusiveSyncPoint, Domain.Range, Cardinality.Any);
-            Invariants.require(epoch <= globalSyncId.epoch(), "Attempting to use local epoch %d which is larger than global epoch %d", epoch, globalSyncId.epoch());
+            Invariants.require(!valid.isEmpty());
+            commandStore.markBootstrapping(safeStore, ready.rangesByTxnId());
+            fetch(ready.byTxnId()).begin(this);
+        }
 
-            if (valid.isEmpty())
+        private AsyncChain<?> fetch(Map<TxnId, ByIdEntry> entries)
+        {
+            AsyncChain<?> chain = null;
+            for (Map.Entry<TxnId, ByIdEntry> e : entries.entrySet())
             {
-                maybeComplete();
-                return globalSyncId;
+                if (chain == null) chain = fetch(e.getKey(), e.getValue());
+                else chain = chain.flatMap(ranges -> fetch(e.getKey(), e.getValue()));
             }
+            return chain != null ? chain : AsyncChains.success(null);
+        }
 
-            if (!node.topology().active().hasAtLeastEpoch(globalSyncId.epoch()))
+        // TODO (expected): we should allow the implementation to define the split boundaries,
+        //  so that e.g. Cassandra can prefer ranges that minimise anticompaction
+        private AsyncChain<?> fetch(TxnId txnId, ByIdEntry e)
+        {
+            Ranges ranges;
+            synchronized (this)
             {
-                // Ignore timeouts fetching the epoch, always keep trying to bootstrap
-                node.withEpochAtLeast(globalSyncId.epoch(), null, (ignored, failure) -> commandStore.execute((ExecutionContext.Empty) () -> "Start Bootstrap", (Consumer<SafeCommandStore>) Attempt.this::start, (ignored1, failure2) -> {
-                    if (failure2 != null)
-                        node.agent().acceptAndWrap(null, failure2);
-                }));
-                return globalSyncId;
+                ranges = e.ranges.slice(valid, Minimal);
             }
+            if (ranges.isEmpty())
+                return AsyncChains.success(Ranges.EMPTY);
 
-            // we fix here the ranges we use for the synthetic command, even though we may end up only finishing a subset
-            // of these ranges as part of this attempt
-            Ranges commitRanges = valid;
-            safeStore = safeStore;
-            CommandStore commandStore = safeStore.commandStore();
-            CoordinateSyncPoint.exclusive(node, globalSyncId, commitRanges)
-                               .flatMap(success -> commandStore.chain((ExecutionContext.Empty) () -> "Mark Bootstrapping", safeStore0 -> {
-
-                                   // we submit a separate execution so that we know markBootstrapping is durable before we initiate the fetch
-                                   if (!valid.isEmpty())
-                                       commandStore.markBootstrapping(safeStore0, globalSyncId, valid);
-                                   return success;
-                               }))
-                               .flatMap(syncPoint -> node.withEpochAtLeast(epoch, null, () -> commandStore.chain((ExecutionContext.Empty) () -> "Start Bootstrap Fetch", safeStore1 -> {
-                                   if (valid.isEmpty()) // we've lost ownership of the range
-                                       return AsyncResults.success(Ranges.EMPTY);
-                                   return fetch = safeStore1.dataStore().fetch(node, safeStore1, valid, syncPoint, this, Image);
-                               })))
-                               .flatMapResult(i -> i)
-                               .begin(this);
-            return globalSyncId;
+            return commandStore.chain((Empty)() -> "Submit Fetch of " + e, safeStore -> {
+                FetchResult fetch = safeStore.dataStore().fetch(node, safeStore, ranges, txnId, e.readable, this, kind);
+                synchronized (this)
+                {
+                    currentFetch = fetch;
+                }
+                return fetch;
+            }).flatMapResult(i -> i);
         }
 
         @Override
@@ -139,9 +139,7 @@ class Bootstrap
         {
             Runnable retry = () -> {
                 node.scheduler().selfRecurring(() -> {
-                    commandStore.execute((ExecutionContext.Empty) () -> "Restart Bootstrap", safeStore -> {
-                        restart(safeStore, newlyFailed.slice(allValid, Minimal), attempt + 1);
-                    }, commandStore.agent());
+                    restart(newlyFailed, attempt + 1);
                 }, 0L, TimeUnit.NANOSECONDS);
             };
             Runnable fail = () -> {
@@ -155,9 +153,13 @@ class Bootstrap
         @Override
         protected AsyncResult<Void> markSafeToRead(Ranges ranges, Timestamp safeToReadAt)
         {
-            if (safeToReadAt.compareTo(globalSyncId) < 0)
-                safeToReadAt = globalSyncId;
-            return commandStore.markSafeToRead(globalSyncId, safeToReadAt, ranges);
+            List<AsyncResult<Void>> results = new ArrayList<>(ready.rangesByTxnId().size());
+            for (Map.Entry<TxnId, Ranges> e : ready.rangesByTxnId().entrySet())
+            {
+                TxnId bound = e.getKey();
+                results.add(commandStore.markSafeToRead(bound, TxnId.max(bound, safeToReadAt), ranges));
+            }
+            return AsyncResults.reduce(results, Reduce.toNull());
         }
 
         @Override
@@ -173,11 +175,7 @@ class Bootstrap
             if (!missing.isEmpty())
             {
                 Runnable retry = () -> {
-                    node.scheduler().selfRecurring(() -> {
-                        commandStore.execute((ExecutionContext.Empty) () -> "Restart Bootstrap", safeStore -> {
-                            restart(safeStore, missing, attempt + 1);
-                        }, node.agent());
-                    }, 0L, TimeUnit.NANOSECONDS);
+                    node.scheduler().selfRecurring(() -> restart(missing, attempt + 1), 0L, TimeUnit.NANOSECONDS);
                 };
 
                 Runnable fail = () -> {
@@ -193,53 +191,207 @@ class Bootstrap
         }
     }
 
+    final String description;
     final FetchKind kind;
+    final BootstrapReason reason;
     final Node node;
     final CommandStore commandStore;
     final long epoch;
+    final AsyncResult.Settable<Void> refusing;
+    final AsyncResult.Settable<Void> notRefusing;
+    final AsyncResult.Settable<Void> coordinate;
     final AsyncResult.Settable<Void> data;
     final AsyncResult.Settable<Void> reads;
     final Set<Attempt> inProgress = new DeterministicIdentitySet<>();
+    long minEpoch, minHlc;
+    TxnId min;
 
     final Ranges all;
 
-    // TODO (expected): handle case where we clear these to empty; should trigger promise immediately
+    // cleared to empty when we no longer own the ranges; see maybeComplete()
     Ranges allValid, remaining;
 
-    public Bootstrap(Node node, CommandStore commandStore, long epoch, Ranges ranges)
+    public Bootstrap(Node node, CommandStore commandStore, long epoch, Ranges ranges, BootstrapReason reason)
     {
-        this(node, commandStore, epoch, ranges, Image);
+        this(node, commandStore, epoch, ranges, Image, reason);
     }
 
-    public Bootstrap(Node node, CommandStore commandStore, long epoch, Ranges ranges, FetchKind kind)
+    public Bootstrap(Node node, CommandStore commandStore, long epoch, Ranges ranges, FetchKind kind, BootstrapReason reason)
     {
         this.kind = kind;
         this.node = node;
         this.commandStore = commandStore;
         this.epoch = epoch;
+        this.minEpoch = epoch;
         this.remaining = allValid = all = ranges;
-        String description = "Bootstrap " + ranges + " for epoch " + epoch + " in " + commandStore;
+        this.reason = reason;
+        this.description = "Bootstrap " + ranges + " for epoch " + epoch + " in " + commandStore + " (" + reason + ")";
+        this.refusing = new AsyncResults.SettableWithDescription<>(description);
+        this.notRefusing = new AsyncResults.SettableWithDescription<>(description);
+        this.coordinate = new AsyncResults.SettableWithDescription<>(description);
         this.data = new AsyncResults.SettableWithDescription<>(description);
         this.reads = new AsyncResults.SettableWithDescription<>(description);
     }
 
-    TxnId start(SafeCommandStore safeStore0)
+    void start(SafeCommandStore safeStore)
     {
-        return restart(safeStore0, allValid, 0);
+        if (!node.topology().active().hasAtLeastEpoch(epoch))
+        {
+            // Ignore timeouts fetching the epoch, always keep trying to bootstrap
+            node.withEpochAtLeast(epoch, null, (i1, f1) -> {
+                commandStore.execute((Empty) () -> "Start Bootstrap", this::start, (i2, f2) -> {
+                    if (f2 != null)
+                        node.agent().acceptAndWrap(null, f2);
+                });
+            });
+            return;
+        }
+
+        Invariants.require(all.equals(allValid));
+        switch (reason)
+        {
+            default: throw new UnhandledEnum(reason);
+            case LOG_INCOMPLETE:
+            case LOG_CORRUPTED:
+                commandStore.unsafeRefuseRequests(safeStore, all);
+                refusing.trySuccess(null);
+            case CATCHUP:
+                safeStore.markUnsafeToRead(all);
+            case GAIN_OWNERSHIP:
+                refusing.trySuccess(null);
+                notRefusing.trySuccess(null);
+                withMaxConflict(0, reason.compareTo(CATCHUP) > 0);
+                break;
+        }
     }
 
-    private synchronized TxnId restart(SafeCommandStore safeStore, Ranges ranges, int count)
+    void restart(int attempt)
     {
-        ranges = ranges.overlapping(allValid);
+        withQuorumBound(attempt, reason.compareTo(CATCHUP) > 0);
+    }
+
+    private void withMaxConflict(int attempt, boolean refusing)
+    {
+        CoordinateMaxConflict.maxConflict(node, all).begin((success, fail) -> {
+            if (fail != null) commandStore.agent().ownershipEvents().onFailedBootstrap(attempt, "MaxConflict", allValid, () -> withMaxConflict(attempt + 1, refusing), doNotRetry(fail), fail);
+            else
+            {
+                minEpoch = Math.max(minEpoch, success.epoch());
+                minHlc = Math.max(minHlc, success.hlc());
+                withQuorumBound(attempt, refusing);
+            }
+        });
+    }
+
+    /**
+     * Note that we use precisely the bounds we obtain from the DurabilityService to update RedundantBefore,
+     * even if we could in principle install a bound based on the max conflicts we derived first.
+     * This means the dependencies of the transaction do not extend into the fuzzy period over which we're initiating
+     * the process and so doesn't rely on pruning them after the fact.
+     */
+    private void withQuorumBound(int attempt, boolean refusing)
+    {
+        TxnId min = this.min = new TxnId(minEpoch, minHlc, ExclusiveSyncPoint, Domain.Range, node.id());
+        MaxConflicts upsertMaxConflicts = MaxConflicts.create(allValid, MaxConflicts.Entry.create(min, min, min));
+        node.durability().sync(description, null, min, allValid, null, SortedArrayList.ofSorted(node.id()), NoLocal, MinorityQuorumAndWaitedForAll, KnownReadable, 1L, TimeUnit.HOURS)
+            .invoke((ready, fail) -> {
+                if (fail != null)
+                {
+                    commandStore.agent().ownershipEvents().onFailedBootstrap(attempt, "EnsureQuorum", allValid, () -> withQuorumBound(attempt + 1, refusing), doNotRetry(fail), fail);
+                    return;
+                }
+
+                commandStore.execute((Empty)() -> description, safeStore -> {
+                    //noinspection SillyAssignment,DataFlowIssue
+                    safeStore = safeStore;
+                    // TODO (required): to guarantee we cannot break quorum, we should FIRST obtain a visibility sync point we can apply, or even make it part of the sync()
+                    safeStore.upsertRedundantBefore(bounds(ready));
+                    if (refusing)
+                    {
+                        commandStore.unsafeAcceptNonDepsRequests(safeStore, allValid);
+                        notRefusing.trySuccess(null);
+                    }
+                    commandStore.unsafeSetMaxConflicts(commandStore.unsafeGetMaxConflicts().update(upsertMaxConflicts));
+                    commandStore.readyToCoordinate(allValid, epoch)
+                                .invoke(coordinate.settingCallback())
+                                .invokeIfSuccess(() -> {
+                                    if (refusing)
+                                    {
+                                        // TODO (expected): should we do something else if we lose some ranges before we reach here? Safe to refuse indefinitely.
+                                        commandStore.execute((Empty)() -> description, safeStore0 -> {
+                                            commandStore.unsafeAcceptRequests(safeStore0, allValid);
+                                        }, node.agent());
+                                    }
+                                });
+
+                    restart(safeStore, allValid, attempt, ready);
+                }, node.agent());
+            });
+
+    }
+
+    private RedundantBefore bounds(DurabilityResults ready)
+    {
+        if (ready == null)
+            return RedundantBefore.EMPTY;
+
+        Ranges valid = allValid;
+        RedundantBefore result = RedundantBefore.EMPTY;
+        for (Map.Entry<TxnId, Ranges> e : ready.rangesByTxnId().entrySet())
+        {
+            Ranges ranges = e.getValue().slice(valid, Minimal);
+            if (ranges.isEmpty())
+                continue;
+            result = RedundantBefore.merge(result, RedundantBefore.create(ranges, e.getKey(), reason.redundantStatus));
+        }
+        return result;
+    }
+
+    private Runnable doNotRetry(Throwable failure)
+    {
+        return () -> {
+            coordinate.tryFailure(failure);
+            reads.tryFailure(failure);
+            data.tryFailure(failure);
+            refusing.tryFailure(failure);
+            notRefusing.tryFailure(failure);
+        };
+    }
+
+    private synchronized Ranges restart(Ranges ranges)
+    {
+        ranges = ranges.slice(allValid, Minimal);
         if (ranges.isEmpty())
             return null;
 
         for (Attempt attempt : inProgress)
             Invariants.requireArgument(!ranges.intersects(attempt.valid));
 
-        Attempt attempt = new Attempt(ranges, count);
+        return ranges;
+    }
+
+    private void restart(Ranges ranges, int attempt)
+    {
+        Ranges stillValid = restart(ranges);
+        if (stillValid == null)
+            return;
+
+        node.durability().sync(description, null, min, stillValid, null, SortedArrayList.ofSorted(node.id()), NoLocal, MinorityQuorumAndWaitedForAll, KnownReadable, 1L, TimeUnit.HOURS)
+        .invoke((ready, fail) -> {
+            if (fail != null) commandStore.agent().ownershipEvents().onFailedBootstrap(attempt, "Restart Bootstrap", allValid, () -> restart(ranges, attempt + 1), doNotRetry(fail), fail);
+            else commandStore.execute((Empty)() -> "", safeStore -> { restart(safeStore, stillValid, attempt, ready); }, node.agent());
+        });
+    }
+
+    private synchronized void restart(SafeCommandStore safeStore, Ranges ranges, int attemptCounter, DurabilityResults ready)
+    {
+        ranges = restart(ranges);
+        if (ranges == null)
+            return;
+
+        Attempt attempt = new Attempt(ranges, attemptCounter, ready);
         inProgress.add(attempt);
-        return attempt.start(safeStore);
+        attempt.start(safeStore);
     }
 
     synchronized void complete(Attempt attempt)
@@ -248,12 +400,8 @@ class Bootstrap
         Invariants.requireArgument(attempt.fetched.equals(attempt.fetchedAndSafeToRead));
         inProgress.remove(attempt);
         remaining = remaining.without(attempt.fetched);
-        if (inProgress.isEmpty() && remaining.isEmpty())
-        {
-            data.setSuccess(null);
-            reads.setSuccess(null);
-            commandStore.complete(this);
-        }
+
+        maybeComplete();
     }
 
     // distinct from abort as triggered by ourselves when we no longer own the range
@@ -263,5 +411,17 @@ class Bootstrap
         remaining = remaining.without(invalidate);
         for (Attempt attempt : inProgress)
             attempt.invalidate(invalidate);
+
+        maybeComplete();
+    }
+
+    private void maybeComplete()
+    {
+        if (inProgress.isEmpty() && remaining.isEmpty())
+        {
+            data.trySuccess(null);
+            reads.trySuccess(null);
+            commandStore.complete(this);
+        }
     }
 }

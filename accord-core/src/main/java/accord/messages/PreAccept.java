@@ -117,6 +117,11 @@ public class PreAccept extends WithUnsynced<ReplyList<PreAccept.PreAcceptReply>>
         return ExecutionKind.PREACCEPT;
     }
 
+    protected boolean abort(Refuse.MinMax refuses)
+    {
+        return refuses.max != Refuse.NONE;
+    }
+
     @Override
     protected Cancellable submit()
     {

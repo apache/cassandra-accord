@@ -61,7 +61,7 @@ public class SynchronousAwait extends AbstractCoordination<Participants<?>, Bool
     void start()
     {
         super.start();
-        contact(to -> new Await(to, tracker.topologies(), txnId, scope, until, notifyProgressLog));
+        contact((to, nodeStatus) -> nodeStatus.isUnavailable() ? null : new Await(to, tracker.topologies(), txnId, scope, until, notifyProgressLog));
     }
 
     public static AsyncChain<Boolean> awaitQuorum(Node node, ExclusiveAsyncExecutor executor, TxnId txnId, Participants<?> participants, Await.Until until, boolean notifyProgressLog)

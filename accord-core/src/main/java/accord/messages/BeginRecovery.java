@@ -137,15 +137,15 @@ public class BeginRecovery extends RouteRequest.WithUnsynced<BeginRecovery.Recov
     }
 
     @Override
-    protected Cancellable submit()
+    protected boolean abort(Refuse.MinMax refuses)
     {
-        return node.commandStores().mapReduceConsume(minEpoch, executeAtOrTxnIdEpoch, this);
+        return refuses.max != Refuse.NONE;
     }
 
     @Override
-    protected void acceptInternal(RecoverReply reply, Throwable failure)
+    protected Cancellable submit()
     {
-        acceptReply(reply, failure);
+        return node.commandStores().mapReduceConsume(minEpoch, executeAtOrTxnIdEpoch, this);
     }
 
     @Override
@@ -216,23 +216,6 @@ public class BeginRecovery extends RouteRequest.WithUnsynced<BeginRecovery.Recov
         return new RecoverOk(txnId, saveStatus.status, accepted, executeAt, deps, simpleWait, simpleNoWait, laterCoordRejects, acceptsFastPath, coordinatorAcceptsFastPath, supersedingRejects, writes, result);
     }
 
-    private boolean recoverFastPath()
-    {
-        if (forceRecoverFastPath(flags))
-            return true;
-        return txnId.hasFastPath() && !isFastPathDecided(flags);
-    }
-
-    private boolean calculateDeps()
-    {
-        return RecoveryFlags.calculateDeps(flags);
-    }
-
-    static boolean acceptsFastPath(TxnId txnId, StoreParticipants participants, SaveStatus saveStatus, @Nullable Timestamp executeAt)
-    {
-        return participants.owns().isEmpty() || (txnId.hasPrivilegedCoordinator() ? saveStatus.known.hasPrivilegedVote() : txnId.equals(executeAt));
-    }
-
     @Override
     public RecoverReply reduce(RecoverReply r1, RecoverReply r2)
     {
@@ -266,13 +249,36 @@ public class BeginRecovery extends RouteRequest.WithUnsynced<BeginRecovery.Recov
         Timestamp timestamp = ok1.status == PreAccepted ? Timestamp.max(ok1.executeAt, ok2.executeAt) : ok1.executeAt;
 
         return new RecoverOk(
-            txnId, ok1.status, ok1.accepted, timestamp,
-            deps, earlierWait, earlierNoWait, laterNoVote,
-            ok1.selfAcceptsFastPath & ok2.selfAcceptsFastPath,
-                Participants.merge(ok1.coordinatorAcceptsFastPath, (Participants)ok2.coordinatorAcceptsFastPath),
-                ok1.supersedingRejects | ok2.supersedingRejects,
-            ok1.writes, ok1.result
+        txnId, ok1.status, ok1.accepted, timestamp,
+        deps, earlierWait, earlierNoWait, laterNoVote,
+        ok1.selfAcceptsFastPath & ok2.selfAcceptsFastPath,
+        Participants.merge(ok1.coordinatorAcceptsFastPath, (Participants)ok2.coordinatorAcceptsFastPath),
+        ok1.supersedingRejects | ok2.supersedingRejects,
+        ok1.writes, ok1.result
         );
+    }
+
+    @Override
+    protected void acceptInternal(RecoverReply reply, Throwable failure)
+    {
+        acceptReply(reply, failure);
+    }
+
+    private boolean recoverFastPath()
+    {
+        if (forceRecoverFastPath(flags))
+            return true;
+        return txnId.hasFastPath() && !isFastPathDecided(flags);
+    }
+
+    private boolean calculateDeps()
+    {
+        return RecoveryFlags.calculateDeps(flags);
+    }
+
+    static boolean acceptsFastPath(TxnId txnId, StoreParticipants participants, SaveStatus saveStatus, @Nullable Timestamp executeAt)
+    {
+        return participants.owns().isEmpty() || (txnId.hasPrivilegedCoordinator() ? saveStatus.known.hasPrivilegedVote() : txnId.equals(executeAt));
     }
 
     @Override

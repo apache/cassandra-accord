@@ -766,7 +766,7 @@ public class CommandsForKeyTest
         }
 
         @Override
-        public SafeCommand get(TxnId txnId)
+        public SafeCommand unsafeTryGet(TxnId txnId)
         {
             return getInternal(txnId);
         }
@@ -927,7 +927,7 @@ public class CommandsForKeyTest
         }
     }
 
-    private static class TestCommandStore extends CommandStore implements Agent, OwnershipEventListener
+    static class TestCommandStore extends CommandStore implements Agent, OwnershipEventListener
     {
         static class Task extends AsyncResults.AbstractResult<Void>
         {

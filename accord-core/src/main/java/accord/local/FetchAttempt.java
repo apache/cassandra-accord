@@ -21,7 +21,6 @@ package accord.local;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiConsumer;
-
 import javax.annotation.Nonnull;
 
 import accord.api.DataStore;
@@ -53,7 +52,7 @@ abstract class FetchAttempt implements DataStore.FetchRanges, BiConsumer<Object,
     ReducingRangeMap<Timestamp> safeToReadAts;
 
     Runnable cancel;
-    FetchResult fetch;
+    FetchResult currentFetch;
 
     /**
      * valid: the ranges we are still meant to fetch - i.e. excluding those that have been invalidated or marked failed
@@ -81,7 +80,7 @@ abstract class FetchAttempt implements DataStore.FetchRanges, BiConsumer<Object,
                 return;
 
             valid = valid.without(invalidate);
-            abort = fetch;
+            abort = currentFetch;
             // only cancel the outer future if we have no more ranges to fetch
             cancel = valid.isEmpty() ? this.cancel : null;
             if (fetched.containsAll(valid))

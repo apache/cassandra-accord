@@ -188,7 +188,6 @@ public class Serialize
                     }
 
                     TxnInfo txn = cfk.get(i);
-                    Invariants.require(!txn.is(InternalStatus.PRUNED));
                     overrideCount += txn.statusOverrides();
                     nodeIds[nodeIdCount++] = txn.node.id;
 

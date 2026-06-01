@@ -221,8 +221,8 @@ public class Topology
         {
             if (shards[i].nodes.intersects(hardRemoved))
             {
-                shards[i] = cache == null ? mapper.apply(shards[i])
-                                          : cache.computeIfAbsent(shards[i], mapper);
+                newShards[i] = cache == null ? mapper.apply(shards[i])
+                                             : cache.computeIfAbsent(shards[i], mapper);
                 ++count;
             }
         }

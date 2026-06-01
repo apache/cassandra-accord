@@ -471,7 +471,7 @@ public class Commands
 
     public static void eraseEphemeralRead(SafeCommandStore safeStore, TxnId txnId)
     {
-        SafeCommand safeCommand = safeStore.unsafeGetNoCleanup(txnId);
+        SafeCommand safeCommand = safeStore.unsafeTryGet(txnId);
         if (safeCommand == null)
             return;
 
@@ -668,7 +668,7 @@ public class Commands
 
     public static void postApply(SafeCommandStore safeStore, TxnId txnId, boolean forceApply)
     {
-        SafeCommand safeCommand = safeStore.get(txnId);
+        SafeCommand safeCommand = safeStore.unsafeGetNoLogFault(txnId);
         Command command = safeCommand.current();
         logger.trace("{} applied, setting status to Applied and notifying listeners", command);
         if (command.hasBeen(Applied) && !forceApply)
@@ -745,7 +745,7 @@ public class Commands
         @Override
         public void accept(SafeCommandStore safeStore)
         {
-            SafeCommand safeCommand = safeStore.get(txnId);
+            SafeCommand safeCommand = safeStore.unsafeGetNoLogFault(txnId);
             Command command = safeCommand.current();
             logger.trace("{} applied, setting status to Applied and notifying listeners", command);
             if (command.hasBeen(Applied) && !force)
@@ -783,6 +783,7 @@ public class Commands
         }
         else
         {
+            Invariants.require(command.hasBeen(PreApplied));
             return command.writes()
                           .apply(safeStore, executes, command.partialTxn())
                           .then(head -> new PostApply<>(head, unsafeStore, txnId, executes, false));
@@ -964,7 +965,7 @@ public class Commands
     private static void replicaExecuteSlowApply(CommandStore unsafeStore, Ballot ballot, TxnId txnId, Route<?> route, PartialTxn txn, Data data, Timestamp applyAt, long stamp)
     {
         unsafeStore.execute(ExecutionContext.unsequenced(txnId, "Replica Apply"), safeStore -> {
-            SafeCommand safeCommand = safeStore.unsafeGet(txnId);
+            SafeCommand safeCommand = safeStore.unsafeGetNoLogFault(txnId);
             Command command = safeCommand.current();
             if (stamp != unsafeStore.node.currentStamp() && !safeStore.safeToReadAt(applyAt).containsAll(command.route()))
             {
@@ -994,7 +995,7 @@ public class Commands
 
     private static void notifyAfterFailedFastApply(SafeCommandStore safeStore, TxnId txnId)
     {
-        SafeCommand safeCommand = safeStore.get(txnId);
+        SafeCommand safeCommand = safeStore.unsafeGetNoLogFault(txnId);
         Command command = safeCommand.current();
         if (command.saveStatus().compareTo(ReadyToExecute) <= 0)
             safeStore.notifyListeners(safeCommand, null);
@@ -1020,7 +1021,7 @@ public class Commands
         initialise.forEachWaitingOnId(safeStore, initialise, waiting, executeAt, (store, upd, w, exec, i) -> {
             // we don't want cleanup to transitively invoke a listener we've registered,
             // as we might still be initialising the WaitingOn collection
-            SafeCommand dep = store.unsafeGetNoCleanup(upd.txnId(i));
+            SafeCommand dep = store.unsafeTryGetNoCleanup(upd.txnId(i));
             if (dep == null || !dep.current().hasBeen(PreCommitted))
                 return;
             updateWaitingOn(store, w, exec, upd, dep);
@@ -1306,8 +1307,13 @@ public class Commands
 
     public static boolean maybeCleanup(SafeCommandStore safeStore, SafeCommand safeCommand, Command command, @Nonnull StoreParticipants newParticipants)
     {
+        return maybeCleanup(FULL, safeStore, safeCommand, command, newParticipants);
+    }
+
+    public static boolean maybeCleanup(Cleanup.Input input, SafeCommandStore safeStore, SafeCommand safeCommand, Command command, @Nonnull StoreParticipants newParticipants)
+    {
         StoreParticipants cleanupParticipants = newParticipants.filter(LOAD, safeStore, command.txnId(), command.executeAtIfKnown());
-        Cleanup cleanup = shouldCleanup(FULL, safeStore, command, cleanupParticipants);
+        Cleanup cleanup = shouldCleanup(input, safeStore, command, cleanupParticipants);
         if (cleanup == NO)
         {
             if (cleanupParticipants == command.participants())
@@ -1411,7 +1417,7 @@ public class Commands
         // return false if done, true if continuing after loading a dependency
         boolean acceptInternal(SafeCommandStore safeStore)
         {
-            SafeCommand waitingSafe = safeStore.get(waitingId);
+            SafeCommand waitingSafe = safeStore.unsafeGetNoLogFault(waitingId);
             PartialDeps partialDeps;
             {
                 Command waiting = waitingSafe.current();
@@ -1465,7 +1471,7 @@ public class Commands
                         }
                     }
 
-                    depSafe = safeStore.ifLoadedAndInitialised(directlyBlockedOn);
+                    depSafe = safeStore.unsafeIfLoadedAndInitialisedNoCleanup(directlyBlockedOn);
                     if (depSafe == null)
                     {
                         loadDepId = directlyBlockedOn;
@@ -1564,7 +1570,7 @@ public class Commands
         static SafeCommand initialiseOrRemoveDependency(SafeCommandStore safeStore, SafeCommand waitingSafe, TxnId depId, Participants<?> executes)
         {
             depId = maybeCleanupRedundantDependency(safeStore, waitingSafe, depId, ignore -> Uninitialised, executes, depId);
-            return depId != null ? safeStore.get(depId) : null;
+            return depId != null ? safeStore.unsafeTryGetNoLogFault(depId) : null;
         }
 
         // executes is not expected to be stillExecutes, i.e. does not need to remove pre-bootstrap, stale or was-owned+redundant

@@ -304,7 +304,7 @@ public class DurabilityQueue
 
     int activeCount;
     int pendingCount;
-    private final PendingQueue queued = new PendingQueue(Comparator.comparing(p -> p.startAt));
+    private final PendingQueue queued = new PendingQueue(Comparator.comparing(p -> (Long)p.startAt));
     private Object[] pendingByRange = IntervalBTree.empty();
     private final ArrayDeque<Pending> requeue = new ArrayDeque<>();
 

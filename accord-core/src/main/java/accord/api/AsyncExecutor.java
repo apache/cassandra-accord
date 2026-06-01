@@ -32,6 +32,9 @@ public interface AsyncExecutor extends Executor
     <V> Cancellable execute(Callable<V> call, BiConsumer<? super V, Throwable> callback);
     <V> Cancellable flatExecute(Callable<? extends AsyncChain<V>> call, BiConsumer<? super V, Throwable> callback);
 
+    /**
+     * See {@link #continuationChain(Runnable)}
+     */
     default Cancellable executeContinuation(Runnable run, BiConsumer<? super Void, Throwable> callback)
     {
         return execute(run, callback);

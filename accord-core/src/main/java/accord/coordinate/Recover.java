@@ -202,7 +202,7 @@ public class Recover extends AbstractCoordination<FullRoute<?>, Outcome, Recover
     {
         super.start();
         node.agent().coordinatorEvents().onRecoveryStarted(txnId, ballot);
-        contact(to -> new BeginRecovery(to, tracker.topologies(), txnId, committedExecuteAt, flags, txn, scope, ballot));
+        contact((to, nodeStatus) -> nodeStatus.isUnableToCalculateDeps() ? null : new BeginRecovery(to, tracker.topologies(), txnId, committedExecuteAt, flags, txn, scope, ballot));
     }
 
     @Override

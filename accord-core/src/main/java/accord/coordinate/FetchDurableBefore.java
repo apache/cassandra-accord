@@ -51,7 +51,7 @@ public class FetchDurableBefore extends AbstractCoordination<Ranges, DurableBefo
     void start()
     {
         super.start();
-        contact(ignore -> new GetDurableBefore(), id -> !node.id().equals(id));
+        contact((i1, i2) -> new GetDurableBefore(), id -> !node.id().equals(id));
         executor.executeMaybeImmediately(() -> {
             markSelfContacted();
             onSuccess(node.id(), new DurableBeforeReply(node.durableBefore()));
@@ -113,8 +113,7 @@ public class FetchDurableBefore extends AbstractCoordination<Ranges, DurableBefo
         {
             case Success:
                 SortedListMap<Node.Id, DurableBefore> oks = finishOks();
-                DurableBefore durableBefore = oks.foldlNonNullValues(DurableBefore::merge, DurableBefore.EMPTY);
-                finishWithSuccess(durableBefore);
+                finishWithSuccess(oks.foldlNonNullValues(DurableBefore::merge, DurableBefore.EMPTY));
                 break;
             case Failed:
                 finishOnFailure();

@@ -20,20 +20,25 @@ package accord.local;
 
 import accord.utils.Rethrowable;
 
-public class LogUnavailableException extends RuntimeException implements Rethrowable<LogUnavailableException>
+public class LogFaultException extends RuntimeException implements Rethrowable<LogFaultException>
 {
-    public LogUnavailableException()
+    public LogFaultException()
     {
     }
 
-    private LogUnavailableException(Throwable cause)
+    public LogFaultException(String description)
+    {
+        super(description);
+    }
+
+    private LogFaultException(Throwable cause)
     {
         super(cause);
     }
 
     @Override
-    public LogUnavailableException rethrowable()
+    public LogFaultException rethrowable()
     {
-        return new LogUnavailableException(this);
+        return new LogFaultException(this);
     }
 }

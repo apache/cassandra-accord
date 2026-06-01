@@ -97,7 +97,7 @@ abstract class Propose<R> extends AbstractCoordination<FullRoute<?>, R, AcceptRe
     void start()
     {
         super.start();
-        contact(to -> new Accept(to, tracker.topologies(), kind, ballot, txnId, scope, executeAt, deps, acceptFlags));
+        contact((to, nodeStatus) -> nodeStatus.isUnableToCalculateDeps() ? null : new Accept(to, tracker.topologies(), kind, ballot, txnId, scope, executeAt, deps, acceptFlags));
     }
 
     @Override
@@ -262,7 +262,7 @@ abstract class Propose<R> extends AbstractCoordination<FullRoute<?>, R, AcceptRe
         void start()
         {
             super.start();
-            contact(to -> new Accept.NotAccept(status, ballot, txnId, scope));
+            contact((to, nodeStatus) -> nodeStatus.isUnavailable() ? null : new Accept.NotAccept(status, ballot, txnId, scope));
         }
 
         public static void proposeInvalidate(Node node, ExclusiveAsyncExecutor executor, Ballot ballot, TxnId txnId, RoutingKey invalidateWithParticipant, BiConsumer<Void, Throwable> callback)

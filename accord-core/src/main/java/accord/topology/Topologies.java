@@ -288,9 +288,9 @@ public interface Topologies extends TopologySorter
         }
 
         @Override
-        public boolean isFaulty(Id node)
+        public NodeStatus status(Id node)
         {
-            return sorter.isFaulty(node);
+            return sorter.status(node);
         }
     }
 
@@ -479,9 +479,9 @@ public interface Topologies extends TopologySorter
         }
 
         @Override
-        public boolean isFaulty(Id node)
+        public NodeStatus status(Id node)
         {
-            return sorter.isFaulty(node);
+            return sorter.status(node);
         }
 
         @Override

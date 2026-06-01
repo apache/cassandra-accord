@@ -21,13 +21,13 @@ package accord.coordinate;
 import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
-import java.util.function.Function;
 import java.util.function.Predicate;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import accord.api.Timeouts;
+import accord.api.TopologySorter.NodeStatus;
 import accord.coordinate.tracking.AbstractTracker;
 import accord.coordinate.tracking.RequestStatus;
 import accord.local.MapReduceConsumeCommandStores;
@@ -47,10 +47,13 @@ import accord.utils.SortedList;
 import accord.utils.SortedListMap;
 import accord.utils.SortedListSet;
 import accord.utils.Rethrowable;
+import accord.utils.UnhandledEnum;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.Cancellable;
 
 import static accord.api.ProtocolModifiers.permitLocalDelivery;
+import static accord.api.TopologySorter.NodeStatus.DEGRADED;
+import static accord.api.TopologySorter.NodeStatus.HEALTHY;
 import static accord.coordinate.AbstractCoordination.LocalExecuteState.PENDING;
 import static accord.coordinate.AbstractCoordination.LocalExecuteState.SUCCESS;
 import static accord.coordinate.AbstractCoordination.LocalExecuteState.TIMEOUT;
@@ -190,18 +193,17 @@ public abstract class AbstractCoordination<P extends Participants<?>, Result, Re
         expectingReply.set(nodes.find(node.id()));
     }
 
-    void contact(Function<Node.Id, Request> request)
+    void contact(BiFunction<Node.Id, NodeStatus, Request> request)
     {
         contact(request, null);
     }
 
-    void contact(Function<Node.Id, Request> request, @Nullable Predicate<Node.Id> include)
+    void contact(BiFunction<Node.Id, NodeStatus, Request> request, @Nullable Predicate<Node.Id> include)
     {
         executor.executeMaybeImmediately(() -> {
             unsafeToReply = true;
             try
             {
-
                 AbstractTracker<?> tracker = tracker();
                 Topologies topologies = tracker.topologies();
                 if (tracing != null)
@@ -212,23 +214,54 @@ public abstract class AbstractCoordination<P extends Participants<?>, Result, Re
                     Node.Id to = nodes.get(i);
                     if (include == null || include.test(to))
                     {
-                        if (topologies.isFaulty(to))
+                        Invariants.require(replyState[i] == null);
+
+                        NodeStatus nodeStatus = topologies.status(to);
+                        if (nodeStatus.isFaulty() && to.equals(node.id()))
                         {
-                            if (tracing != null)
-                                tracing.trace(null, "%s is considered faulty; recording failure instead", to);
-                            if (RequestStatus.Failed == tracker.prerecordFailure(to))
+                            // don't drop self-addressed messages; this is generally sensible, but in particular
+                            // helps us achieve KnownToSelf statuses promptly on startup/rebootstrap that are necessary for progress
+                            nodeStatus = HEALTHY;
+                        }
+
+                        Request r;
+                        switch (nodeStatus)
+                        {
+                            default: throw new UnhandledEnum(nodeStatus);
+                            case HEALTHY:
                             {
-                                finishOnExaustion();
-                                return;
+                                r = Invariants.nonNull(request.apply(to, HEALTHY));
+                                break;
+                            }
+
+                            case DEGRADED:
+                            case UNABLE_TO_CALCULATE_DEPS:
+                            case UNREADABLE:
+                            {
+                                r = request.apply(to, nodeStatus);
+                                if (tracing != null && r == null)
+                                    tracing.trace(null, "%s is %s; not contacting", to, nodeStatus);
+                                break;
+                            }
+
+                            case UNAVAILABLE:
+                            {
+                                if (tracing != null)
+                                    tracing.trace(null, "%s is %s; recording failure instead", to, nodeStatus);
+                                r = null;
+                                break;
                             }
                         }
-                        else
+
+                        if (r != null)
                         {
-                            Invariants.require(replyState[i] == null);
                             expectingReply.set(i);
-                            // TODO (expected): do not cancel PreAccept, Accept, Commit, Stable or Apply to self on done
-                            replyState[i] = node.send(to, request.apply(to), executor, this, tracing);
-                            Invariants.require(expectingReply.get(i) || replyState[i] == null);
+                            replyState[i] = node.send(to, r, executor, this, tracing);
+                            Invariants.require(expectingReply.get(i));
+                        }
+                        else if (RequestStatus.Failed == tracker.prerecordFailure(to))
+                        {
+                            finishOnExaustion();
                         }
                     }
                 }
@@ -414,6 +447,11 @@ public abstract class AbstractCoordination<P extends Participants<?>, Result, Re
                 replies[i] = null;
         }
         return new SortedListMap<>(nodes, replies, replyCount);
+    }
+
+    public int inflightCount()
+    {
+        return expectingReply.getSetBitCount();
     }
 
     @Override

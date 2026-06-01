@@ -341,7 +341,9 @@ public class ShardDurability
                 currentSplits = Math.min(currentSplits * 2, maxSplits);
                 logger.info("Increased numberOfSplits to {} for shard {}", currentSplits, shard.range);
             }
-            long retryDelay = node.agent().retrySyncPointDelay(node, retries, MICROSECONDS);
+            long retryDelay = activeRequest != null
+                              ? node.agent().retrySyncPointDelay(node, retries, MICROSECONDS)
+                              : node.agent().retryBackgroundSyncPointDelay(node, retries, nodeOffset, shard.rf(), MICROSECONDS);
             if (activeRequest != null) logger.info("Retrying {} for {} in {}s", ranges, activeRequest.requestedBy, String.format("%.2f", retryDelay/1000_000.0));
             else logger.debug("Retrying {} in {}s", ranges, String.format("%.2f", retryDelay/1000_000.0));
             scheduled = node.scheduler().selfRecurring(() -> {
@@ -369,7 +371,8 @@ public class ShardDurability
             Txn.Kind kind = ExclusiveSyncPoint;
             if (activeRequest != null)
             {
-                kind = activeRequest.kind;
+                if (activeRequest.kind != null)
+                    kind = activeRequest.kind;
                 if (activeRequest.min != null)
                 {
                     minEpoch = activeRequest.min.epoch();
@@ -377,7 +380,7 @@ public class ShardDurability
                 }
             }
             minHlc = Math.max(minHlc, node.agent().minStaleHlc(node, activeRequest != null));
-            TxnId staleId = node.nextStaleTxnIdWithDefaultFlags(minEpoch, minHlc, ranges, kind, Domain.Range);
+            TxnId staleId = node.nextStaleReservedTxnIdWithDefaultFlags(minEpoch, minHlc, ranges, kind, Domain.Range);
             if (activeRequest != null) logger.info("Initiating RX requested by {} for {} with TxnId {}. Remaining: {}.", activeRequest.requestedBy, ranges, staleId, active);
             else logger.debug("Initiating RX for durability of {} with TxnId {}.", ranges, staleId);
 
@@ -401,16 +404,23 @@ public class ShardDurability
                 if (fail != null && (!(fail instanceof CoordinationFailed)) && activeRequest != null)
                     logger.warn("{}: Failed to agree RX requested by {} for {}.", syncId, activeRequest.requestedBy, ranges, fail);
                 if (fail != null && activeRequest != null)
-                    logger.warn("{}: Failed to agree RX requested by {} for {}: {}.", syncId, activeRequest.requestedBy, ranges, fail.getMessage());
+                    logger.warn("{}: Failed to agree RX requested by {} for {}: {}.", syncId, activeRequest.requestedBy, ranges, describeFailure(fail));
                 else if (fail != null && (!(fail instanceof CoordinationFailed)))
                     logger.warn("{}: Failed to agree RX for {}.", syncId, ranges, fail);
                 else if (fail != null)
-                    logger.warn("{}: Failed to agree RX for {}: {}.", syncId, ranges, fail.getMessage());
+                    logger.warn("{}: Failed to agree RX for {}: {}.", syncId, ranges, describeFailure(fail));
                 else if (activeRequest != null)
                     logger.info("{}: Successfully agreed RX requested by {} for {}.", syncId, activeRequest.requestedBy, ranges);
                 else
                     logger.debug("{}: Successfully agreed RX for {}.", syncId, ranges);
             };
+        }
+
+        private String describeFailure(Throwable fail)
+        {
+            String message = fail.getMessage();
+            String name = fail.getClass().getSimpleName();
+            return message == null ? name : name + ": " + message;
         }
 
         synchronized boolean request(DurabilityRequest request, Range range)
@@ -494,6 +504,11 @@ public class ShardDurability
     {
         shardCycleTimeMicros = units.toMicros(newShardCycleTime);
         reschedule();
+    }
+
+    public long shardCycleTimeMicros()
+    {
+        return shardCycleTimeMicros;
     }
 
     public synchronized void reconfigure(int targetShardSplits, int maxShardSplits, long newShardCycleTime, TimeUnit units)

@@ -142,6 +142,18 @@ public class Accept extends RouteRequest.WithUnsynced<ReplyList<Accept.AcceptRep
     }
 
     @Override
+    protected boolean abort(Refuse.MinMax refuses)
+    {
+        return refuses.max != Refuse.NONE;
+    }
+
+    @Override
+    public Cancellable submit()
+    {
+        return node.commandStores().mapReduceConsume(minEpoch, executeAt.epoch(), this);
+    }
+
+    @Override
     public ReplyList<AcceptReply> applyInternal(SafeCommandStore safeStore)
     {
         PartialDeps inputDeps = this.partialDeps;
@@ -249,6 +261,21 @@ public class Accept extends RouteRequest.WithUnsynced<ReplyList<Accept.AcceptRep
         return outcome;
     }
 
+    @Override
+    public ReplyList<AcceptReply> reduce(ReplyList<AcceptReply> r1, ReplyList<AcceptReply> r2)
+    {
+        return ReplyList.merge(r1, r2);
+    }
+
+    @Override
+    protected void acceptInternal(ReplyList<AcceptReply> replies, Throwable fail)
+    {
+        // finished processing, null out large objects
+        partialDeps = null;
+        if (fail != null || replies == null) acceptReply(null, fail);
+        else ReplyList.invoke(replies, AcceptReply::reduce, this::acceptReply);
+    }
+
     private boolean isPartialAccept()
     {
         return AcceptFlags.isPartial(acceptFlags);
@@ -262,27 +289,6 @@ public class Accept extends RouteRequest.WithUnsynced<ReplyList<Accept.AcceptRep
     private boolean filterDeps()
     {
         return AcceptFlags.filterDeps(acceptFlags);
-    }
-
-    @Override
-    public ReplyList<AcceptReply> reduce(ReplyList<AcceptReply> r1, ReplyList<AcceptReply> r2)
-    {
-        return ReplyList.merge(r1, r2);
-    }
-
-    @Override
-    public Cancellable submit()
-    {
-        return node.commandStores().mapReduceConsume(minEpoch, executeAt.epoch(), this);
-    }
-
-    @Override
-    protected void acceptInternal(ReplyList<AcceptReply> replies, Throwable fail)
-    {
-        // finished processing, null out large objects
-        partialDeps = null;
-        if (fail != null || replies == null) acceptReply(null, fail);
-        else ReplyList.invoke(replies, AcceptReply::reduce, this::acceptReply);
     }
 
     @Override

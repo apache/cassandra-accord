@@ -133,6 +133,12 @@ public class GetEphemeralReadDeps extends RouteRequest.WithUnsynced<ReplyList<Ge
     }
 
     @Override
+    protected boolean abort(Refuse.MinMax refuses)
+    {
+        return refuses.max != Refuse.NONE;
+    }
+
+    @Override
     public String toString()
     {
         return "GetEphemeralReadDeps{" +

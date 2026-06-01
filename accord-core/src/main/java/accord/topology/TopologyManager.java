@@ -391,6 +391,8 @@ public class TopologyManager
                 AsyncResult.Settable<EpochReady> whenSetup = new AsyncResults.SettableWithDescription<>("Publishing Active Epoch");
                 EpochReady epochReady = new EpochReady(topology.epoch,
                                                        NestedAsyncResult.flatMap(whenSetup, ignore -> AsyncResults.success(null)),
+                                                       NestedAsyncResult.flatMap(whenSetup, EpochReady::refusing),
+                                                       NestedAsyncResult.flatMap(whenSetup, EpochReady::notRefusing),
                                                        NestedAsyncResult.flatMap(whenSetup, EpochReady::coordinate),
                                                        NestedAsyncResult.flatMap(whenSetup, EpochReady::data),
                                                        NestedAsyncResult.flatMap(whenSetup, EpochReady::reads));
@@ -454,6 +456,7 @@ public class TopologyManager
         }
     }
 
+    // we use this as an override point in tests within the C* integration
     @VisibleForTesting
     protected EpochReady bootstrap(Supplier<EpochReady> bootstrap)
     {
@@ -469,6 +472,8 @@ public class TopologyManager
 
         return new EpochReady(next.epoch,
                               next.active,
+                              NestedAsyncResult.flatMap(previous.refusing, ignore -> next.refusing),
+                              NestedAsyncResult.flatMap(previous.notRefusing, ignore -> next.notRefusing),
                               NestedAsyncResult.flatMap(previous.coordinate, ignore -> next.coordinate),
                               NestedAsyncResult.flatMap(previous.data, ignore -> next.data),
                               NestedAsyncResult.flatMap(previous.reads, ignore -> next.reads)

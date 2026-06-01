@@ -105,7 +105,7 @@ public class AsynchronousAwait extends AbstractCoordination<Participants<?>, Asy
     void start()
     {
         super.start();
-        contact(to -> new Await(to, tracker.topologies(), txnId, scope, until, asynchronousCallbackId, notifyProgressLog));
+        contact((to, nodeStatus) -> new Await(to, tracker.topologies(), txnId, scope, until, asynchronousCallbackId, notifyProgressLog));
     }
 
     @Override

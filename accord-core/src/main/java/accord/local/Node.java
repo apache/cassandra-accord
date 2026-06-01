@@ -18,6 +18,7 @@
 
 package accord.local;
 
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -37,6 +38,7 @@ import accord.api.Agent;
 import accord.api.AsyncExecutor;
 import accord.api.ExclusiveAsyncExecutor;
 import accord.api.TopologyService;
+import accord.api.TopologySorter.NodeStatus;
 import accord.api.Tracing;
 import accord.coordinate.ExecuteTxn;
 import accord.impl.LocalDelivery;
@@ -496,6 +498,12 @@ public class Node implements NodeCommandStoreService
     }
 
     @Override
+    public long uniqueStaleReserved(long greaterThan)
+    {
+        return uniqueTime.uniqueStaleReserved(greaterThan);
+    }
+
+    @Override
     public long now()
     {
         return time.now();
@@ -546,24 +554,25 @@ public class Node implements NodeCommandStoreService
         agent.replicaEvents().onLocalExecution(this, txnId, result);
     }
 
-    public void send(Topologies topologies, Request send, @Nullable Tracing tracing)
+    public void send(Topologies topologies, NodeStatus ifAtLeast, Request send, @Nullable Tracing tracing)
     {
         SortedArrayList<Node.Id> nodes = topologies.nodes();
         for (int i = 0 ; i < nodes.size() ; ++i)
         {
             Node.Id to = nodes.get(i);
-            if (!topologies.isFaulty(nodes.get(i)))
+            if (topologies.status(to).isAtLeast(ifAtLeast))
                 send(to, send, tracing);
         }
     }
 
-    public void send(Topologies topologies, Function<Id, Request> requestFactory, @Nullable Tracing tracing)
+    public void send(Topologies topologies, NodeStatus ifAtLeast, Function<Id, Request> requestFactory, @Nullable Tracing tracing)
     {
         SortedArrayList<Node.Id> nodes = topologies.nodes();
         for (int i = 0 ; i < nodes.size() ; ++i)
         {
             Node.Id to = nodes.get(i);
-            if (!topologies.isFaulty(nodes.get(i)))
+            NodeStatus status = topologies.status(to);
+            if (status.isAtLeast(ifAtLeast))
                 send(to, requestFactory.apply(to), tracing);
         }
     }
@@ -612,6 +621,8 @@ public class Node implements NodeCommandStoreService
             agent.onException(failure);
             if (success != null)
                 agent().onException(new IllegalArgumentException(String.format("fail (%s) and send (%s) are both not null", failure, success)));
+            if (failure instanceof CancellationException && !(replyContext instanceof LocalDelivery<?>))
+                return; // cancellation likely means the request timed out - no need to respond unless LocalDelivery which registers no timeout
         }
         else if (success == null)
         {
@@ -632,9 +643,9 @@ public class Node implements NodeCommandStoreService
         return nextTxnIdWithFlags(keys, kind, domain, Any, defaultMediumPath().bit());
     }
 
-    public TxnId nextStaleTxnIdWithDefaultFlags(long minEpoch, long minHlc, Seekables<?, ?> keys, Txn.Kind kind, Domain domain)
+    public TxnId nextStaleReservedTxnIdWithDefaultFlags(long minEpoch, long minHlc, Seekables<?, ?> keys, Txn.Kind kind, Domain domain)
     {
-        return nextStaleTxnIdWithFlags(minEpoch, minHlc, keys, kind, domain, Any, defaultMediumPath().bit());
+        return nextStaleReservedTxnIdWithFlags(minEpoch, minHlc, keys, kind, domain, Any, defaultMediumPath().bit());
     }
 
     public TxnId nextTxnIdWithDefaultFlags(Seekables<?, ?> keys, Txn.Kind kind, Domain domain, Cardinality cardinality)
@@ -665,10 +676,11 @@ public class Node implements NodeCommandStoreService
         return newTxnId(epoch(Long.MIN_VALUE, keys, kind), uniqueNow(), kind, domain, cardinality, flags, id);
     }
 
-    public TxnId nextStaleTxnIdWithFlags(long minEpoch, long minHlc, Seekables<?, ?> keys, Txn.Kind kind, Domain domain, Cardinality cardinality, int flags)
+    public TxnId nextStaleReservedTxnIdWithFlags(long minEpoch, long minHlc, Seekables<?, ?> keys, Txn.Kind kind, Domain domain, Cardinality cardinality, int flags)
     {
         long epoch = epoch(minEpoch, keys, kind);
-        long hlc = uniqueStale(minHlc);
+        // sync point ids are low traffic and always ask for a fixed (large) staleness, so use the reserved bucket
+        long hlc = uniqueStaleReserved(minHlc);
         return newTxnId(epoch, hlc, kind, domain, cardinality, flags, id);
     }
 
@@ -769,6 +781,11 @@ public class Node implements NodeCommandStoreService
     public FullRoute<?> computeRoute(TxnId txnId, Routables<?> keysOrRanges) throws TopologyException
     {
         return computeRoute(txnId.epoch(), keysOrRanges, topology.active());
+    }
+
+    public FullRoute<?> computeRoute(long epoch, Routables<?> keysOrRanges) throws TopologyException
+    {
+        return computeRoute(epoch, keysOrRanges, topology.active());
     }
 
     public FullRoute<?> computeRoute(long epoch, Routables<?> keysOrRanges, ActiveEpochs active) throws TopologyException

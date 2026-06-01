@@ -126,7 +126,7 @@ public class FetchData extends CheckShards<FetchData.FetchResult, Route<?>>
         if (!node.topology().active().hasAtLeastEpoch(srcEpoch))
         {
             if (request.tracing != null)
-                request.tracing.trace(null, "Epoch %d not ready; waiting", srcEpoch);
+                request.tracing.trace(null, "Epoch %d not ready; waiting", (Long)srcEpoch);
             return node.withEpochAtLeast(srcEpoch, request.executor, request, () -> fetchSpecific(node, query, maxRoute, request));
         }
 

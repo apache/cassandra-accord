@@ -100,7 +100,7 @@ public class CoordinateMaxConflict extends AbstractCoordinatePreAccept<Timestamp
     void start()
     {
         super.start();
-        contact(to -> new GetMaxConflict(to, topologies, scope, executionEpoch));
+        contact((to, nodeStatus) -> nodeStatus.isUnavailable() ? null : new GetMaxConflict(to, topologies, scope, executionEpoch));
     }
 
     @Override

@@ -1233,9 +1233,14 @@ public class CommandsForKey extends CommandsForKeyUpdate
         return prunedBeforeById < 0 ? NO_INFO : byId[prunedBeforeById];
     }
 
-    public TxnId redundantOrBootstrappedBefore()
+    public TxnId redundantOrUnreadyBefore()
     {
-        return TxnId.nonNullOrMax(redundantBefore(), bounds.readyAt);
+        return redundantOrUnreadyBefore(bounds);
+    }
+
+    static TxnId redundantOrUnreadyBefore(QuickBounds bounds)
+    {
+        return TxnId.nonNullOrMax(redundantBefore(bounds), bounds.readyAt);
     }
 
     public TxnId readyAt()
@@ -2406,6 +2411,7 @@ public class CommandsForKey extends CommandsForKeyUpdate
                     {
                         Invariants.require(txn.witnesses(missingId));
                         TxnInfo missingInfo = get(missingId, byId);
+                        // a missing entry we do not hold a record for must be one we are loading
                         Invariants.require(missingInfo == null ? missingId.is(UNSTABLE) && find(loadingPruned, missingId) != null : missingInfo.status().compareTo(InternalStatus.COMMITTED) < 0);
                         Invariants.require(txn.depsKnownBefore().compareTo(missingId) >= 0);
                     }

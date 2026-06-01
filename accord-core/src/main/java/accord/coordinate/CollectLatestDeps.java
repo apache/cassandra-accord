@@ -81,7 +81,7 @@ public class CollectLatestDeps extends AbstractCoordination<Route<?>, List<Lates
     void start()
     {
         super.start();
-        contact(to -> new GetLatestDeps(to, tracker.topologies(), scope, txnId, ballot, executeAt));
+        contact((to, nodeStatus) -> nodeStatus.isUnableToCalculateDeps() ? null : new GetLatestDeps(to, tracker.topologies(), scope, txnId, ballot, executeAt));
     }
 
     @Override

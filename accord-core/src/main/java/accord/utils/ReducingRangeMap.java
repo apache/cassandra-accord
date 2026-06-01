@@ -54,6 +54,11 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         super(RoutingKeys.EMPTY_KEYS_ARRAY, (V[])NO_OBJECTS);
     }
 
+    protected ReducingRangeMap(ReducingRangeMap<V> copy)
+    {
+        super(copy.starts, copy.values);
+    }
+
     protected ReducingRangeMap(RoutingKey[] starts, V[] values)
     {
         super(starts, values);
@@ -498,6 +503,9 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         @Override
         protected ReducingRangeMap<V> buildInternal()
         {
+            if (values.isEmpty())
+                return EMPTY;
+
             return new ReducingRangeMap<>(starts.toArray(new RoutingKey[0]), (V[])values.toArray(new Object[0]));
         }
     }
@@ -526,22 +534,29 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         return map(map, allocator, (ReducingRangeMap<V2>) ReducingRangeMap.EMPTY, ReducingRangeMap::new);
     }
 
-    // TODO (desired): this doesn't merge equivalent but non-equal V2 values
     public <V2, M extends ReducingRangeMap<V2>> M map(Function<V, V2> map, IntFunction<V2[]> allocator, M empty, BiFunction<RoutingKey[], V2[], M> factory)
+    {
+        return map((m, s, e, v) -> m.apply(v), map, (next, prev) -> Objects.equals(next, prev) ? prev : next, allocator, empty, factory);
+    }
+
+    public <P, V2, M extends ReducingRangeMap<V2>> M map(QuadFunction<P, RoutingKey, RoutingKey, V, V2> map, P param, BiFunction<V2, V2, V2> mergeEquivalent, IntFunction<V2[]> allocator, M empty, BiFunction<RoutingKey[], V2[], M> factory)
     {
         RoutingKey[] starts = null;
         V2[] output = allocator.apply(values.length);
         int count = 0;
         for (int i = 0 ; i < values.length ; ++i)
         {
-            V2 next = map.apply(values[i]);
-            if (count == 0 ? next == null : (Objects.equals(next, output[count - 1])))
+            V2 next = map.apply(param, this.starts[i], this.starts[i + 1], values[i]);
+            V2 merged = next;
+            if (count == 0 ? next == null : next == output[count - 1] || next != (merged = mergeEquivalent.apply(next, output[count - 1])))
             {
                 if (starts == null)
                 {
                     starts = new RoutingKey[values.length];
                     System.arraycopy(this.starts, 0, starts, 0, count);
                 }
+                if (count > 0)
+                    output[count - 1] = merged;
                 continue;
             }
             if (starts != null)

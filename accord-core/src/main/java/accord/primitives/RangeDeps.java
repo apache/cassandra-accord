@@ -1148,8 +1148,11 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>, KeyOrRangeD
         {
             for (Map.Entry<TxnId, Ranges> e : txnIdRanges.entrySet())
             {
-                builder.nextKey(e.getKey());
                 Ranges ranges = e.getValue();
+                if (ranges.isEmpty())
+                    continue;
+
+                builder.nextKey(e.getKey());
                 for (int i = 0 ; i < ranges.size() ; ++i)
                     builder.add(ranges.get(i));
             }

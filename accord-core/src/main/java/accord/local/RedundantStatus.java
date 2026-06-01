@@ -31,6 +31,7 @@ import static accord.local.RedundantStatus.Property.LOCALLY_DURABLE_TO_COMMAND_S
 import static accord.local.RedundantStatus.Property.LOCALLY_DURABLE_TO_DATA_STORE;
 import static accord.local.RedundantStatus.Property.LOCALLY_SYNCED;
 import static accord.local.RedundantStatus.Property.LOCALLY_WITNESSED;
+import static accord.local.RedundantStatus.Property.LOG_INCOMPLETE;
 import static accord.local.RedundantStatus.Property.LOG_UNAVAILABLE;
 import static accord.local.RedundantStatus.Property.QUORUM_APPLIED;
 import static accord.local.RedundantStatus.Property.NOT_OWNED;
@@ -80,7 +81,6 @@ public class RedundantStatus
         LOCALLY_DEFUNCT                    (false,  true,  LT, LOCALLY_REDUNDANT),
 
         /**
-         *
          * We can bootstrap ranges at different times, and have a transaction that participates in both ranges -
          * in this case one of the portions of the transaction may be totally unordered with respect to other transactions
          * in that range because both occur prior to the readyAt point, so their (local) dependencies are entirely erased.
@@ -91,14 +91,14 @@ public class RedundantStatus
          * Being UNREADY on one epoch doesn't override another epoch where we have lost ownership
          * (a sync point may still be waiting for it to apply)
          */
-        UNREADY(false, true, LT, LOCALLY_DEFUNCT),
+        UNREADY                            (false, true, LT, LOCALLY_DEFUNCT),
 
-        SHARD_APPLIED_HLC_BOUND(false, true, LE),
+        SHARD_APPLIED_HLC_BOUND            (false, true, LE),
 
         /**
          * A point before which we do not know OUR OWN log
          */
-        LOG_UNAVAILABLE(true, false, LT, UNREADY),
+        LOG_UNAVAILABLE                    (true, false, LT, UNREADY),
 
         // have applied a VisibilitySyncPoint locally, syncing deps for active transactions
         LOCALLY_WITNESSED                  (false,  true,  LE),
@@ -138,6 +138,12 @@ public class RedundantStatus
         // TODO (desired): separate GC_BEFORE with HLC_BOUND and without
         GC_BEFORE                          (false,  true,  LT, TRUNCATE_BEFORE, SHARD_APPLIED_HLC_BOUND),
 
+        /**
+         * A point before which OUR OWN log is perhaps incomplete - we may answer definitive queries (i.e. >= STABLE)
+         * but an absent or undecided record will throw a log fault
+         */
+        LOG_INCOMPLETE                     ( true, false,  LT, UNREADY),
+
         // not persisted
         WAS_OWNED                          (false,  false, LT, LOCALLY_DEFUNCT),
         NOT_OWNED                          (false,  false, LT),
@@ -147,8 +153,9 @@ public class RedundantStatus
         static final Property[] REVERSE_PROPERTIES = values();
         static
         {
-            // we have 32 integer bits to use, and we use 2 bits per property. If we exceed this number of properties we need to bump to long.
-            Invariants.require(PROPERTIES[PROPERTIES.length - 1].ordinal() < 16);
+            // we now have room for 32 property ordinals, but the integration serializer assumes up to 16;
+            // for now we verify that no more than 16 unique PERSISTENT properties exist. WAS_OWNED and NOT_OWNED are derived.
+            Invariants.require(WAS_OWNED.ordinal() <= 16);
             for (int i = 0 ; i < REVERSE_PROPERTIES.length / 2 ; ++i)
             {
                 REVERSE_PROPERTIES[i] = REVERSE_PROPERTIES[REVERSE_PROPERTIES.length - (1 + i)];
@@ -187,6 +194,7 @@ public class RedundantStatus
         public static final SomeStatus QUORUM_APPLIED_ONLY = oneSlow(QUORUM_APPLIED);
         public static final SomeStatus SHARD_APPLIED_ONLY = oneSlow(SHARD_APPLIED);
         public static final SomeStatus LOG_UNAVAILABLE_ONLY = oneSlow(LOG_UNAVAILABLE);
+        public static final SomeStatus LOG_INCOMPLETE_ONLY = oneSlow(LOG_INCOMPLETE);
         public static final SomeStatus LOCALLY_DURABLE_TO_DATA_STORE_ONLY = oneSlow(LOCALLY_DURABLE_TO_DATA_STORE);
         public static final SomeStatus LOCALLY_DURABLE_TO_COMMAND_STORE_ONLY = oneSlow(LOCALLY_DURABLE_TO_COMMAND_STORE);
         public static final SomeStatus GC_BEFORE_AND_LOCALLY_DURABLE = multi(GC_BEFORE, LOCALLY_DURABLE_TO_DATA_STORE, LOCALLY_DURABLE_TO_COMMAND_STORE);

@@ -20,7 +20,6 @@ package accord.messages;
 import javax.annotation.Nullable;
 
 import accord.api.Tracing;
-import accord.impl.LocalDelivery;
 import accord.local.Commands;
 import accord.local.Commands.CommitOutcome;
 import accord.local.LoadKeys;
@@ -50,6 +49,7 @@ import accord.utils.Invariants;
 import accord.utils.UnhandledEnum;
 import accord.utils.async.Cancellable;
 
+import static accord.api.TopologySorter.NodeStatus.UNREADABLE;
 import static accord.messages.Commit.Kind.CommitWithTxn;
 import static accord.messages.MessageType.StandardMessage.COMMIT_INVALIDATE_REQ;
 import static accord.messages.MessageType.StandardMessage.COMMIT_REQ;
@@ -264,8 +264,6 @@ public class Commit extends RouteRequest.WithUnsynced<CommitOrReadNack>
         {
             if (isCancelled())
             {
-                if (!(replyContext instanceof LocalDelivery<?>))
-                    return;
                 failure = CANCELLATION_EXCEPTION;
             }
             else
@@ -330,7 +328,7 @@ public class Commit extends RouteRequest.WithUnsynced<CommitOrReadNack>
 
         public static void commitInvalidate(Node node, Topologies commitTo, TxnId txnId, Participants<?> inform, @Nullable Tracing tracing)
         {
-            node.send(commitTo, to -> new Invalidate(to, commitTo, txnId, inform), tracing);
+            node.send(commitTo, UNREADABLE, to -> new Invalidate(to, commitTo, txnId, inform), tracing);
         }
 
         public final long invalidateUntilEpoch;
@@ -378,9 +376,9 @@ public class Commit extends RouteRequest.WithUnsynced<CommitOrReadNack>
         }
 
         @Override
-        protected boolean supportsPartialRefusal()
+        protected boolean abort(Refuse.MinMax refuses)
         {
-            return true;
+            return refuses.min == Refuse.ALL;
         }
 
         @Override

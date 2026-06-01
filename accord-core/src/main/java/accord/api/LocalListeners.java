@@ -85,8 +85,10 @@ public interface LocalListeners
 
     /**
      * Erase all listeners for transactions with a lower {@code TxnId} than {@code clearBefore}.
+     * Notify all waiters on listeners with a lower {@code TxnId} than {@code unreadyBefore}.
+     *
      */
-    void clearBefore(TxnId clearBefore);
+    void cleanupBefore(TxnId clearBefore, TxnId unreadyBefore);
 
     /**
      * Erase all listeners; used only for resetting state

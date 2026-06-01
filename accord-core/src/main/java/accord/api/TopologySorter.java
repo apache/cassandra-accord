@@ -27,6 +27,44 @@ import accord.topology.Topology;
 //  have the transaction data, or may not be able to serve the read
 public interface TopologySorter
 {
+    enum NodeStatus
+    {
+        UNAVAILABLE, UNABLE_TO_CALCULATE_DEPS, UNREADABLE,
+        /* Some ranges may be unable to participate in some way */
+        DEGRADED,
+        HEALTHY;
+
+        public final boolean isAtLeast(NodeStatus greaterThan)
+        {
+            return this.compareTo(greaterThan) >= 0;
+        }
+
+        public final boolean isHealthy()
+        {
+            return this == HEALTHY;
+        }
+
+        public final boolean isFaulty()
+        {
+            return this != HEALTHY;
+        }
+
+        public final boolean isUnreadable()
+        {
+            return compareTo(UNREADABLE) <= 0;
+        }
+
+        public final boolean isUnableToCalculateDeps()
+        {
+            return compareTo(UNABLE_TO_CALCULATE_DEPS) <= 0;
+        }
+
+        public final boolean isUnavailable()
+        {
+            return this == UNAVAILABLE;
+        }
+    }
+
     interface Supplier
     {
         TopologySorter get(Topology topologies);
@@ -41,7 +79,7 @@ public interface TopologySorter
         default TopologySorter get(Topologies topologies) { return this; }
 
         @Override
-        default boolean isFaulty(Node.Id node) { return false; }
+        default NodeStatus status(Node.Id node) { return NodeStatus.HEALTHY; }
     }
 
     /**
@@ -49,5 +87,5 @@ public interface TopologySorter
      */
     int compare(Node.Id node1, Node.Id node2, ShardSelection shards);
 
-    boolean isFaulty(Node.Id node);
+    NodeStatus status(Node.Id node);
 }

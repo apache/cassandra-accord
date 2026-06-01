@@ -22,11 +22,14 @@ import java.util.AbstractSet;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
+import java.util.function.IntFunction;
+
+import accord.utils.SortedArrays.SortedArrayList;
 
 // TODO (expected): make a hashing version of this class; have Node.Id support both approaches
 public abstract class SortedListSet<K extends Comparable<? super K>> extends AbstractSet<K>
 {
-    private static final SmallSortedListSet ALWAYS_EMPTY = new SmallSortedListSet(new SortedArrays.SortedArrayList(new Comparable[0]));
+    private static final SmallSortedListSet ALWAYS_EMPTY = new SmallSortedListSet(new SortedArrayList(new Comparable[0]));
 
     public static class SmallSortedListSet<K extends Comparable<? super K>> extends SortedListSet<K>
     {
@@ -230,6 +233,19 @@ public abstract class SortedListSet<K extends Comparable<? super K>> extends Abs
                 j++;
             }
         }
+    }
+
+    public SortedArrayList<K> toSortedArrayList(IntFunction<K[]> alloc)
+    {
+        if (size() == domainSize())
+            return SortedArrayList.of(list, alloc);
+
+        K[] out = alloc.apply(size());
+        int count = 0;
+        for (int i = nextSet(0); i >= 0 ; i = nextSet(i + 1))
+            out[count++] = list.get(i);
+
+        return SortedArrayList.ofSorted(out);
     }
 
     @Override

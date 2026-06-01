@@ -26,7 +26,10 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.function.Consumer;
+import java.util.function.Function;
+
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
@@ -133,7 +136,11 @@ public class DefaultProgressLog implements ProgressLog, Consumer<SafeCommandStor
     private final Object2ObjectHashMap<TxnId, PendingTask> pendingHome = new Object2ObjectHashMap<>();
 
     private final Long2ObjectHashMap<Object> active = new Long2ObjectHashMap<>();
-    private final Map<TxnId, Boolean> debugDeleted = Invariants.debug() && Invariants.isParanoid() ? new Object2ObjectHashMap<>() : null;
+    private final Map<TxnId, TxnState> debugDeleted = Invariants.debug() && Invariants.isParanoid() && Invariants.isTesting() ? new Object2ObjectHashMap<>() : null;
+
+    // peek into the future by this many micros when picking what to run.
+    // this is primarily to handle the fact that we do not support 0 delay when scheduling, so tasks that should be run immediately are schedule with 1us delay
+    private static final long RUN_AHEAD_MICROS = 100;
 
     private static final Object[] EMPTY_RUN_BUFFER = new Object[0];
     private static final RunInvoker[] EMPTY_AWAITING_EPOCH_BUFFER = new RunInvoker[0];
@@ -152,6 +159,8 @@ public class DefaultProgressLog implements ProgressLog, Consumer<SafeCommandStor
     private int modeFlags;
 
     private volatile boolean stopped = true;
+    private volatile int scheduled;
+    private static final AtomicIntegerFieldUpdater<DefaultProgressLog> scheduledUpdater = AtomicIntegerFieldUpdater.newUpdater(DefaultProgressLog.class, "scheduled");
     private Config config = new Config();
 
     private long prevCallbackId;
@@ -167,14 +176,16 @@ public class DefaultProgressLog implements ProgressLog, Consumer<SafeCommandStor
         return node;
     }
 
-    void update(long deadline, TxnState timer)
+    void update(long now, long deadline, TxnState timer)
     {
         timers.update(deadline, timer);
+        maybeNotify(now);
     }
 
-    void add(long deadline, TxnState timer)
+    void add(long now, long deadline, TxnState timer)
     {
         timers.add(deadline, timer);
+        maybeNotify(now);
     }
 
     @Nullable TxnState get(TxnId txnId)
@@ -386,7 +397,8 @@ public class DefaultProgressLog implements ProgressLog, Consumer<SafeCommandStor
                 // the command might be invalidated, which should be established on load, so simply load the command
                 TxnId txnId = state.txnId;
                 safeStore.commandStore().execute(ExecutionContext.unsequenced(txnId, "Clear Progress"), safeStore0 -> {
-                    safeStore0.unsafeGet(txnId);
+                    // performs a safe cleanup, which should notify any listeners
+                    safeStore0.unsafeGetNoLogFault(txnId);
                 }, node.agent());
             }
 
@@ -444,17 +456,20 @@ public class DefaultProgressLog implements ProgressLog, Consumer<SafeCommandStor
 
     private void clear(TxnState state)
     {
+        remove(state);
         state.clearHome(this);
         state.setWaitingDone(this);
         Invariants.require(!state.isScheduled());
-        remove(state.txnId);
     }
 
-    void remove(TxnId txnId)
+    void remove(TxnState state)
     {
-        stateMap = BTreeRemoval.<TxnId, TxnState>remove(stateMap, (id, s) -> id.compareTo(s.txnId), txnId);
+        stateMap = BTreeRemoval.<TxnId, TxnState>remove(stateMap, (id, s) -> id.compareTo(s.txnId), state.txnId);
         if (debugDeleted != null)
-            debugDeleted.put(txnId, Boolean.TRUE);
+        {
+            DeletedTxnState copy = new DeletedTxnState(state);
+            debugDeleted.put(copy.txnId, copy);
+        }
     }
 
     @Override
@@ -547,7 +562,7 @@ public class DefaultProgressLog implements ProgressLog, Consumer<SafeCommandStor
         if (stopped || processing)
             return;
 
-        long nowMicros = node.recentElapsed(TimeUnit.MICROSECONDS);
+        long nowMicros = node.recentElapsed(TimeUnit.MICROSECONDS) + RUN_AHEAD_MICROS;
         processing = true;
         try
         {
@@ -569,6 +584,7 @@ public class DefaultProgressLog implements ProgressLog, Consumer<SafeCommandStor
         }
         finally
         {
+            scheduled = 0;
             processing = false;
         }
     }
@@ -977,16 +993,14 @@ public class DefaultProgressLog implements ProgressLog, Consumer<SafeCommandStor
         if (stopped)
             return;
 
-        if (commandStore.inStore())
-        {
-            accept(null);
-        }
-        else
-        {
-            long now = node.recentElapsed(MICROSECONDS);
-            if (timers.shouldWake(now))
-                commandStore.execute((ExecutionContext.Empty) () -> "Run ProgressLog", this, node.agent());
-        }
+        maybeNotify(node.recentElapsed(MICROSECONDS));
+    }
+
+    private void maybeNotify(long nowMicros)
+    {
+        nowMicros += RUN_AHEAD_MICROS;
+        if (timers.shouldWake(nowMicros) && scheduledUpdater.compareAndSet(this, 0, 1))
+            commandStore.execute((ExecutionContext.Empty) () -> "Run ProgressLog", this, node.agent());
     }
 
     public Config config()
@@ -1181,5 +1195,22 @@ public class DefaultProgressLog implements ProgressLog, Consumer<SafeCommandStor
         for (TxnState state : BTree.<TxnState>iterable(stateMap))
             snapshot.add(state.snapshot());
         return snapshot;
+    }
+
+    private static class DeletedTxnState extends TxnState
+    {
+        final Object debug;
+        protected DeletedTxnState(TxnState copy)
+        {
+            super(copy.txnId);
+            this.encodedState = copy.encodedState;
+            this.debug = debugDeletion.apply(copy.txnId);
+        }
+    }
+
+    private static volatile Function<TxnId, ?> debugDeletion = id -> null;
+    public static void setDebugDeletion(Function<TxnId, ?> newDebugDeletion)
+    {
+        debugDeletion = newDebugDeletion;
     }
 }

@@ -441,15 +441,33 @@ abstract class WaitingState extends HomeState
         }
     }
 
-    final void runWaiting(DefaultProgressLog owner, SafeCommandStore safeStore, SafeCommand safeCommand)
+    /**
+     * Why we are running the state machine. This decides what happens to {@link #waitingRunCounter()}, which feeds the
+     * per-attempt backoff in {@link accord.api.Agent#slowReplicaDelay}: the counter counts <i>consecutive unproductive
+     * rounds</i>, so a callback that told us something must clear it. Resolving a transaction we never witnessed takes
+     * several phases (fetch route, await home shard, fetch the decision, wait for apply); if a successful phase left the
+     * counter set, each subsequent phase of the same resolution would be delayed by seconds.
+     */
+    enum Run
     {
-        runInternal(safeStore, safeCommand, owner, owner.node.agent().trace(txnId, maxParticipants(safeCommand), WaitProgress), false);
+        /** a timer fired; any backoff has already been applied by the scheduler */
+        Scheduled,
+        /** a callback advanced the state machine - we learned something, so continue at the speed of the network */
+        Advanced,
+        /** a callback told us nothing new and {@link #retry} is widening its contact set; the counter is already incremented */
+        Retrying
     }
 
-    private void runInternal(SafeCommandStore safeStore, SafeCommand safeCommand, DefaultProgressLog owner, @Nullable Tracing tracing, boolean isCallback)
+    final void runWaiting(DefaultProgressLog owner, SafeCommandStore safeStore, SafeCommand safeCommand)
+    {
+        runInternal(safeStore, safeCommand, owner, owner.node.agent().trace(txnId, maxParticipants(safeCommand), WaitProgress), Run.Scheduled);
+    }
+
+    private void runInternal(SafeCommandStore safeStore, SafeCommand safeCommand, DefaultProgressLog owner, @Nullable Tracing tracing, Run run)
     {
         Invariants.require(!owner.hasPending(Waiting, txnId));
-        incrementWaitingRunCounter();
+        if (run == Run.Advanced)
+            clearWaitingRunCounter();
         BlockedUntil blockedUntil = blockedUntil();
         Command command = safeCommand.current();
         if (command.saveStatus().compareTo(blockedUntil.unblockedFrom) >= 0)
@@ -518,8 +536,7 @@ abstract class WaitingState extends HomeState
             // at this point we can switch to polling as we know someone has the relevant state
             if (tracing != null)
                 tracing.trace(owner.commandStore, "Blocked until %s. Fetching %s%s for epochs [%d..%d].", querying, slicedRoute, slicedRoute == fetchRoute ? "" : " from " + fetchRoute, lowEpoch, highEpoch);
-            if (isCallback && waitingRunCounter() > 0) set(safeStore, owner, querying, Queued);
-            else fetch(owner, querying, txnId, invalidIf(), executeAt, slicedRoute, fetchRoute, route);
+            fetch(owner, querying, txnId, invalidIf(), executeAt, slicedRoute, fetchRoute, route);
             return;
         }
 
@@ -552,8 +569,7 @@ abstract class WaitingState extends HomeState
 
             // all of the shards we are awaiting have been processed and found at least one replica that has the state needed to answer our query
             // at this point we can switch to polling as we know someone has the relevant state
-            if (isCallback && waitingRunCounter() > 0) set(safeStore, owner, querying, Queued);
-            else fetch(owner, querying, txnId, invalidIf(), executeAt, slicedRoute, fetchRoute, route);
+            fetch(owner, querying, txnId, invalidIf(), executeAt, slicedRoute, fetchRoute, route);
             return;
         }
 
@@ -627,7 +643,7 @@ abstract class WaitingState extends HomeState
                         // we can immediately progress the state machine
                         Invariants.expect(0 == state.awaitRoundIndex(roundSize));
                         Invariants.expect(0 == state.awaitBitSet(roundSize));
-                        state.runInternal(safeStore, safeCommand, owner, tracing, true);
+                        state.runInternal(safeStore, safeCommand, owner, tracing, Run.Advanced);
                     }
                     else
                     {
@@ -653,7 +669,7 @@ abstract class WaitingState extends HomeState
                             Invariants.expect((int) slicedRoute.findNextSameKindIntersection(roundStart, (Unseekables) ready, 0) / roundSize == roundIndex);
                             if (roundStart + roundSize >= slicedRoute.size()) state.setAwaitDone(roundSize);
                             else state.updateAwaitRound(roundIndex + 1, roundSize);
-                            state.runInternal(safeStore, safeCommand, owner, tracing, true);
+                            state.runInternal(safeStore, safeCommand, owner, tracing, Run.Advanced);
                         }
                         else
                         {
@@ -671,7 +687,7 @@ abstract class WaitingState extends HomeState
                     {
                         if (tracing != null)
                             tracing.trace(owner.commandStore, "Successfully fetched route; invoking runInternal");
-                        state.runInternal(safeStore, safeCommand, owner, tracing, true);
+                        state.runInternal(safeStore, safeCommand, owner, tracing, Run.Advanced);
                         return;
                     }
 
@@ -693,7 +709,7 @@ abstract class WaitingState extends HomeState
                         if (Invariants.expect(satisfies.compareTo(querying) >= 0, "Fetch %s was successful for all keys, but the Command %s does not reflect the expected state", querying, command))
                         {
                             state.setAwaitDone(roundSize);
-                            state.runInternal(safeStore, safeCommand, owner, tracing, true);
+                            state.runInternal(safeStore, safeCommand, owner, tracing, Run.Advanced);
                             return;
                         }
                         // otherwise fall through to delayed retry
@@ -722,7 +738,7 @@ abstract class WaitingState extends HomeState
                                 Invariants.require(roundIndex * roundSize < slicedRoute.size());
                                 state.updateAwaitRound(roundIndex, roundSize);
                                 state.initialiseAwaitBitSet(slicedRoute, notReady, roundIndex, roundSize);
-                                state.runInternal(safeStore, safeCommand, owner, tracing, true);
+                                state.runInternal(safeStore, safeCommand, owner, tracing, Run.Advanced);
                                 return;
                             }
                         }
@@ -791,7 +807,7 @@ abstract class WaitingState extends HomeState
         if ((callbackId & 1) != 1)
             return;
 
-        SafeCommand safeCommand = safeStore.unsafeGet(txnId);
+        SafeCommand safeCommand = safeStore.unsafeTryGetNoLogFault(txnId);
         Tracing tracing = owner.node.agent().trace(txnId, maxParticipants(safeCommand), WaitProgress);
 
         BlockedUntil querying = querying();
@@ -821,7 +837,7 @@ abstract class WaitingState extends HomeState
             {
                 if (tracing != null)
                     tracing.trace(owner.commandStore, "Received async home key callback %d. Blocked until %s, querying %s, home key now %s.", callbackId, blockedUntil(), querying, newHomeStatus);
-                runInternal(safeStore, safeCommand, owner, tracing, true);
+                runInternal(safeStore, safeCommand, owner, tracing, Run.Advanced);
             }
         }
         else
@@ -885,7 +901,7 @@ abstract class WaitingState extends HomeState
                 if (tracing != null)
                     tracing.trace(owner.commandStore, "Blocked until %s. Received async callback %d for waiting keys. Round complete.", querying, callbackId);
 
-                runInternal(safeStore, safeCommand, owner, tracing, true);
+                runInternal(safeStore, safeCommand, owner, tracing, Run.Advanced);
             }
             else
             {
@@ -898,19 +914,19 @@ abstract class WaitingState extends HomeState
     // TODO (expected): use back-off counter here
     private void retry(SafeCommandStore safeStore, SafeCommand safeCommand, DefaultProgressLog owner, BlockedUntil querying, @Nullable Tracing tracing)
     {
+        incrementWaitingRunCounter();
         if (!contactEveryone())
         {
             if (tracing != null)
                 tracing.trace(owner.commandStore, "Retrying immediately, without contact restrictions");
             setContactEveryone(true);
             // try again immediately with a query to all eligible replicas
-            runInternal(safeStore, safeCommand, owner, tracing, true);
+            runInternal(safeStore, safeCommand, owner, tracing, Run.Retrying);
         }
         else
         {
             if (tracing != null)
                 tracing.trace(owner.commandStore, "Retry queued for later.");
-            incrementWaitingRunCounter();
             set(safeStore, owner, querying, Queued);
         }
     }

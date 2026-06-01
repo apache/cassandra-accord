@@ -63,9 +63,9 @@ public class SizeOfIntersectionSorter implements TopologySorter
     }
 
     @Override
-    public boolean isFaulty(Node.Id node)
+    public NodeStatus status(Node.Id node)
     {
-        return false;
+        return NodeStatus.HEALTHY;
     }
 
     private static int count(Node.Id node, ShardSelection shards, int offset, Topology topology)

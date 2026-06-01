@@ -45,7 +45,7 @@ import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.CommandStores;
 import accord.local.DurableBefore;
-import accord.local.LogUnavailableException;
+import accord.local.LogFaultException;
 import accord.local.MinimalCommand;
 import accord.local.Node;
 import accord.local.RedundantBefore;
@@ -504,7 +504,7 @@ public class InMemoryJournal implements Journal
                         Builder builder = new Builder(e2.getKey(), ALL);
                         Cleanup cleanup;
                         try { cleanup = builder.shouldCleanup(FULL, store.unsafeGetRedundantBefore(), store.durableBefore()); }
-                        catch (LogUnavailableException ignore) { continue; }
+                        catch (LogFaultException ignore) { continue; }
 
                         Invariants.require(cleanup.compareTo(((FinalList) diffs.flushed).cleanup()) >= 0);
                     }
@@ -571,8 +571,10 @@ public class InMemoryJournal implements Journal
                 ++counter;
 
                 Cleanup cleanup;
+                // a log fault licenses no cleanup: production refuses the operation rather than rewriting the
+                // record, so the faithful simulation is to leave it untouched
                 try { cleanup = builder.shouldCleanup(input, store.unsafeGetRedundantBefore(), store.durableBefore()); }
-                catch (LogUnavailableException ignore) {cleanup = ERASE; }
+                catch (LogFaultException ignore) {cleanup = NO; }
 
                 cleanup = builder.maybeCleanup(true, cleanup);
                 if (cleanup != NO)
@@ -634,7 +636,7 @@ public class InMemoryJournal implements Journal
                 Builder before = reconstruct(diffs, ALL);
                 boolean unavailableBefore = false, unavailableAfter = false;
                 try { before.maybeCleanup(true, FULL, store.unsafeGetRedundantBefore(), store.durableBefore()); }
-                catch (LogUnavailableException ignore) { unavailableBefore = true; }
+                catch (LogFaultException ignore) {unavailableBefore = true; }
                 diffs.size -= removeCount;
                 diffs.flushed.removeAll(subset.flushed);
                 diffs.files.removeAll(subset.files);
@@ -642,9 +644,12 @@ public class InMemoryJournal implements Journal
                 diffs.sorted = null;
                 Builder after = reconstruct(diffs, ALL);
                 try { after.maybeCleanup(true, FULL, store.unsafeGetRedundantBefore(), store.durableBefore()); }
-                catch (LogUnavailableException ignore) { unavailableAfter = true; }
-                Invariants.require(unavailableBefore == unavailableAfter);
-                Invariants.require(Objects.equals(before.construct(store.unsafeGetRedundantBefore()), after.construct(store.unsafeGetRedundantBefore())));
+                catch (LogFaultException ignore) {unavailableAfter = true; }
+                if (after.cleanup() != ERASE)
+                {
+                    Invariants.require(unavailableBefore == unavailableAfter);
+                    Invariants.require(Objects.equals(before.construct(store.unsafeGetRedundantBefore()), after.construct(store.unsafeGetRedundantBefore())));
+                }
             }
         }
     }

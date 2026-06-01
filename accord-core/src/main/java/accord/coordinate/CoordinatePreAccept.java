@@ -71,12 +71,12 @@ abstract class CoordinatePreAccept<T> extends AbstractCoordinatePreAccept<T, Pre
 
     void contact(@Nullable Deps deps, boolean hasCoordinatorVote)
     {
-        contact(to -> new PreAccept(to, topologies, txnId, txn, deps, hasCoordinatorVote, scope));
+        contact((to, nodeStatus) -> nodeStatus.isUnableToCalculateDeps() ? null : new PreAccept(to, topologies, txnId, txn, deps, hasCoordinatorVote, scope));
     }
 
     void contactNotSelf(@Nullable Deps deps, boolean hasCoordinatorVote)
     {
-        contact(to -> new PreAccept(to, topologies, txnId, txn, deps, hasCoordinatorVote, scope), id -> !id.equals(node.id()));
+        contact((to, nodeStatus) -> nodeStatus.isUnableToCalculateDeps() ? null : new PreAccept(to, topologies, txnId, txn, deps, hasCoordinatorVote, scope), id -> !id.equals(node.id()));
     }
 
     @Override

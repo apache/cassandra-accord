@@ -65,21 +65,21 @@ class Utils
 
     /**
      * {@code removeTxnId} no longer needs to be tracked in missing arrays;
-     * remove it from byId and committedByExecuteAt, ensuring both arrays still reference the same TxnInfo where updated
+     * remove it from byId and committedByExecuteAt, ensuring both arrays still reference the same TxnInfo where updated.
      */
-    static void removeFromMissingArrays(TxnInfo[] byId, TxnInfo[] committedByExecuteAt, TxnId removeTxnId)
+    static TxnInfo[] removeFromMissingArrays(TxnInfo[] byId, TxnInfo[] newCommittedByExecuteAt, TxnId removeTxnId, @Nullable TxnInfo[] committedByExecuteAt)
     {
-        int startIndex = SortedArrays.binarySearch(committedByExecuteAt, 0, committedByExecuteAt.length, removeTxnId, (id, info) -> id.compareTo(info.executeAt), FAST);
+        int startIndex = SortedArrays.binarySearch(newCommittedByExecuteAt, 0, newCommittedByExecuteAt.length, removeTxnId, (id, info) -> id.compareTo(info.executeAt), FAST);
         if (startIndex < 0) startIndex = -1 - startIndex;
         else ++startIndex;
 
         int minSearchIndex = Arrays.binarySearch(byId, removeTxnId) + 1;
         removeFromMissingArraysById(byId, 0, minSearchIndex, removeTxnId);
-        for (int i = startIndex ; i < committedByExecuteAt.length ; ++i)
+        for (int i = startIndex ; i < newCommittedByExecuteAt.length ; ++i)
         {
             int newMinSearchIndex;
             {
-                TxnInfo txn = committedByExecuteAt[i];
+                TxnInfo txn = newCommittedByExecuteAt[i];
                 if (txn.getClass() == TxnInfo.class) continue;
                 if (!txn.witnesses(removeTxnId)) continue;
 
@@ -87,23 +87,25 @@ class Utils
                 TxnId[] newMissing = removeOneMissing(missing, removeTxnId);
                 if (missing == newMissing) continue;
 
-                newMinSearchIndex = updateInfoArraysByExecuteAt(i, txn, txn.withMissing(newMissing), minSearchIndex, byId, committedByExecuteAt);
+                newCommittedByExecuteAt = copyIfShared(newCommittedByExecuteAt, committedByExecuteAt);
+                newMinSearchIndex = updateInfoArraysByExecuteAt(i, txn, txn.withMissing(newMissing), minSearchIndex, byId, newCommittedByExecuteAt);
             }
 
             minSearchIndex = removeFromMissingArraysById(byId, minSearchIndex, newMinSearchIndex, removeTxnId);
         }
 
         removeFromMissingArraysById(byId, minSearchIndex, byId.length, removeTxnId);
+        return newCommittedByExecuteAt;
     }
 
     /**
      * {@code removeTxnId} no longer needs to be tracked in missing arrays;
      * remove it from byId and committedByExecuteAt, ensuring both arrays still reference the same TxnInfo where updated
      */
-    static void removeFromWitnessMissingArrays(TxnInfo[] byId, TxnInfo[] committedByExecuteAt, TxnId removeTxnId, TxnId[] witnessedBy)
+    static TxnInfo[] removeFromWitnessMissingArrays(TxnInfo[] byId, TxnInfo[] newCommittedByExecuteAt, TxnId removeTxnId, TxnId[] witnessedBy, @Nullable TxnInfo[] committedByExecuteAt)
     {
         if (witnessedBy.length == 0)
-            return;
+            return newCommittedByExecuteAt;
 
         int byIdIndex = Arrays.binarySearch(byId, witnessedBy[0]);
         if (byIdIndex < 0)
@@ -125,9 +127,11 @@ class Utils
             TxnInfo newTxn = curTxn.withMissing(newMissing);
             byId[byIdIndex] = newTxn;
             if (!curTxn.isCommittedAndExecutes()) continue;
-            int byExecuteAtIndex = Arrays.binarySearch(committedByExecuteAt, curTxn, TxnInfo::compareExecuteAt);
-            committedByExecuteAt[byExecuteAtIndex] = newTxn;
+            int byExecuteAtIndex = Arrays.binarySearch(newCommittedByExecuteAt, curTxn, TxnInfo::compareExecuteAt);
+            newCommittedByExecuteAt = copyIfShared(newCommittedByExecuteAt, committedByExecuteAt);
+            newCommittedByExecuteAt[byExecuteAtIndex] = newTxn;
         }
+        return newCommittedByExecuteAt;
     }
 
     /**
@@ -158,11 +162,11 @@ class Utils
      * add it to byId and committedByExecuteAt, ensuring both arrays still reference the same TxnInfo where updated
      * Do not insert it into any members of {@code doNotInsert} as these are known to have witnessed {@code insertTxnId}
      */
-    static void addToMissingArrays(TxnInfo[] byId, TxnInfo[] committedByExecuteAt, TxnInfo newInfo, TxnId insertTxnId, @Nonnull TxnId[] doNotInsert)
+    static TxnInfo[] addToMissingArrays(TxnInfo[] byId, TxnInfo[] newCommittedByExecuteAt, TxnInfo newInfo, TxnId insertTxnId, @Nonnull TxnId[] doNotInsert, @Nullable TxnInfo[] committedByExecuteAt)
     {
         TxnId[] oneMissing = null;
 
-        int startIndex = SortedArrays.binarySearch(committedByExecuteAt, 0, committedByExecuteAt.length, insertTxnId, (id, info) -> id.compareTo(info.executeAt), FAST);
+        int startIndex = SortedArrays.binarySearch(newCommittedByExecuteAt, 0, newCommittedByExecuteAt.length, insertTxnId, (id, info) -> id.compareTo(info.executeAt), FAST);
         if (startIndex < 0) startIndex = -1 - startIndex;
         else ++startIndex;
 
@@ -184,11 +188,11 @@ class Utils
         }
 
         int minDoNotInsertSearchIndex = 0;
-        for (int i = startIndex ; i < committedByExecuteAt.length ; ++i)
+        for (int i = startIndex ; i < newCommittedByExecuteAt.length ; ++i)
         {
             int newMinSearchIndex;
             {
-                TxnInfo txn = committedByExecuteAt[i];
+                TxnInfo txn = newCommittedByExecuteAt[i];
                 if (txn == newInfo) continue;
                 if (!txn.witnesses(insertTxnId)) continue;
 
@@ -211,7 +215,8 @@ class Utils
                 if (missing == NO_TXNIDS) missing = oneMissing = ensureOneMissing(insertTxnId, oneMissing);
                 else missing = SortedArrays.insert(missing, insertTxnId, TxnId[]::new);
 
-                newMinSearchIndex = updateInfoArraysByExecuteAt(i, txn, txn.withMissing(missing), minByIdSearchIndex, byId, committedByExecuteAt);
+                newCommittedByExecuteAt = copyIfShared(newCommittedByExecuteAt, committedByExecuteAt);
+                newMinSearchIndex = updateInfoArraysByExecuteAt(i, txn, txn.withMissing(missing), minByIdSearchIndex, byId, newCommittedByExecuteAt);
             }
 
             if (newMinSearchIndex == minByIdSearchIndex) continue;
@@ -256,6 +261,13 @@ class Utils
             else missing = SortedArrays.insert(missing, insertTxnId, TxnId[]::new);
             byId[minByIdSearchIndex] = txn.withMissing(missing);
         }
+        return newCommittedByExecuteAt;
+    }
+
+    @Inline
+    static TxnInfo[] copyIfShared(TxnInfo[] copy, @Nullable TxnInfo[] shared)
+    {
+        return copy == shared ? copy.clone() : copy;
     }
 
     private static int linearScan(TxnId[] array, int from, TxnId find)

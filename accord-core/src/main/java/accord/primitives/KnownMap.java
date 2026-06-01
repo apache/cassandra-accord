@@ -341,6 +341,9 @@ public class KnownMap extends ReducingRangeMap<KnownMap.MinAndMaxKnown>
         @Override
         protected KnownMap buildInternal()
         {
+            if (values.isEmpty())
+                return EMPTY;
+
             return new KnownMap(starts.toArray(new RoutingKey[0]), values.toArray(new MinAndMaxKnown[0]));
         }
     }

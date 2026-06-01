@@ -18,6 +18,7 @@
 
 package accord.messages;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import accord.api.Result.PersistableResult;
@@ -25,33 +26,33 @@ import accord.api.RoutingKey;
 import accord.coordinate.Infer.InvalidIf;
 import accord.local.Command;
 import accord.local.Commands;
-import accord.local.Node.Id;
 import accord.local.ExecutionContext;
+import accord.local.Node.Id;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.primitives.KnownMap.MinAndMaxKnown;
-import accord.primitives.SaveStatus;
-import accord.primitives.Status;
 import accord.local.StoreParticipants;
 import accord.primitives.Ballot;
+import accord.primitives.Known;
 import accord.primitives.KnownMap;
-import accord.primitives.Status.Durability.HasDecision;
-import accord.primitives.Status.Durability.HasOutcome;
-import accord.primitives.WithQuorum;
+import accord.primitives.KnownMap.MinAndMaxKnown;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Participants;
 import accord.primitives.ProgressToken;
 import accord.primitives.Route;
+import accord.primitives.SaveStatus;
+import accord.primitives.Status;
+import accord.primitives.Status.Durability.HasDecision;
+import accord.primitives.Status.Durability.HasOutcome;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
+import accord.primitives.WithQuorum;
 import accord.primitives.Writes;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 import accord.utils.MapReduceConsume;
-
-import javax.annotation.Nonnull;
+import accord.utils.async.Cancellable;
 
 import static accord.coordinate.Infer.InvalidIf.IfUncommitted;
 import static accord.coordinate.Infer.InvalidIf.IsInvalid;
@@ -67,22 +68,18 @@ import static accord.primitives.Known.KnownExecuteAt.ExecuteAtKnown;
 import static accord.primitives.Known.KnownExecuteAt.ExecuteAtProposed;
 import static accord.primitives.Known.Nothing;
 import static accord.primitives.Routables.Slice.Minimal;
+import static accord.primitives.Route.castToRoute;
+import static accord.primitives.Route.isRoute;
 import static accord.primitives.Status.Durability;
-
-import accord.primitives.Known;
-import accord.utils.async.Cancellable;
-
-import static accord.primitives.Status.Durability.HasOutcome.None;
-import static accord.primitives.Status.Durability.HasOutcome.Quorum;
-import static accord.primitives.Status.NotDefined;
 import static accord.primitives.Status.Durability.HasDecision.DurablyCommitted;
 import static accord.primitives.Status.Durability.HasDecision.DurablyStable;
 import static accord.primitives.Status.Durability.HasDecision.FastPathDecided;
+import static accord.primitives.Status.Durability.HasOutcome.None;
+import static accord.primitives.Status.Durability.HasOutcome.Quorum;
+import static accord.primitives.Status.NotDefined;
 import static accord.primitives.Status.Stable;
 import static accord.primitives.Status.Truncated;
 import static accord.primitives.WithQuorum.HasQuorum;
-import static accord.primitives.Route.castToRoute;
-import static accord.primitives.Route.isRoute;
 
 public class CheckStatus extends ParticipantsRequest<Participants<?>, CheckStatus.CheckStatusReply>
         implements Request, ExecutionContext, MapReduceConsume<SafeCommandStore, CheckStatus.CheckStatusReply>
@@ -243,9 +240,8 @@ public class CheckStatus extends ParticipantsRequest<Participants<?>, CheckStatu
     @Override
     protected void acceptInternal(CheckStatusReply ok, Throwable failure)
     {
-        if (failure != null) node.reply(replyTo, replyContext, ok, failure, tracing());
-        else if (ok == null) node.reply(replyTo, replyContext, CheckStatusNack.NotOwned, null, tracing());
-        else node.reply(replyTo, replyContext, ok, null, tracing());
+        if (failure == null) node.reply(replyTo, replyContext, ok != null ? ok : CheckStatusNack.NotOwned, null, tracing());
+        else node.reply(replyTo, replyContext, ok, failure, tracing());
     }
 
     public interface CheckStatusReply extends Reply

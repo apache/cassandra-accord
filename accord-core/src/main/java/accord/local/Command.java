@@ -126,14 +126,23 @@ public abstract class Command extends MinimalWithConcreteDeps
     public boolean equals(Object o)
     {
         if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        Command command = (Command) o;
-        return txnId().equals(command.txnId())
-               && saveStatus() == command.saveStatus()
-               && durability() == command.durability()
-               && Objects.equals(participants(), command.participants())
-               && Objects.equals(acceptedOrCommitted(), command.acceptedOrCommitted())
-               && Objects.equals(promised(), command.promised());
+        if (!(o instanceof Command))
+            return false;
+
+        Command that = (Command) o;
+        return equalsIgnoreDurability(that) && durability() == that.durability();
+    }
+
+    @VisibleForTesting
+    public boolean equalsIgnoreDurability(Command that)
+    {
+        if (this == that) return true;
+        if (that == null || getClass() != that.getClass()) return false;
+        return txnId().equals(that.txnId())
+               && saveStatus() == that.saveStatus()
+               && Objects.equals(participants(), that.participants())
+               && Objects.equals(acceptedOrCommitted(), that.acceptedOrCommitted())
+               && Objects.equals(promised(), that.promised());
     }
 
     @Override
@@ -389,14 +398,11 @@ public abstract class Command extends MinimalWithConcreteDeps
         }
 
         @Override
-        public boolean equals(Object o)
+        public boolean equalsIgnoreDurability(Command that)
         {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            if (!super.equals(o)) return false;
-            Truncated that = (Truncated) o;
-            return Objects.equals(writes, that.writes)
-                && Objects.equals(result, that.result);
+            return super.equalsIgnoreDurability(that)
+                   && Objects.equals(writes(), that.writes())
+                   && Objects.equals(result(), that.result());
         }
 
         @Override
@@ -444,10 +450,10 @@ public abstract class Command extends MinimalWithConcreteDeps
         }
 
         @Override
-        public boolean equals(Object o)
+        public boolean equalsIgnoreDurability(Command that)
         {
-            if (!super.equals(o)) return false;
-            return Objects.equals(executesAtLeast, ((TruncatedAwaitsOnlyDeps)o).executesAtLeast);
+            return super.equalsIgnoreDurability(that)
+                   && Objects.equals(executesAtLeast(), that.executesAtLeast());
         }
 
         @Override
@@ -613,13 +619,10 @@ public abstract class Command extends MinimalWithConcreteDeps
         }
 
         @Override
-        public boolean equals(Object o)
+        public boolean equalsIgnoreDurability(Command that)
         {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            if (!super.equals(o)) return false;
-            Committed committed = (Committed) o;
-            return Objects.equals(waitingOn, committed.waitingOn);
+            return super.equalsIgnoreDurability(that)
+                   && Objects.equals(waitingOn(), that.waitingOn());
         }
 
         public final WaitingOn waitingOn()
@@ -687,14 +690,11 @@ public abstract class Command extends MinimalWithConcreteDeps
         }
 
         @Override
-        public boolean equals(Object o)
+        public boolean equalsIgnoreDurability(Command that)
         {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            if (!super.equals(o)) return false;
-            Executed executed = (Executed) o;
-            return Objects.equals(writes, executed.writes)
-                && Objects.equals(result, executed.result);
+            return super.equalsIgnoreDurability(that)
+                   && Objects.equals(writes(), that.writes())
+                   && Objects.equals(result(), that.result());
         }
 
         public Writes writes()

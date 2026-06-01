@@ -98,9 +98,6 @@ public class RelationMultiMap
     public static abstract class AbstractBuilder<K, V, T> implements AutoCloseable
     {
         final Adapter<K, V> adapter;
-        final ObjectBuffers<K> cachedKeys;
-        final ObjectBuffers<V> cachedValues;
-        final IntBuffers cachedInts = cachedInts();
 
         K[] keys;
         int[] keyLimits;
@@ -114,11 +111,9 @@ public class RelationMultiMap
         public AbstractBuilder(Adapter<K, V> adapter)
         {
             this.adapter = adapter;
-            this.cachedKeys = adapter.cachedKeys();
-            this.cachedValues = adapter.cachedValues();
-            this.keys = cachedKeys.get(16);
-            this.keyLimits = cachedInts.getInts(keys.length);
-            this.keysToValues = cachedValues.get(16);
+            this.keys = adapter.cachedKeys().get(16);
+            this.keyLimits = cachedInts().getInts(keys.length);
+            this.keysToValues = adapter.cachedValues().get(16);
             this.keySize = Math.min(keys.length, keyLimits.length);
         }
 
@@ -143,6 +138,7 @@ public class RelationMultiMap
             {
                 if (keyCount == keys.length)
                 {
+                    ObjectBuffers<K> cachedKeys = adapter.cachedKeys();
                     K[] newKeys = cachedKeys.get(keyCount * 2);
                     System.arraycopy(keys, 0, newKeys, 0, keyCount);
                     cachedKeys.forceDiscard(keys, keyCount);
@@ -150,6 +146,7 @@ public class RelationMultiMap
                 }
                 if (keyCount == keyLimits.length)
                 {
+                    IntBuffers cachedInts = cachedInts();
                     int[] newKeyLimits = cachedInts.getInts(keyCount * 2);
                     System.arraycopy(keyLimits, 0, newKeyLimits, 0, keyCount);
                     cachedInts.forceDiscard(keyLimits);
@@ -229,11 +226,13 @@ public class RelationMultiMap
          */
         public void add(V value)
         {
+            Invariants.nonNull(value);
             if (hasOrderedValues && totalCount > keyOffset && adapter.valueComparator().compare(keysToValues[totalCount - 1], value) >= 0)
                 hasOrderedValues = false;
 
             if (totalCount >= keysToValues.length)
             {
+                ObjectBuffers<V> cachedValues = adapter.cachedValues();
                 V[] newValues = cachedValues.get(keysToValues.length * 2);
                 System.arraycopy(keysToValues, 0, newValues, 0, totalCount);
                 cachedValues.forceDiscard(keysToValues, totalCount);
@@ -250,6 +249,7 @@ public class RelationMultiMap
 
             finishKey();
 
+            ObjectBuffers<V> cachedValues = adapter.cachedValues();
             V[] uniqueValues = cachedValues.get(totalCount);
             System.arraycopy(keysToValues, 0, uniqueValues, 0, totalCount);
             Arrays.sort(uniqueValues, 0, totalCount, adapter.valueComparator());
@@ -268,7 +268,8 @@ public class RelationMultiMap
             if (hasOrderedKeys)
             {
                 sortedKeyIndexes = null;
-                sortedKeys = cachedKeys.completeAndDiscard(keys, keyCount);
+                try { sortedKeys = adapter.cachedKeys().completeAndDiscard(keys, keyCount); }
+                finally { keys = null; }
             }
             else
             {
@@ -284,7 +285,8 @@ public class RelationMultiMap
                 }
                 for (int i = 0 ; i < keyCount ; ++i)
                     sortedKeyIndexes[Arrays.binarySearch(sortedKeys, keys[i], adapter.keyComparator())] = i;
-                cachedKeys.forceDiscard(keys, keyCount);
+                try { adapter.cachedKeys().forceDiscard(keys, keyCount); }
+                finally { keys = null; }
             }
 
             int[] result = new int[keyCount + totalCount];
@@ -310,14 +312,19 @@ public class RelationMultiMap
         @Override
         public void close()
         {
+            if (keys != null)
+            {
+                adapter.cachedKeys().forceDiscard(keys, keyCount);
+                keys = null;
+            }
             if (keyLimits != null)
             {
-                cachedInts.forceDiscard(keyLimits);
+                cachedInts().forceDiscard(keyLimits);
                 keyLimits = null;
             }
             if (keysToValues != null)
             {
-                cachedValues.forceDiscard(keysToValues, totalCount);
+                adapter.cachedValues().forceDiscard(keysToValues, totalCount);
                 keysToValues = null;
             }
         }

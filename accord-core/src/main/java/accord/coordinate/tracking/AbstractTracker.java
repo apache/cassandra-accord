@@ -19,6 +19,7 @@
 package accord.coordinate.tracking;
 
 import accord.api.TopologySorter;
+import accord.api.TopologySorter.NodeStatus;
 import accord.api.Tracing;
 import accord.local.Node.Id;
 import accord.topology.Shard;
@@ -196,14 +197,14 @@ public abstract class AbstractTracker<ST extends ShardTracker>
         return topologies.nodes();
     }
 
-    public SortedArrayList<Id> filterAndRecordFaulty(@Nullable Tracing tracing)
+    public SortedArrayList<Id> filterAndRecordUnreadable(@Nullable Tracing tracing)
     {
-        return filterAndRecordFaulty(topologies.nodes(), tracing);
+        return filterAndRecordUnreadable(topologies.nodes(), tracing);
     }
 
-    public SortedArrayList<Id> filterAndRecordFaulty(SortedArrayList<Id> ids, @Nullable Tracing tracing)
+    public SortedArrayList<Id> filterAndRecordUnreadable(SortedArrayList<Id> ids, @Nullable Tracing tracing)
     {
-        return filterAndRecordFaulty(ids, topologies, this, tracing);
+        return filterAndRecordUnreadable(ids, topologies, this, tracing);
     }
 
     public ST get(int shardIndex)
@@ -225,7 +226,7 @@ public abstract class AbstractTracker<ST extends ShardTracker>
         return maxShardsPerEpoch;
     }
 
-    public static SortedArrayList<Id> filterAndRecordFaulty(SortedArrayList<Id> nodes, TopologySorter sorter, AbstractTracker<?> reportTo, @Nullable Tracing tracing)
+    public static SortedArrayList<Id> filterAndRecordUnreadable(SortedArrayList<Id> nodes, TopologySorter sorter, AbstractTracker<?> reportTo, @Nullable Tracing tracing)
     {
         Object[] buffer = null;
         int bufferCount = 0;
@@ -233,10 +234,12 @@ public abstract class AbstractTracker<ST extends ShardTracker>
         for (int i = 0 ; i < nodes.size() ; ++i)
         {
             Id node = nodes.get(i);
-            if (sorter.isFaulty(node))
+            NodeStatus status = sorter.status(node);
+            if (status.isUnreadable())
             {
                 if (tracing != null)
-                    tracing.trace(null, "%s considered faulty; recording failure", node);
+                    tracing.trace(null, "%s considered %s; recording failure", node, status);
+
                 if (Failed == reportTo.prerecordFailure(node))
                     return null;
 

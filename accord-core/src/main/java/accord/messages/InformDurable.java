@@ -47,6 +47,7 @@ import accord.utils.async.Cancellable;
 import static accord.api.ProtocolModifiers.DependencyElision.IF_DURABLY_COMMITTED;
 import static accord.api.ProtocolModifiers.dependencyElision;
 import static accord.api.ProtocolModifiers.informOfDurability;
+import static accord.api.TopologySorter.NodeStatus.UNREADABLE;
 import static accord.messages.MessageType.StandardMessage.INFORM_DURABLE_REQ;
 import static accord.messages.SimpleReply.Ok;
 
@@ -109,12 +110,12 @@ public class InformDurable extends RouteRequest<Reply> implements ExecutionConte
         }
         Topology latest = any.current();
         Topologies homeTopology = new Topologies.Single(any, new Topology(txnId.epoch(), latest.removedIds(), latest.hardRemovedIds(), latest.staleIds(), homeShard));
-        node.send(homeTopology, to -> new InformDurable(to, homeTopology, route.homeKeyOnlyRoute(), txnId, executeAt, txnId.epoch(), txnId.epoch(), durability), tracing);
+        node.send(homeTopology, UNREADABLE, to -> new InformDurable(to, homeTopology, route.homeKeyOnlyRoute(), txnId, executeAt, txnId.epoch(), txnId.epoch(), durability), tracing);
     }
 
     public static void informAll(Node node, Topologies inform, TxnId txnId, Route<?> route, Timestamp executeAt, Durability durability, @Nullable Tracing tracing)
     {
-        node.send(inform, to -> new InformDurable(to, inform, route, txnId, executeAt, inform.oldestEpoch(), inform.currentEpoch(), durability), tracing);
+        node.send(inform, UNREADABLE, to -> new InformDurable(to, inform, route, txnId, executeAt, inform.oldestEpoch(), inform.currentEpoch(), durability), tracing);
     }
 
     static Shard homeShard(Node node, Topologies any, TxnId txnId, RoutingKey homeKey) throws TopologyException
