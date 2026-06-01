@@ -24,6 +24,7 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
@@ -80,6 +81,7 @@ import org.agrona.collections.Hashing;
 import org.agrona.collections.Int2IntHashMap;
 import org.agrona.collections.Int2ObjectHashMap;
 
+import static accord.local.CommandStore.purgeHistory;
 import static accord.topology.EpochReady.done;
 import static accord.api.DataStore.FetchKind.Sync;
 import static accord.local.CommandStores.BootstrapRangeAction.BOOTSTRAP_NOT_NEEDED;
@@ -1203,5 +1205,23 @@ public abstract class CommandStores implements AsyncExecutorFactory
     protected Snapshot current()
     {
         return current;
+    }
+
+    public AsyncResult<List<Ranges>> getInUseRangesAndMarkRetiredRangesUnsafeToRead()
+    {
+        List<AsyncResult<Ranges>> results = new ArrayList<>();
+        Snapshot snapshot = current;
+        for (ShardHolder shard : snapshot.shards)
+            results.add(shard.store.submit((PreLoadContext.Empty) () -> "Get not retired ranges and mark retired ranges unsafe to read",
+                    safeCommandStore -> {
+                        Ranges notRetiredRanges = shard.ranges().notRetired(safeCommandStore);
+                        Ranges retired = shard.ranges().all().without(notRetiredRanges);
+                        NavigableMap<Timestamp, Ranges> safeToReadAt = safeCommandStore.safeToReadAt();
+                        if (safeToReadAt.values().stream().anyMatch(r -> r.intersects(retired)))
+                            safeCommandStore.setSafeToRead(purgeHistory(safeToReadAt, retired));
+                        return notRetiredRanges;
+                    }));
+
+        return AsyncResults.allOf(results);
     }
 }
