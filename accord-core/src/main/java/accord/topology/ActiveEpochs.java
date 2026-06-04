@@ -61,19 +61,34 @@ public final class ActiveEpochs implements Iterable<ActiveEpoch>
     // Epochs are sorted in _descending_ order
     final ActiveEpoch[] epochs;
 
-    ActiveEpochs(TopologyManager manager, ActiveEpoch[] epochs, long prevFirstNonEmptyEpoch)
+    private ActiveEpochs(TopologyManager manager, ActiveEpoch[] epochs, long firstNonEmptyEpoch)
     {
         this.manager = manager;
         this.currentEpoch = epochs.length > 0 ? epochs[0].epoch() : 0;
-        if (prevFirstNonEmptyEpoch != -1)
-            this.firstNonEmptyEpoch = prevFirstNonEmptyEpoch;
-        else if (epochs.length > 0 && !epochs[0].all().isEmpty())
-            this.firstNonEmptyEpoch = currentEpoch;
-        else
-            this.firstNonEmptyEpoch = prevFirstNonEmptyEpoch;
-
+        this.firstNonEmptyEpoch = firstNonEmptyEpoch;
+        this.epochs = epochs;
         for (int i = 1; i < epochs.length; i++)
             Invariants.requireArgument(epochs[i].epoch() == epochs[i - 1].epoch() - 1);
+    }
+
+    static ActiveEpochs empty(TopologyManager manager)
+    {
+        return new ActiveEpochs(manager, new ActiveEpoch[0], -1);
+    }
+
+    ActiveEpochs withNewEpochs(ActiveEpoch[] epochs)
+    {
+        long firstNonEmptyEpoch = this.firstNonEmptyEpoch;
+        if (firstNonEmptyEpoch == -1 && epochs.length > 0 && !epochs[0].all().isEmpty())
+        {
+            Invariants.require(epochs.length == 1);
+            firstNonEmptyEpoch = epochs[0].epoch();
+        }
+        return new ActiveEpochs(manager, epochs, firstNonEmptyEpoch);
+    }
+
+    ActiveEpochs maybeTruncate()
+    {
         int truncateFrom = -1;
         // > 0 because we do not want to be left without epochs in case they're all empty
         for (int i = epochs.length - 1; i > 0; i--)
@@ -85,28 +100,26 @@ public final class ActiveEpochs implements Iterable<ActiveEpoch>
         }
 
         if (truncateFrom == -1)
+            return this;
+
+        ActiveEpoch[] newEpochs = Arrays.copyOf(epochs, truncateFrom);
+        for (int i = truncateFrom; i < epochs.length; i++)
         {
-            this.epochs = epochs;
+            ActiveEpoch e = epochs[i];
+            Invariants.require(epochs[i].isQuorumReady());
+            logger.info("Retired epoch {} with added/removed ranges {}/{}. Topology: {}. Closed: {}", e.epoch(), e.addedRanges, e.removedRanges, e.all.ranges, e.closed());
         }
-        else
+        if (logger.isTraceEnabled())
         {
-            this.epochs = Arrays.copyOf(epochs, truncateFrom);
-            for (int i = truncateFrom; i < epochs.length; i++)
+            for (int i = 0; i < truncateFrom; i++)
             {
                 ActiveEpoch e = epochs[i];
-                Invariants.require(epochs[i].isQuorumReady());
-                logger.info("Retired epoch {} with added/removed ranges {}/{}. Topology: {}. Closed: {}", e.epoch(), e.addedRanges, e.removedRanges, e.all.ranges, e.closed());
-            }
-            if (logger.isTraceEnabled())
-            {
-                for (int i = 0; i < truncateFrom; i++)
-                {
-                    ActiveEpoch e = epochs[i];
-                    Invariants.require(e.isQuorumReady());
-                    logger.trace("Leaving epoch {} with added/removed ranges {}/{}", e.epoch(), e.addedRanges, e.removedRanges);
-                }
+                Invariants.require(e.isQuorumReady());
+                logger.trace("Leaving epoch {} with added/removed ranges {}/{}", e.epoch(), e.addedRanges, e.removedRanges);
             }
         }
+
+        return withNewEpochs(newEpochs);
     }
 
     public boolean isEmpty()

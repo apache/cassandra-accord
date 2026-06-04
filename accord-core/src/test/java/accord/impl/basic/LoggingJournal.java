@@ -166,6 +166,12 @@ public class LoggingJournal implements Journal
     }
 
     @Override
+    public Ranges loadPermanentlyUnsafeToRead(int store)
+    {
+        return delegate.loadPermanentlyUnsafeToRead(store);
+    }
+
+    @Override
     public PersistentField.Persister<DurableBefore, DurableBefore> durableBeforePersister()
     {
         return delegate.durableBeforePersister();

@@ -403,6 +403,7 @@ public class Cluster implements Scheduler
         @Override public NavigableMap<TxnId, Ranges> loadBootstrapBeganAt(int store) { throw new IllegalStateException("Not impelemented"); }
         @Override public NavigableMap<Timestamp, Ranges> loadSafeToRead(int store) { throw new IllegalStateException("Not impelemented"); }
         @Override public CommandStores.RangesForEpoch loadRangesForEpoch(int store) { throw new IllegalStateException("Not impelemented"); }
+        @Override public Ranges loadPermanentlyUnsafeToRead(int store) { throw new IllegalStateException("Not implemented"); }
         @Override public PersistentField.Persister<DurableBefore, DurableBefore> durableBeforePersister() { throw new IllegalStateException("Not impelemented"); }
         @Override public void saveStoreState(int store, FieldUpdates fieldUpdates, Runnable onFlush)  { throw new IllegalStateException("Not impelemented"); }
     }

@@ -19,6 +19,7 @@
 package accord.topology;
 
 import java.util.IdentityHashMap;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -51,6 +52,9 @@ import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 import accord.utils.async.NestedAsyncResult;
+
+import static accord.primitives.AbstractRanges.UnionMode.MERGE_ADJACENT;
+import static accord.primitives.Routables.Slice.Minimal;
 
 /**
  * Manages topology state changes and update bookkeeping
@@ -99,7 +103,7 @@ public class TopologyManager
         this.time = time;
         this.timeouts = timeouts;
         this.topologyService = topologyService;
-        this.active = new ActiveEpochs(this, new ActiveEpoch[0], -1);
+        this.active = ActiveEpochs.empty(this);
         this.pending = new PendingEpochs(this);
     }
 
@@ -169,6 +173,7 @@ public class TopologyManager
 
     private void onEpochRetired(Ranges ranges, long epoch, @Nullable TxnId txnId)
     {
+        long removeCommandStoresBefore = 0;
         Topology topology = null;
         synchronized (this)
         {
@@ -193,28 +198,20 @@ public class TopologyManager
             if (epoch > active.currentEpoch)
                 ranges = pending.retired(ranges, epoch);
             ranges = active.retired(ranges, epoch);
+            ActiveEpochs truncated = active.maybeTruncate();
+            if (truncated != active)
+            {
+                active = truncated;
+                removeCommandStoresBefore = truncated.minEpoch();
+            }
         }
         if (!ranges.isEmpty())
         {
             for (TopologyListener listener : listeners)
                 listener.onEpochRetired(ranges, epoch, topology);
         }
-    }
-
-    public synchronized void truncateTopologiesUntil(long epoch)
-    {
-        ActiveEpochs current = active;
-        Invariants.requireArgument(current.epoch() >= epoch, "Unable to truncate; epoch %d is > current epoch %d", epoch, current.epoch());
-
-        if (current.minEpoch() >= epoch)
-            return;
-
-        int newLen = current.epochs.length - (int) (epoch - current.minEpoch());
-        Invariants.require(current.epochs[newLen - 1].isQuorumReady(), "Epoch %d is not ready to coordinate", current.epochs[newLen - 1].epoch());
-
-        ActiveEpoch[] nextEpochs = new ActiveEpoch[newLen];
-        System.arraycopy(current.epochs, 0, nextEpochs, 0, newLen);
-        active = new ActiveEpochs(this, nextEpochs, current.firstNonEmptyEpoch);
+        if (removeCommandStoresBefore > 0)
+            node.commandStores().removeCommandStoresBefore(removeCommandStoresBefore);
     }
 
     public TopologySorter.Supplier sorter()
@@ -308,6 +305,63 @@ public class TopologyManager
         updateActive();
     }
 
+    public static class RegainingEpochRange
+    {
+        public final long epoch;
+        public final Ranges ranges;
+
+        public RegainingEpochRange(long epoch, Ranges ranges)
+        {
+            this.epoch = epoch;
+            this.ranges = ranges;
+        }
+
+        public long epoch()
+        {
+            return epoch;
+        }
+
+        public Ranges ranges()
+        {
+            return ranges;
+        }
+    }
+
+    @Nullable
+    public RegainingEpochRange computeRegaining(Topology current, Topology next)
+    {
+        Map<Id, Ranges> additions = Topology.computeNodeAdditions(current, next);
+        long greatestEpoch = -1;
+        Ranges ranges = Ranges.EMPTY;
+
+        ActiveEpochs active = this.active;
+        for (Map.Entry<Id, Ranges> entry : additions.entrySet())
+        {
+            Ranges addingForNode = entry.getValue();
+            for (ActiveEpoch e : active)
+            {
+                addingForNode = addingForNode.without(e.removedRanges).without(e.retired());
+                if (addingForNode.isEmpty())
+                    break;
+
+                Ranges existingForNode = e.all().rangesForNode(entry.getKey());
+                Ranges regainingForNode = addingForNode.slice(existingForNode, Minimal);
+                if (!regainingForNode.isEmpty())
+                {
+                    greatestEpoch = Math.max(greatestEpoch, e.epoch());
+                    ranges = ranges.union(MERGE_ADJACENT, regainingForNode);
+                    addingForNode = addingForNode.without(regainingForNode);
+                }
+                addingForNode = addingForNode.without(e.addedRanges);
+            }
+        }
+
+        if (greatestEpoch != -1)
+            return new RegainingEpochRange(greatestEpoch, ranges);
+
+        return null;
+    }
+
     private final AtomicBoolean updatingActive = new AtomicBoolean();
     private void updateActive()
     {
@@ -376,7 +430,7 @@ public class TopologyManager
                         }
                     }
 
-                    this.active = new ActiveEpochs(this, next, prev.firstNonEmptyEpoch);
+                    this.active = prev.withNewEpochs(next);
                     this.pending.removeFirst(topology.epoch);
                 }
 

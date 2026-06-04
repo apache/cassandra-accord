@@ -33,6 +33,7 @@ import accord.api.DataStore;
 import accord.api.LocalListeners;
 import accord.api.ProgressLog;
 import accord.api.RoutingKey;
+import accord.local.CommandStores.RangesForEpoch;
 import accord.local.CommandStores.RangesForEpochSupplier;
 import accord.local.RedundantBefore.RedundantBeforeSupplier;
 import accord.local.cfk.CommandsForKey;
@@ -557,7 +558,7 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
         if (safeCommand != null && safeCommand.current().known().route() != MaybeRoute)
             return;
 
-        CommandStores.RangesForEpoch rangesForEpoch = safeStore.ranges();
+        RangesForEpoch rangesForEpoch = safeStore.ranges();
         // TODO (required): this is incompatible with rebootstrap - we need to use some additional condition
         witnessedBy = witnessedBy.without(rangesForEpoch.coordinates(txnId));  // already coordinates, no need to replicate
         if (witnessedBy.isEmpty())
@@ -601,6 +602,11 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
         commandStore().unsafeSetSafeToRead(newSafeToRead);
     }
 
+    public void setPermanentlyUnsafeToRead(Ranges newPermanentlyUnsafeToRead)
+    {
+        commandStore().unsafeSetPermanentlyUnsafeToRead(newPermanentlyUnsafeToRead);
+    }
+
     public void setRangesForEpoch(CommandStores.RangesForEpoch rangesForEpoch)
     {
         commandStore().unsafeSetRangesForEpoch(rangesForEpoch);
@@ -613,7 +619,7 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
     public abstract Agent agent();
     public abstract ProgressLog progressLog();
     public abstract NodeCommandStoreService node();
-    public abstract CommandStores.RangesForEpoch ranges();
+    public abstract RangesForEpoch ranges();
 
     protected NavigableMap<TxnId, Ranges> bootstrapBeganAt()
     {

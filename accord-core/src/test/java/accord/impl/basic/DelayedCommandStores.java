@@ -85,6 +85,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
 
     public void validateShardStateForTesting(Journal.TopologyUpdate lastUpdate)
     {
+        PreviouslyOwned previouslyOwned = lastUpdate.previouslyOwned;
         ShardHolder[] shards = new ShardHolder[lastUpdate.commandStores.size()];
         int i = 0;
         for (Map.Entry<Integer, RangesForEpoch> e : lastUpdate.commandStores.entrySet())
@@ -92,20 +93,26 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
             Snapshot current = current();
             RangesForEpoch ranges = e.getValue();
             DelayedCommandStore commandStore = null;
+            Ranges regainingRanges = null;
             for (ShardHolder shard : current)
             {
                 if (shard.ranges().equals(ranges))
+                {
+                    Invariants.require(commandStore == null);
                     commandStore = (DelayedCommandStore) shard.store;
+                    regainingRanges = shard.regainsRanges;
+                }
             }
             Invariants.nonNull(commandStore, "Each set of ranges should have a corresponding command store, but %d did not:(%s)",
                                ranges, Arrays.toString(shards))
                       .restore();
-            ShardHolder shard = new ShardHolder(commandStore, e.getValue());
+            Invariants.require(previouslyOwned.regains(ranges.currentRanges()).equals(regainingRanges));
+            ShardHolder shard = new ShardHolder(commandStore, ranges, previouslyOwned.regains(ranges.currentRanges()));
             shards[i++] = shard;
         }
         Arrays.sort(shards, Comparator.comparingInt(shard -> shard.store.id()));
 
-        loadSnapshot(new Snapshot(shards, lastUpdate.global.forNode(nodeId()).trim(), lastUpdate.global));
+        loadSnapshot(new Snapshot(shards, lastUpdate.global.forNode(nodeId()).trim(), lastUpdate.global, lastUpdate.previouslyOwned));
     }
 
     protected void loadSnapshot(Snapshot nextSnapshot)
@@ -137,6 +144,12 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
             {
                 RangesForEpoch orig = prev.unsafeGetRangesForEpoch();
                 RangesForEpoch loaded = next.unsafeGetRangesForEpoch();
+                Invariants.require(orig.equals(loaded), "%s should equal %s", loaded, orig);
+            }
+
+            {
+                Ranges orig = prev.unsafeGetPermanentlyUnsafeToRead();
+                Ranges loaded = next.unsafeGetPermanentlyUnsafeToRead();
                 Invariants.require(orig.equals(loaded), "%s should equal %s", loaded, orig);
             }
         }
@@ -258,8 +271,20 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
             }
         }
 
+        @Override
+        protected void loadPermanentlyUnsafeToRead(Ranges newPermanentlyUnsafeToRead)
+        {
+            if (newPermanentlyUnsafeToRead == null) Invariants.require(super.permanentlyUnsafeToRead.isEmpty());
+            else
+            {
+                unsafeClearPermanentlyUnsafeToRead();
+                super.loadPermanentlyUnsafeToRead(newPermanentlyUnsafeToRead);
+            }
+        }
+
         public void restore()
         {
+            loadPermanentlyUnsafeToRead(journal.loadPermanentlyUnsafeToRead(id()));
             loadRangesForEpoch(journal.loadRangesForEpoch(id()));
             loadRedundantBefore(journal.loadRedundantBefore(id()));
             loadBootstrapBeganAt(journal.loadBootstrapBeganAt(id()));

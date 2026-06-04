@@ -44,9 +44,9 @@ public final class ActiveEpoch
 
     final QuorumTracker quorumReadyTracker;
     final SimpleBitSet shardQuorumReady, receivedNodeReady;
-    private Ranges quorumReady;
+    private volatile Ranges quorumReady;
 
-    private Ranges closed = Ranges.EMPTY, retired = Ranges.EMPTY;
+    private volatile Ranges closed = Ranges.EMPTY, retired = Ranges.EMPTY;
     private volatile boolean allRetired;
 
     public boolean allRetired()

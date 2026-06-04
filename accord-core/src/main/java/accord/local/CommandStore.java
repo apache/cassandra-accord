@@ -188,6 +188,7 @@ public abstract class CommandStore implements AbstractAsyncExecutor, SequentialA
      * But they may still be ordered for other key ranges they participate in.
      */
     private NavigableMap<Timestamp, Ranges> safeToRead = emptySafeToRead();
+    protected Ranges permanentlyUnsafeToRead = Ranges.EMPTY;
     private final Set<Bootstrap> bootstraps = Collections.synchronizedSet(new DeterministicIdentitySet<>());
 
     static class WaitingOnVisibility
@@ -248,6 +249,7 @@ public abstract class CommandStore implements AbstractAsyncExecutor, SequentialA
         maxConflicts = MaxConflicts.EMPTY;
         maxDecidedRX = MaxDecidedRX.EMPTY;
         safeToRead = emptySafeToRead();
+        permanentlyUnsafeToRead = Ranges.EMPTY;
         listeners.clear();
         waitingOnVisibility.values().forEach(w -> w.invalid = true);
         waitingOnVisibility.clear();
@@ -286,6 +288,11 @@ public abstract class CommandStore implements AbstractAsyncExecutor, SequentialA
         return rangesForEpoch;
     }
 
+    public Ranges unsafeGetPermanentlyUnsafeToRead()
+    {
+        return permanentlyUnsafeToRead;
+    }
+
     public MaxDecidedRX unsafeGetMaxDecidedRX()
     {
         return maxDecidedRX;
@@ -306,6 +313,17 @@ public abstract class CommandStore implements AbstractAsyncExecutor, SequentialA
     {
         Invariants.require(this.rangesForEpoch == null);
         unsafeSetRangesForEpoch(newRangesForEpoch);
+    }
+
+    protected final void unsafeClearPermanentlyUnsafeToRead()
+    {
+        permanentlyUnsafeToRead = null;
+    }
+
+    protected void loadPermanentlyUnsafeToRead(Ranges newPermanentlyUnsafeToRead)
+    {
+        Invariants.require(this.permanentlyUnsafeToRead == null);
+        unsafeSetPermanentlyUnsafeToRead(newPermanentlyUnsafeToRead);
     }
 
     public abstract boolean inStore();
@@ -406,10 +424,17 @@ public abstract class CommandStore implements AbstractAsyncExecutor, SequentialA
     /**
      * This method may be invoked on a non-CommandStore thread
      */
-    final void unsafeSetSafeToRead(NavigableMap<Timestamp, Ranges> newSafeToRead)
+    final void unsafeSetSafeToRead(@Nullable NavigableMap<Timestamp, Ranges> newSafeToRead)
     {
+        if (newSafeToRead != null)
+            newSafeToRead = purgeHistory(newSafeToRead, permanentlyUnsafeToRead);
         this.safeToRead = newSafeToRead;
         node.updateStamp();
+    }
+
+    final void unsafeSetPermanentlyUnsafeToRead(Ranges newPermanentlyUnsafeToRead)
+    {
+        this.permanentlyUnsafeToRead = newPermanentlyUnsafeToRead;
     }
 
     protected final void unsafeClearSafeToRead()
@@ -1225,6 +1250,14 @@ public abstract class CommandStore implements AbstractAsyncExecutor, SequentialA
                 safeStore.setSafeToRead(purgeHistory(safeToRead, ranges));
             }, agent);
         }
+    }
+
+    final AsyncChain<Void> markPermanentlyUnsafeToRead(Ranges ranges)
+    {
+        return chain((Empty) () -> "Mark Range As Permanently Unsafe To Read", safeStore -> {
+            safeStore.setSafeToRead(purgeHistory(safeToRead, ranges));
+            safeStore.setPermanentlyUnsafeToRead(permanentlyUnsafeToRead.union(MERGE_ADJACENT, ranges));
+        });
     }
 
     public final DataStore unsafeGetDataStore()

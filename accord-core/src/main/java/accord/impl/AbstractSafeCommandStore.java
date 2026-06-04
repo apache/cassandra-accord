@@ -214,6 +214,9 @@ extends SafeCommandStore
         if (fieldUpdates.newRangesForEpoch != null)
             super.setRangesForEpoch(fieldUpdates.newRangesForEpoch);
 
+        if (fieldUpdates.newPermanentlyUnsafeToRead != null)
+            super.setPermanentlyUnsafeToRead(fieldUpdates.newPermanentlyUnsafeToRead);
+
         fieldUpdates = null;
     }
 
@@ -241,6 +244,12 @@ extends SafeCommandStore
     public final void setSafeToRead(NavigableMap<Timestamp, Ranges> newSafeToRead)
     {
         ensureFieldUpdates().newSafeToRead = newSafeToRead;
+    }
+
+    @Override
+    public final void setPermanentlyUnsafeToRead(Ranges newPermanentlyUnsafeToRead)
+    {
+        ensureFieldUpdates().newPermanentlyUnsafeToRead = newPermanentlyUnsafeToRead;
     }
 
     @Override

@@ -28,6 +28,7 @@ import javax.annotation.Nullable;
 import accord.impl.CommandChange;
 import accord.local.Command;
 import accord.local.CommandStores;
+import accord.local.CommandStores.PreviouslyOwned;
 import accord.local.DurableBefore;
 import accord.local.MinimalCommand;
 import accord.local.Node;
@@ -64,12 +65,14 @@ public interface Journal
     void saveCommand(int store, CommandUpdate value, Runnable onFlush);
 
     List<? extends TopologyUpdate> loadTopologies();
+    // TODO (required): saveTopology should be synchronous, or we should at least await durability before updating in memory topology
     void saveTopology(TopologyUpdate topologyUpdate, Runnable onFlush);
 
     RedundantBefore loadRedundantBefore(int store);
     NavigableMap<TxnId, Ranges> loadBootstrapBeganAt(int store);
     NavigableMap<Timestamp, Ranges> loadSafeToRead(int store);
     CommandStores.RangesForEpoch loadRangesForEpoch(int store);
+    Ranges loadPermanentlyUnsafeToRead(int store);
     void saveStoreState(int store, FieldUpdates fieldUpdates, Runnable onFlush);
 
     Persister<DurableBefore, DurableBefore> durableBeforePersister();
@@ -86,16 +89,18 @@ public interface Journal
     {
         public final Int2ObjectHashMap<CommandStores.RangesForEpoch> commandStores;
         public final Topology global;
+        public final PreviouslyOwned previouslyOwned;
 
-        public TopologyUpdate(@Nonnull Int2ObjectHashMap<CommandStores.RangesForEpoch> commandStores, @Nonnull Topology global)
+        public TopologyUpdate(@Nonnull Int2ObjectHashMap<CommandStores.RangesForEpoch> commandStores, @Nonnull Topology global, PreviouslyOwned previouslyOwned)
         {
             this.commandStores = commandStores;
             this.global = global;
+            this.previouslyOwned = previouslyOwned;
         }
 
         public boolean isEquivalent(TopologyUpdate other)
         {
-            boolean equivalent = global.isEquivalent(other.global);
+            boolean equivalent = global.isEquivalent(other.global) && Objects.equals(previouslyOwned, other.previouslyOwned);
             if (!equivalent)
                 return false;
             Invariants.require(commandStores.equals(other.commandStores));
@@ -104,7 +109,7 @@ public interface Journal
 
         public TopologyUpdate cloneWithEquivalentEpoch(long epoch)
         {
-            return new TopologyUpdate(commandStores, global.cloneEquivalentWithEpoch(epoch));
+            return new TopologyUpdate(commandStores, global.cloneEquivalentWithEpoch(epoch), previouslyOwned);
         }
 
         @Override
@@ -113,7 +118,8 @@ public interface Journal
             if (this == object) return true;
             if (object == null || getClass() != object.getClass()) return false;
             TopologyUpdate update = (TopologyUpdate) object;
-            return Objects.equals(commandStores, update.commandStores) && Objects.equals(global, update.global);
+            return Objects.equals(commandStores, update.commandStores) && Objects.equals(global, update.global)
+                   && Objects.equals(previouslyOwned, update.previouslyOwned);
         }
 
         @Override
@@ -151,6 +157,7 @@ public interface Journal
         public RedundantBefore newRedundantBefore;
         public NavigableMap<TxnId, Ranges> newBootstrapBeganAt;
         public NavigableMap<Timestamp, Ranges> newSafeToRead;
+        public Ranges newPermanentlyUnsafeToRead;
         public CommandStores.RangesForEpoch newRangesForEpoch;
 
         public String toString()
@@ -162,6 +169,8 @@ public interface Journal
                 builder.append("newBootstrapBeganAt=").append(newBootstrapBeganAt).append(", ");
             if (newSafeToRead != null)
                 builder.append("newSafeToRead=").append(newSafeToRead).append(", ");
+            if (newPermanentlyUnsafeToRead != null)
+                builder.append("newPermanentlyUnsafeToRead=").append(newPermanentlyUnsafeToRead).append(", ");
             if (newRangesForEpoch != null)
                 builder.append("newRangesForEpoch=").append(newRangesForEpoch).append(", ");
             builder.setLength(builder.length() - 2);

@@ -766,6 +766,23 @@ public class Topology
             forEach.accept(shards[i]);
     }
 
+    public static Map<Id, Ranges> computeNodeAdditions(Topology current, Topology next)
+    {
+        Map<Id, Ranges> additions = new HashMap<>();
+        for (Id node : next.nodes())
+        {
+            Ranges prev = current.rangesForNode(node);
+            if (prev == null) prev = Ranges.EMPTY;
+
+            Ranges added = next.rangesForNode(node).without(prev);
+            if (added.isEmpty())
+                continue;
+
+            additions.put(node, added);
+        }
+        return additions;
+    }
+
     public SortedArrayList<Id> nodes()
     {
         return nodes;

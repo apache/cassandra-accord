@@ -55,7 +55,6 @@ public class MaybeRecover extends CheckShards<Outcome, Route<?>>
         this.recoverIfAlreadyDurable = recoverIfAlreadyDurable;
         this.reportTo = reportTo;
     }
-
     public static Object maybeRecover(Node node, TxnId txnId, Infer.InvalidIf invalidIf, Route<?> someRoute, ProgressToken prevProgress, boolean recoverIfAlreadyDurable, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback)
     {
         MaybeRecover maybeRecover;

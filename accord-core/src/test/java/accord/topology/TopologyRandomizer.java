@@ -413,33 +413,37 @@ public class TopologyRandomizer
         return ((PrefixedIntHashKey) shard.range.start()).prefix;
     }
 
-    private static Map<Id, Ranges> getAdditions(Topology current, Topology next)
-    {
-        Map<Id, Ranges> additions = new HashMap<>();
-        for (Id node : next.nodes())
-        {
-            Ranges prev = current.rangesForNode(node);
-            if (prev == null) prev = Ranges.EMPTY;
-
-            Ranges added = next.rangesForNode(node).without(prev);
-            if (added.isEmpty())
-                continue;
-
-            additions.put(node, added);
-        }
-        return additions;
-    }
-
-    private static boolean reassignsRanges(Topology current, Shard[] nextShards, Map<Id, Ranges> previouslyReplicated)
+    private boolean validToReassignRange(Topology current, Shard[] nextShards, Map<Id, Ranges> previouslyReplicated)
     {
         Topology next = new Topology(current.epoch + 1, nextShards);
-        Map<Id, Ranges> additions = getAdditions(current, next);
+        Map<Id, Ranges> additions = Topology.computeNodeAdditions(current, next);
 
         for (Map.Entry<Id, Ranges> entry : additions.entrySet())
         {
-            if (previouslyReplicated.getOrDefault(entry.getKey(), Ranges.EMPTY).intersects(entry.getValue()))
+            if (previouslyReplicated.getOrDefault(entry.getKey(), Ranges.EMPTY).intersects(entry.getValue())
+                    && !(previousEpochForRegainedRangeRetired(current, entry.getValue())))
+                return false;
+        }
+
+        return true;
+    }
+
+    private boolean previousEpochForRegainedRangeRetired(Topology current, Ranges regainingRanges)
+    {
+        for (Id id : current.nodes())
+        {
+            Node node = this.nodeLookup.apply(id);
+            boolean isRetiredForNode = true;
+            for (ActiveEpoch epoch : node.topology().active())
+            {
+                if (epoch.all().ranges.intersects(regainingRanges) && !epoch.allRetired())
+                    isRetiredForNode = false;
+            }
+
+            if (isRetiredForNode)
                 return true;
         }
+
         return false;
     }
 
@@ -472,7 +476,7 @@ public class TopologyRandomizer
             Shard[] testShards = type.apply(state, random);
             Arrays.sort(testShards, (a, b) -> a.range.compareTo(b.range));
             if (!everyShardHasQuorumOverlaps(oldShards, testShards)
-                || reassignsRanges(current, testShards, previouslyReplicated))
+                || !validToReassignRange(current, testShards, previouslyReplicated))
             {
                 ++rejectedMutations;
             }
@@ -488,7 +492,7 @@ public class TopologyRandomizer
 
         Topology nextTopology = new Topology(current.epoch + 1, newShards);
 
-        Map<Id, Ranges> nextAdditions = getAdditions(current, nextTopology);
+        Map<Id, Ranges> nextAdditions = Topology.computeNodeAdditions(current, nextTopology);
         for (Map.Entry<Id, Ranges> entry : nextAdditions.entrySet())
         {
             previouslyReplicated.merge(entry.getKey(), entry.getValue(), (a, b) -> a.union(MERGE_ADJACENT, b));

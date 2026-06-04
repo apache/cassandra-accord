@@ -262,6 +262,11 @@ public class InMemoryJournal implements Journal
     @Override
     public void saveTopology(TopologyUpdate topologyUpdate, Runnable onFlush)
     {
+        // Ensure that we only read the latest topologyUpdate as that is what happens in the
+        // C* implementation
+        int lastIndex = topologyUpdates.size() - 1;
+        if (!topologyUpdates.isEmpty() && topologyUpdates.get(lastIndex).global.equals(topologyUpdate.global))
+            topologyUpdates.remove(lastIndex);
         topologyUpdates.add(topologyUpdate);
         if (onFlush != null)
             onFlush.run();
@@ -316,6 +321,15 @@ public class InMemoryJournal implements Journal
     }
 
     @Override
+    public Ranges loadPermanentlyUnsafeToRead(int commandStoreId)
+    {
+        FieldUpdates fieldStates = this.fieldStates.get(commandStoreId);
+        if (fieldStates == null)
+            return null;
+        return fieldStates.newPermanentlyUnsafeToRead;
+    }
+
+    @Override
     public PersistentField.Persister<DurableBefore, DurableBefore> durableBeforePersister()
     {
         return DurableBefore.NOOP_PERSISTER;
@@ -329,6 +343,7 @@ public class InMemoryJournal implements Journal
             init.newRedundantBefore = RedundantBefore.EMPTY;
             init.newBootstrapBeganAt = ImmutableSortedMap.of(TxnId.NONE, Ranges.EMPTY);
             init.newSafeToRead = ImmutableSortedMap.of(Timestamp.NONE, Ranges.EMPTY);
+            init.newPermanentlyUnsafeToRead = Ranges.EMPTY;
             return init;
         });
 
@@ -340,6 +355,8 @@ public class InMemoryJournal implements Journal
             fieldStates.newBootstrapBeganAt = fieldUpdates.newBootstrapBeganAt;
         if (fieldUpdates.newRangesForEpoch != null)
             fieldStates.newRangesForEpoch = fieldUpdates.newRangesForEpoch;
+        if (fieldUpdates.newPermanentlyUnsafeToRead != null)
+            fieldStates.newPermanentlyUnsafeToRead = fieldUpdates.newPermanentlyUnsafeToRead;
 
         if (onFlush!= null)
             onFlush.run();
@@ -634,6 +651,10 @@ public class InMemoryJournal implements Journal
             Map<TxnId, List<Diff>> diffs = new TreeMap<>();
 
             InMemoryCommandStore commandStore = (InMemoryCommandStore) commandStores.forId(commandStoreId);
+
+            if (commandStore == null)
+                continue;
+
             Replayer replayer = commandStore.replayer(PART_NON_DURABLE);
 
             for (Map.Entry<TxnId, Diffs> e : diffEntry.getValue().entrySet())
