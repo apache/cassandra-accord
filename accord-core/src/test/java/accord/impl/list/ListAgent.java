@@ -301,7 +301,7 @@ public class ListAgent implements InMemoryAgent, CoordinatorEventListener, Owner
     public AsyncResult<Void> snapshot(InMemoryCommandStore commandStore)
     {
         Snapshotter<Snapshot> snapshotter = snapshotters.computeIfAbsent(commandStore.id(), ignore -> new Snapshotter<>(scheduler, rnd));
-        return commandStore.submit((PreLoadContext.Empty)() -> "Snapshot", safeStore -> snapshotter.snapshot(false, Snapshot.snapshot(commandStore)))
+        return commandStore.submit((ExecutionContext.Empty)() -> "Snapshot", safeStore -> snapshotter.snapshot(false, Snapshot.snapshot(commandStore)))
                            .flatMap(Function.identity());
     }
 

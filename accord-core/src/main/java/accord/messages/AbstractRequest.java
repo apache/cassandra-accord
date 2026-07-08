@@ -26,8 +26,8 @@ import accord.primitives.Participants;
 import accord.primitives.TxnId;
 
 // TODO (expected): merge cancel/timeout logic here from NoWaitRequest and ReadRequest
-// TODO (expected): migrate to SequentialExecutor approach used by Coordinator logic, rather than synchronized
-// TODO (desired): allow a task to be associated with more than one SequentialExecutor, and only commit a thread when both are ready to schedule it
+// TODO (expected): migrate to ExclusiveExecutor approach used by Coordinator logic, rather than synchronized
+// TODO (desired): allow a task to be associated with more than one ExclusiveExecutor, and only commit a thread when both are ready to schedule it
 public abstract class AbstractRequest<P extends Participants<?>, R> extends MapReduceConsumeCommandStores<P, R> implements Request
 {
     protected transient Node node;

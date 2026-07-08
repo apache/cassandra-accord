@@ -21,7 +21,7 @@ package accord.messages;
 import javax.annotation.Nullable;
 
 import accord.local.Node;
-import accord.local.PreLoadContext;
+import accord.local.ExecutionContext;
 import accord.local.DurableBefore;
 import accord.primitives.TxnId;
 import accord.utils.async.Cancellable;
@@ -29,7 +29,7 @@ import accord.utils.async.Cancellable;
 import static accord.messages.MessageType.StandardMessage.GET_DURABLE_BEFORE_REQ;
 import static accord.messages.MessageType.StandardMessage.GET_DURABLE_BEFORE_RSP;
 
-public class GetDurableBefore implements Request, PreLoadContext
+public class GetDurableBefore implements Request, ExecutionContext
 {
     public GetDurableBefore()
     {

@@ -18,26 +18,18 @@
 
 package accord.impl;
 
-import java.util.Objects;
-import java.util.function.Supplier;
-
 import javax.annotation.Nullable;
 
 import accord.impl.InMemoryCommandStore.GlobalCommand;
 import accord.local.Command;
 import accord.local.SafeCommand;
+import accord.primitives.SaveStatus;
 import accord.primitives.TxnId;
 
-import static accord.utils.Invariants.illegalState;
-
-public class InMemorySafeCommand extends SafeCommand implements SafeState<Command>
+public class InMemorySafeCommand extends SafeCommand
 {
-    private static final Object INIT = new Object();
-    private static final Supplier<GlobalCommand> INVALIDATED = () -> null;
-
-    private Supplier<GlobalCommand> lazy;
-    private Object original = INIT;
-    private GlobalCommand global;
+    private final GlobalCommand global;
+    private boolean touched;
 
     public InMemorySafeCommand(TxnId txnId, GlobalCommand global)
     {
@@ -45,75 +37,39 @@ public class InMemorySafeCommand extends SafeCommand implements SafeState<Comman
         this.global = global;
     }
 
-    public InMemorySafeCommand(TxnId txnId, Supplier<GlobalCommand> global)
+    protected boolean hasChanged(Command original, Command updated)
     {
-        super(txnId);
-        this.lazy = global;
-    }
-
-    @Override
-    public Command current()
-    {
-        touch();
-        return global.value();
-    }
-
-    public boolean isModified()
-    {
-        return original != INIT && !Objects.equals(original, global.value());
+        return original != updated && updated.saveStatus != SaveStatus.Uninitialised;
     }
 
     @Nullable
     public Command original()
     {
-        touch();
-        if (!isModified())
-            return global.value();
-        return (Command) original;
+        return global == null ? null : global.value();
     }
 
-    @Override
-    protected void set(Command update)
+    public final void preExecute()
     {
-        touch();
-        if (original == INIT)
-            original = global.value();
-        global.value(update);
+        requireUninitialised();
+        current = global.value();
+        if (current == null)
+            initialise();
+        global.lock(this);
+        setSafe();
     }
 
-    @Override
-    public void markUnsafe()
+    protected void postExecute(InMemoryCommandStore commandStore)
     {
-        lazy = INVALIDATED;
-        original = INIT;
+        if (isModified()) global.value(current);
+        else if (global.value() == null) commandStore.commands.remove(txnId);
+        global.unlock(this);
+        setReleased();
     }
 
-    @Override
-    public boolean isUnsafe()
+    protected boolean touch()
     {
-        return lazy == INVALIDATED;
-    }
-
-    private void touch()
-    {
-        if (isUnsafe())
-            throw illegalState("Cannot access invalidated " + this);
-        if (lazy != null)
-        {
-            global = lazy.get();
-            lazy = null;
-        }
-    }
-
-    GlobalCommand global()
-    {
-        touch();
-        return global;
-    }
-
-    @Nullable
-    GlobalCommand unsafeGlobal()
-    {
-        return global;
+        if (touched)
+            return false;
+        return touched = true;
     }
 }

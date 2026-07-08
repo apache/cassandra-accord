@@ -18,13 +18,8 @@
 
 package accord.local;
 
-import accord.api.RoutingKey;
-import accord.api.VisibleForImplementation;
 import accord.local.cfk.CommandsForKey;
-import accord.primitives.AbstractUnseekableKeys;
 import accord.primitives.Ranges;
-import accord.primitives.Routable;
-import accord.primitives.Routables;
 import accord.primitives.Routables.Slice;
 import accord.primitives.RoutingKeys;
 import accord.primitives.Timestamp;
@@ -39,8 +34,10 @@ import java.util.List;
 import java.util.function.Consumer;
 import javax.annotation.Nullable;
 
+import static accord.local.LoadKeys.INCR;
 import static accord.local.LoadKeys.NONE;
 import static accord.local.LoadKeys.SYNC;
+import static accord.local.LoadKeysFor.READ_WRITE;
 import static accord.local.LoadKeysFor.WRITE;
 
 /**
@@ -49,8 +46,40 @@ import static accord.local.LoadKeysFor.WRITE;
  *
  * TODO (desired): rename to simply Context, or LoadContext
  */
-public interface PreLoadContext
+public interface ExecutionContext
 {
+    enum ExecutionKind
+    {
+        PREACCEPT,
+        ACCEPT,
+        COMMIT,
+        STABLE,
+        APPLY,
+        OTHER,
+    }
+
+    enum ExecutionSequence
+    {
+        /**
+         * The task may run as soon as it is ready, without any regard to ordering on other tasks on the same keys.
+         */
+        UNSEQUENCED,
+
+        /**
+         * The task is ordered with respect to other tasks' priorities, but if the task is INCR each batch may
+         * interleave with other work on those keys.
+         */
+        BY_PRIORITY,
+
+        /**
+         * Appears to be processed "atomically" both itself and with the task that submits it, with respect to other tasks.
+         * Meaningful only when submitted by an already running task, or against an incremental task.
+         * In the latter case, if the execution partially succeeds, any failing keys are blocked from further work
+         * to avoid witnessing a partial update.
+         */
+        ATOMIC;
+    }
+
     @Nullable TxnId primaryTxnId();
     String reason();
 
@@ -61,9 +90,13 @@ public interface PreLoadContext
      *
      * TODO (expected): this is used for Apply, NotifyWaitingOn and listenerContexts; others only use a single txnId
      *  The information we need in memory is super minimal for secondary transactions (mostly just SaveStatus?).
+     *
+     *  NOTE: this currently can change during execution for NotifyWaitingOn.
+     *  This should not be treated as readable after execution is started.
      */
     default @Nullable TxnId additionalTxnId() { return null; }
 
+    // TODO (desired): minimise call-sites, or see if hotspot can optimise this effectively
     default List<TxnId> txnIds()
     {
         TxnId primaryTxnId = primaryTxnId();
@@ -96,7 +129,7 @@ public interface PreLoadContext
             consumer.accept(additionalTxnId);
     }
 
-    default PreLoadContext slice(Ranges ranges, Slice slice)
+    default ExecutionContext slice(Ranges ranges, Slice slice)
     {
         Unseekables<?> keys = keys();
         int size = keys.size();
@@ -119,6 +152,16 @@ public interface PreLoadContext
 
     default LoadKeysFor loadKeysFor() { return WRITE; }
 
+    /**
+     * Whether this execution may be retried safely; useful only for INCR tasks that may partially succeed,
+     * so that the failed portions may be safely retried. It is expected that all INCR tasks are idempotent.
+     */
+    default boolean isIdempotent() { return false; }
+
+    default ExecutionKind executionKind() { return ExecutionKind.OTHER; }
+
+    default ExecutionSequence executionSequence() { return ExecutionSequence.BY_PRIORITY; }
+
     default Timestamp executeAt() { return primaryTxnId(); }
 
     default boolean isEmpty()
@@ -134,7 +177,7 @@ public interface PreLoadContext
      * not whether a subset has been requested - that is, a superset with INCR or ASYNC key information
      * cannot be relied upon for serving INCR or ASYNC subsets in this calculation.
      */
-    default boolean isSubsetOf(PreLoadContext superset)
+    default boolean isSubsetOf(ExecutionContext superset)
     {
         Unseekables<?> keys = keys();
         if (!keys.isEmpty())
@@ -155,19 +198,20 @@ public interface PreLoadContext
                 return false;
         }
 
-        TxnId primaryId = primaryTxnId();
-        TxnId additionalId = additionalTxnId();
-        if (additionalId == null)
-        {
-            return primaryId == null || primaryId.equals(superset.primaryTxnId()) || primaryId.equals(superset.additionalTxnId());
-        }
-        else
-        {
-            Invariants.require(primaryId != null);
-            TxnId supersetPrimaryId = superset.primaryTxnId();
-            TxnId supersetAdditionalId = superset.additionalTxnId();
-            return (primaryId.equals(supersetPrimaryId) || primaryId.equals(supersetAdditionalId)) && (additionalId.equals(supersetAdditionalId) || additionalId.equals(supersetPrimaryId));
-        }
+        return isTxnIdSubsetOf(superset);
+    }
+
+    default boolean isTxnIdSubsetOf(ExecutionContext txnIdSuperset)
+    {
+        TxnId primaryTxnId = primaryTxnId();
+        if (primaryTxnId == null)
+            return true;
+
+        if (!primaryTxnId.equals(txnIdSuperset.primaryTxnId()))
+            return false;
+
+        TxnId additionalTxnId = additionalTxnId();
+        return additionalTxnId == null || additionalTxnId.equals(txnIdSuperset.additionalTxnId());
     }
 
     default String describe()
@@ -177,39 +221,40 @@ public interface PreLoadContext
         return reason() + (txnIds.isEmpty() ? "" : " for " + txnIds) + (keys.isEmpty() ? "" : (txnIds.isEmpty() ? " for " : " and ") + keys());
     }
 
-    class Wrapped implements PreLoadContext
+    interface Wrapped extends ExecutionContext
     {
-        final PreLoadContext wrapped;
-        public Wrapped(PreLoadContext wrapped)
-        {
-            this.wrapped = wrapped;
-        }
-        @Nullable @Override public TxnId primaryTxnId() { return wrapped.primaryTxnId(); }
-        @Nullable @Override public TxnId additionalTxnId() { return wrapped.additionalTxnId(); }
-        @Override public Unseekables<?> keys() { return wrapped.keys(); }
-        @Override public LoadKeys loadKeys() { return wrapped.loadKeys(); }
-        @Override public LoadKeysFor loadKeysFor() { return wrapped.loadKeysFor(); }
-        @Override public Timestamp executeAt() { return wrapped.executeAt(); }
-        @Override public String reason() { return wrapped.reason(); }
-        @Override public String describe() { return wrapped.describe(); }
+        @Nullable @Override default TxnId primaryTxnId() { return wrapped().primaryTxnId(); }
+        @Nullable @Override default TxnId additionalTxnId() { return wrapped().additionalTxnId(); }
+        @Override default Unseekables<?> keys() { return wrapped().keys(); }
+        @Override default ExecutionSequence executionSequence() { return wrapped().executionSequence(); }
+        @Override default ExecutionKind executionKind() { return wrapped().executionKind(); }
+        @Override default boolean isIdempotent() { return wrapped().isIdempotent(); }
+        @Override default LoadKeys loadKeys() { return wrapped().loadKeys(); }
+        @Override default LoadKeysFor loadKeysFor() { return wrapped().loadKeysFor(); }
+        @Override default Timestamp executeAt() { return wrapped().executeAt(); }
+        @Override default String reason() { return wrapped().reason(); }
+        @Override default String describe() { return wrapped().describe(); }
+        ExecutionContext wrapped();
     }
 
-    class OverrideKeys extends Wrapped
+    class OverrideKeys implements Wrapped
     {
+        final ExecutionContext wrapped;
         final Unseekables<?> keys;
-        public OverrideKeys(PreLoadContext wrapped, Unseekables<?> keys)
+        public OverrideKeys(ExecutionContext wrapped, Unseekables<?> keys)
         {
-            super(wrapped);
+            this.wrapped = wrapped;
             this.keys = keys;
         }
 
         @Override public Unseekables<?> keys() { return keys; }
+        @Override public ExecutionContext wrapped() { return wrapped; }
     }
 
-    static PreLoadContext contextFor(@Nullable TxnId primary, @Nullable TxnId additional, Unseekables<?> keys, LoadKeys loadKeys, LoadKeysFor loadKeysFor, String reason)
+    static ExecutionContext contextFor(@Nullable TxnId primary, @Nullable TxnId additional, Unseekables<?> keys, LoadKeys loadKeys, LoadKeysFor loadKeysFor, String reason)
     {
         Invariants.require(primary == null ? additional == null : !primary.equals(additional));
-        return new PreLoadContext()
+        return new ExecutionContext()
         {
             @Override public @Nullable TxnId primaryTxnId() { return primary; }
             @Override public @Nullable TxnId additionalTxnId() { return additional; }
@@ -227,61 +272,84 @@ public interface PreLoadContext
         return primaryTxnId != null && (txnId.equals(primaryTxnId) || txnId.equals(additionalTxnId()));
     }
 
-    static PreLoadContext contextFor(TxnId primary, TxnId additional, String reason)
+    static ExecutionContext unsequenced(TxnId primary, String reason)
     {
-        return new PreLoadContext()
+        return new ExecutionContext()
         {
             @Override public @Nullable TxnId primaryTxnId() { return primary; }
-            @Override public @Nullable TxnId additionalTxnId() { return additional; }
             @Override public String reason() { return reason; }
+            @Override public ExecutionSequence executionSequence() { return ExecutionSequence.UNSEQUENCED; }
             @Override public String toString() { return describe(); }
         };
     }
 
-    static PreLoadContext contextFor(TxnId primary, String reason)
+    class UnsequencedIdempotentIncrementalWrite implements ExecutionContext
     {
-        return new PreLoadContext()
+        final Unseekables<?> keys;
+        final String reason;
+
+        public UnsequencedIdempotentIncrementalWrite(Unseekables<?> keys, String reason)
         {
-            @Override public @Nullable TxnId primaryTxnId() { return primary; }
-            @Override public String reason() { return reason; }
-            @Override public String toString() { return describe(); }
-        };
+            this.keys = keys;
+            this.reason = reason;
+        }
+
+        @Override public @Nullable TxnId primaryTxnId() { return null; }
+        @Override public Unseekables<?> keys() { return keys; }
+        @Override public LoadKeys loadKeys() { return INCR; }
+        @Override public boolean isIdempotent() { return true; }
+        @Override public ExecutionSequence executionSequence() { return ExecutionSequence.UNSEQUENCED; }
+        @Override public String reason() { return reason; }
+        @Override public String toString() { return describe(); }
     }
 
-    static PreLoadContext contextFor(TxnId txnId, Unseekables<?> keys, LoadKeys loadKeys, LoadKeysFor loadKeysFor, String reason)
+    static ExecutionContext unsequencedIdempotentIncrementalWrite(Unseekables<?> keys, String reason)
     {
-        return new PreLoadContext()
+        return new UnsequencedIdempotentIncrementalWrite(keys, reason);
+    }
+
+    static ExecutionContext unsequencedWrite(TxnId txnId, Unseekables<?> keys, String reason)
+    {
+        return new ExecutionContext()
         {
             @Override public @Nullable TxnId primaryTxnId() { return txnId; }
             @Override public Unseekables<?> keys() { return keys; }
-            @Override public LoadKeys loadKeys() { return loadKeys; }
-            @Override public LoadKeysFor loadKeysFor() { return loadKeysFor; }
+            @Override public LoadKeys loadKeys() { return SYNC; }
+            @Override public ExecutionSequence executionSequence() { return ExecutionSequence.UNSEQUENCED; }
             @Override public String reason() { return reason; }
             @Override public String toString() { return describe(); }
         };
     }
 
-    static PreLoadContext contextFor(RoutingKey key, LoadKeys loadKeys, LoadKeysFor loadKeysFor, String describe)
+    static ExecutionContext unsequencedReadWrite(TxnId txnId, Unseekables<?> keys, String reason)
     {
-        return contextFor(RoutingKeys.of(key), loadKeys, loadKeysFor, describe);
+        return new ExecutionContext()
+        {
+            @Override public @Nullable TxnId primaryTxnId() { return txnId; }
+            @Override public Unseekables<?> keys() { return keys; }
+            @Override public LoadKeys loadKeys() { return SYNC; }
+            @Override public LoadKeysFor loadKeysFor() { return READ_WRITE; }
+            @Override public ExecutionSequence executionSequence() { return ExecutionSequence.UNSEQUENCED; }
+            @Override public String reason() { return reason; }
+            @Override public String toString() { return describe(); }
+        };
     }
 
-    // we don't currently permit range queries without an associated TxnId
-    static PreLoadContext contextFor(AbstractUnseekableKeys keys, LoadKeys loadKeys, LoadKeysFor loadKeysFor, String reason)
+    static ExecutionContext unsequencedReadWrite(Unseekables<?> keys, String reason)
     {
-        Invariants.require(keys.domain() == Routable.Domain.Key);
-        return new PreLoadContext()
+        return new ExecutionContext()
         {
             @Override public @Nullable TxnId primaryTxnId() { return null; }
             @Override public Unseekables<?> keys() { return keys; }
-            @Override public LoadKeys loadKeys() { return loadKeys; }
-            @Override public LoadKeysFor loadKeysFor() { return loadKeysFor; }
+            @Override public LoadKeys loadKeys() { return SYNC; }
+            @Override public LoadKeysFor loadKeysFor() { return READ_WRITE; }
+            @Override public ExecutionSequence executionSequence() { return ExecutionSequence.UNSEQUENCED; }
             @Override public String reason() { return reason; }
             @Override public String toString() { return describe(); }
         };
     }
 
-    interface Empty extends PreLoadContext
+    interface Empty extends ExecutionContext
     {
         @Override default @Nullable TxnId primaryTxnId() { return null; }
     }

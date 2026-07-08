@@ -286,6 +286,11 @@ public class Accept extends RouteRequest.WithUnsynced<Accept.AcceptReply>
         return calculateDeps() ? LoadKeysFor.READ_WRITE : LoadKeysFor.WRITE;
     }
 
+    public ExecutionKind executionKind()
+    {
+        return ExecutionKind.ACCEPT;
+    }
+
     @Override
     public MessageType type()
     {

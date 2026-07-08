@@ -26,7 +26,7 @@ import accord.coordinate.tracking.AwaitTracker;
 import accord.coordinate.tracking.RequestStatus;
 import accord.local.Commands;
 import accord.local.Node;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.messages.Await;
 import accord.messages.Await.AwaitOk;
 import accord.messages.Callback;
@@ -74,7 +74,7 @@ public class AsynchronousAwait extends AbstractCoordination<Participants<?>, Asy
     final int asynchronousCallbackId;
     final boolean notifyProgressLog;
 
-    public AsynchronousAwait(Node node, SequentialAsyncExecutor executor, Participants<?> contact, TxnId txnId, AwaitTracker tracker, Await.Until until, boolean notifyProgressLog, int asynchronousCallbackId, BiConsumer<SynchronousResult, Throwable> synchronousCallback)
+    public AsynchronousAwait(Node node, ExclusiveAsyncExecutor executor, Participants<?> contact, TxnId txnId, AwaitTracker tracker, Await.Until until, boolean notifyProgressLog, int asynchronousCallbackId, BiConsumer<SynchronousResult, Throwable> synchronousCallback)
     {
         super(node, executor, txnId, contact, tracker.nodes(), synchronousCallback);
         this.tracker = tracker;
@@ -85,14 +85,14 @@ public class AsynchronousAwait extends AbstractCoordination<Participants<?>, Asy
 
     public static AsynchronousAwait awaitAny(Node node, Topologies topologies, TxnId txnId, Route<?> contact, Await.Until until, int asynchronousCallbackId, BiConsumer<SynchronousResult, Throwable> synchronousCallback)
     {
-        return awaitAny(node, node.someSequentialExecutor(), topologies, txnId, contact, until, true, asynchronousCallbackId, synchronousCallback);
+        return awaitAny(node, node.someExclusiveExecutor(), topologies, txnId, contact, until, true, asynchronousCallbackId, synchronousCallback);
     }
 
     /**
      * we require a Route to contact so we can be sure a home shard recipient invokes {@link Commands#supplementParticipants},
      * notifying the progress log of a Route to determine it is the home shard.
      */
-    public static AsynchronousAwait awaitAny(Node node, SequentialAsyncExecutor executor, Topologies topologies, TxnId txnId, Route<?> contact, Await.Until until, boolean notifyProgressLog, int asynchronousCallbackId, BiConsumer<SynchronousResult, Throwable> synchronousCallback)
+    public static AsynchronousAwait awaitAny(Node node, ExclusiveAsyncExecutor executor, Topologies topologies, TxnId txnId, Route<?> contact, Await.Until until, boolean notifyProgressLog, int asynchronousCallbackId, BiConsumer<SynchronousResult, Throwable> synchronousCallback)
     {
         Invariants.requireArgument(topologies.size() == 1);
         AwaitTracker tracker = new AwaitTracker(topologies);

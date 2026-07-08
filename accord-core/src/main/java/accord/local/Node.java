@@ -27,7 +27,6 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import java.util.stream.Stream;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -36,6 +35,7 @@ import com.google.common.annotations.VisibleForTesting;
 
 import accord.api.Agent;
 import accord.api.AsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.api.TopologyService;
 import accord.api.Tracing;
 import accord.coordinate.ExecuteTxn;
@@ -71,7 +71,6 @@ import accord.coordinate.Infer.InvalidIf;
 import accord.coordinate.Outcome;
 import accord.coordinate.PrepareRecovery;
 import accord.local.CommandStores.LatentStoreSelector;
-import accord.local.CommandStores.StoreSelector;
 import accord.local.cfk.CommandsForKey;
 import accord.local.durability.DurabilityService;
 import accord.messages.Callback;
@@ -469,9 +468,9 @@ public class Node implements NodeCommandStoreService
     }
 
     @Override
-    public SequentialAsyncExecutor someSequentialExecutor()
+    public ExclusiveAsyncExecutor someExclusiveExecutor()
     {
-        return commandStores.someSequentialExecutor();
+        return commandStores.someExclusiveExecutor();
     }
 
     public void shutdown()
@@ -793,7 +792,7 @@ public class Node implements NodeCommandStoreService
 
     public AsyncChain<? extends Outcome> recover(TxnId txnId, InvalidIf invalidIf, FullRoute<?> route, LatentStoreSelector reportTo)
     {
-        SequentialAsyncExecutor executor = someSequentialExecutor();
+        ExclusiveAsyncExecutor executor = someExclusiveExecutor();
         return withEpochExact(txnId.epoch(), executor, () -> new AsyncChains.Head<>()
         {
             @Override

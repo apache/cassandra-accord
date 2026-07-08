@@ -22,7 +22,7 @@ import javax.annotation.Nullable;
 
 import accord.api.Tracing;
 import accord.local.Node;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.primitives.Participants;
 import accord.primitives.TxnId;
 import accord.utils.Invariants;
@@ -33,14 +33,14 @@ public abstract class AbstractSimpleCoordination<P extends Participants<?>> impl
 {
     final long coordinationId;
     protected final Node node;
-    protected final SequentialAsyncExecutor executor;
+    protected final ExclusiveAsyncExecutor executor;
     protected final TxnId txnId;
     protected final P scope;
     protected final @Nullable Tracing tracing;
     private Throwable failure;
     private boolean isDoneWithReplies, isFinishing, isDone;
 
-    protected AbstractSimpleCoordination(Node node, SequentialAsyncExecutor executor, TxnId txnId, P scope)
+    protected AbstractSimpleCoordination(Node node, ExclusiveAsyncExecutor executor, TxnId txnId, P scope)
     {
         this.coordinationId = node.nextCoordinationId();
         this.node = node;
@@ -65,7 +65,7 @@ public abstract class AbstractSimpleCoordination<P extends Participants<?>> impl
     public final P scope() { return scope; }
 
     @Override
-    public final SequentialAsyncExecutor executor()
+    public final ExclusiveAsyncExecutor executor()
     {
         return executor;
     }

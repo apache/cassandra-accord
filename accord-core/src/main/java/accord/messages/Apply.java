@@ -20,6 +20,7 @@ package accord.messages;
 
 import javax.annotation.Nullable;
 
+import accord.api.ProtocolModifiers;
 import accord.api.Result;
 import accord.api.Result.PersistableResult;
 import accord.coordinate.ExecuteFlag.ExecuteFlags;
@@ -38,12 +39,10 @@ import accord.primitives.FullRoute;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Route;
-import accord.primitives.RoutingKeys;
 import accord.primitives.SaveStatus;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
-import accord.primitives.Unseekables;
 import accord.primitives.Writes;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
@@ -172,7 +171,7 @@ public class Apply extends RouteRequest<ApplyReply>
         @Override
         public AsyncChain<ApplyReply> apply(Void o)
         {
-            return commandStore.chain(Apply.this, safeStore -> {
+            return commandStore.continuationChain(Apply.this, safeStore -> {
                 return Apply.apply(Applied, safeStore, participants, ballot, txn, txnId, executeAt, deps, participants.route(), writes, result);
             });
         }
@@ -247,14 +246,6 @@ public class Apply extends RouteRequest<ApplyReply>
     }
 
     @Override
-    public Unseekables<?> keys()
-    {
-        if (flags.contains(READY_TO_EXECUTE) && fastWritesMayBypassCommandsForKey())
-            return RoutingKeys.EMPTY;
-        return super.keys();
-    }
-
-    @Override
     public ApplyReply reduce(ApplyReply a, ApplyReply b)
     {
         return ApplyReply.reduce(a, b);
@@ -263,8 +254,13 @@ public class Apply extends RouteRequest<ApplyReply>
     @Override
     public LoadKeys loadKeys()
     {
-        // TODO (expected): need to guarantee execution order then can make this ASYNC
-        return LoadKeys.SYNC;
+        return ProtocolModifiers.loadKeysAsyncIfPermitted(txnId);
+    }
+
+    @Override
+    public ExecutionKind executionKind()
+    {
+        return ExecutionKind.APPLY;
     }
 
     @Override

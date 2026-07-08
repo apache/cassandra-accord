@@ -21,6 +21,7 @@ package accord.primitives;
 import accord.api.RoutingKey;
 import accord.primitives.Deps.DepRelationList;
 import accord.utils.ArrayBuffers;
+import accord.utils.Functions;
 import accord.utils.IndexedBiConsumer;
 import accord.utils.IndexedConsumer;
 import accord.utils.IndexedFunction;
@@ -250,7 +251,7 @@ public class KeyDeps implements Iterable<Map.Entry<RoutingKey, TxnId>>, KeyOrRan
             if (start == end)
                 return min;
             return TxnId.nonNullOrMin(min, txnIds[start]);
-        }, (TxnId)null);
+        }, (TxnId)null, Functions.alwaysFalse());
     }
 
     private KeyDeps select(RoutingKeys select)

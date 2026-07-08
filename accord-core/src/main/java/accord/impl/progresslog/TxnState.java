@@ -23,7 +23,7 @@ import javax.annotation.Nullable;
 import com.google.common.primitives.Ints;
 
 import accord.api.ProgressLog.BlockedUntil;
-import accord.local.PreLoadContext;
+import accord.local.ExecutionContext;
 import accord.local.SafeCommandStore;
 import accord.primitives.TxnId;
 import accord.utils.Invariants;
@@ -32,7 +32,7 @@ import accord.utils.UnhandledEnum;
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
-public final class TxnState extends WaitingState implements PreLoadContext
+public final class TxnState extends WaitingState implements ExecutionContext
 {
     public static class SerializationSupport
     {

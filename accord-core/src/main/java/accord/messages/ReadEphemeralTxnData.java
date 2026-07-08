@@ -24,7 +24,7 @@ import accord.coordinate.ExecuteFlag.ExecuteFlags;
 import accord.local.Command;
 import accord.local.Commands;
 import accord.local.Node.Id;
-import accord.local.PreLoadContext;
+import accord.local.ExecutionContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.StoreParticipants;
@@ -186,7 +186,7 @@ public class ReadEphemeralTxnData extends ReadData
             while (iter.hasNext())
             {
                 node.commandStores().forId(iter.nextValue())
-                    .execute((PreLoadContext.Empty) () -> "Timeout Ephemeral Read", safeStore -> {
+                    .execute((ExecutionContext.Empty) () -> "Timeout Ephemeral Read", safeStore -> {
                         eraseEphemeralRead(safeStore, txnId);
                     }, node.agent());
             }

@@ -143,8 +143,6 @@ public class RequestCallbacks extends AbstractTimeouts<RequestCallbacks.Callback
 
             <P> void safeInvoke(BiConsumer<RegisteredCallback<T>, P> invoker, P param)
             {
-                // TODO (expected): have executor provide inStore() function so can invoke immediately
-                //   BUT need to be careful no callers fail if we invok to refactor a little as we cannot safely invoke callbacks before we have marked them in-flight
                 executor.execute(() -> {
                     try
                     {

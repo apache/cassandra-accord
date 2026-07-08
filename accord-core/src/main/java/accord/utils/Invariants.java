@@ -51,7 +51,8 @@ public class Invariants
     private static final int PARANOIA_MEMORY = Paranoia.valueOf(System.getProperty(KEY_PARANOIA_MEMORY, "NONE").toUpperCase()).ordinal();
     private static final int PARANOIA_FACTOR = ParanoiaCostFactor.valueOf(System.getProperty(KEY_PARANOIA_COSTFACTOR, "LOW").toUpperCase()).ordinal();
     private static final boolean IS_PARANOID = Boolean.parseBoolean(System.getProperty("accord.paranoid", "false")) || PARANOIA_COMPUTE > 0 || PARANOIA_MEMORY > 0;
-    private static Consumer<RuntimeException> onUnexpected = System.getProperty("accord.testing", "false").equals("true")
+    public static final boolean THROW_ON_EXPECTS = System.getProperty("accord.testing", "false").equals("true");
+    private static Consumer<RuntimeException> onUnexpected = THROW_ON_EXPECTS
                                                              ? fail -> { throw fail; }
                                                              : fail -> logger.error("Invariant failed", fail);
     private static final boolean DEBUG = System.getProperty("accord.debug", "false").equals("true");
@@ -74,6 +75,11 @@ public class Invariants
     public static IllegalStateException createIllegalState(String msg)
     {
         return new IllegalStateException(msg);
+    }
+
+    public static IllegalStateException createIllegalState(String fmt, Object... args)
+    {
+        return createIllegalState(format(fmt, args));
     }
 
     public static IllegalStateException illegalState(String msg)
@@ -133,6 +139,12 @@ public class Invariants
     public static void paranoid(boolean condition)
     {
         if (isParanoid() && !condition)
+            throw illegalState();
+    }
+
+    public static void paranoidLinearCost(boolean condition)
+    {
+        if (isParanoid() && testParanoia(Paranoia.LINEAR, Paranoia.LINEAR, ParanoiaCostFactor.LOW) && !condition)
             throw illegalState();
     }
 
@@ -356,6 +368,12 @@ public class Invariants
         if (param == null)
             throw new NullPointerException();
         return param;
+    }
+
+    public static void requireNull(Object param)
+    {
+        if (param != null)
+            throw illegalState("Expected to be null: " + param);
     }
 
     public static <T> T nonNull(T param, String message)

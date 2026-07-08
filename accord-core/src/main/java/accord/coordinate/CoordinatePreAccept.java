@@ -28,7 +28,7 @@ import accord.coordinate.tracking.FastPathTracker;
 import accord.coordinate.tracking.PreAcceptTracker;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.messages.PreAccept;
 import accord.messages.PreAccept.PreAcceptOk;
 import accord.messages.PreAccept.PreAcceptReply;
@@ -57,12 +57,12 @@ abstract class CoordinatePreAccept<T> extends AbstractCoordinatePreAccept<T, Pre
     final Txn txn;
     boolean fastPathEnabled = true;
 
-    CoordinatePreAccept(Node node, SequentialAsyncExecutor executor, Topologies topologies, FullRoute<?> route, TxnId txnId, Txn txn, BiConsumer<? super T, Throwable> callback)
+    CoordinatePreAccept(Node node, ExclusiveAsyncExecutor executor, Topologies topologies, FullRoute<?> route, TxnId txnId, Txn txn, BiConsumer<? super T, Throwable> callback)
     {
         this(node, executor, txnId, txn, route, topologies, FastPathTracker::new, callback);
     }
 
-    CoordinatePreAccept(Node node, SequentialAsyncExecutor executor, TxnId txnId, Txn txn, FullRoute<?> route, Topologies topologies, BiFunction<Topologies, TxnId, PreAcceptTracker<?>> trackerFactory, BiConsumer<? super T, Throwable> callback)
+    CoordinatePreAccept(Node node, ExclusiveAsyncExecutor executor, TxnId txnId, Txn txn, FullRoute<?> route, Topologies topologies, BiFunction<Topologies, TxnId, PreAcceptTracker<?>> trackerFactory, BiConsumer<? super T, Throwable> callback)
     {
         super(node, executor, topologies, route, txnId, callback);
         this.tracker = trackerFactory.apply(topologies, txnId);

@@ -87,6 +87,9 @@ public interface Routables<K extends Routable> extends Iterable<K>
 
     default boolean containsAll(Unseekables<?> keysOrRanges)
     {
+        if (keysOrRanges == this)
+            return true;
+
         switch (keysOrRanges.domain())
         {
             default: throw new UnhandledEnum(keysOrRanges.domainKind());
@@ -203,7 +206,7 @@ public interface Routables<K extends Routable> extends Iterable<K>
     @Inline
     static <Input extends Routable, T> T foldl(Routables<Input> inputs, AbstractRanges matching, IndexedFold<? super Input, T> fold, T initialValue)
     {
-        return Helper.foldl(Routables::findNextIntersection, Helper::findLimit, inputs, matching, fold, initialValue);
+        return Helper.foldl(Routables::findNextIntersection, Helper::findLimit, inputs, matching, fold, initialValue, Functions.alwaysFalse());
     }
 
     /**
@@ -213,7 +216,7 @@ public interface Routables<K extends Routable> extends Iterable<K>
     @Inline
     static <Input extends RoutableKey, T> T foldl(AbstractKeys<Input> inputs, AbstractRanges matching, IndexedFold<? super Input, T> fold, T initialValue)
     {
-        return Helper.foldl(AbstractKeys::findNextIntersection, Helper::findLimit, inputs, matching, fold, initialValue);
+        return Helper.foldl(AbstractKeys::findNextIntersection, Helper::findLimit, inputs, matching, fold, initialValue, Functions.alwaysFalse());
     }
 
     /**
@@ -221,13 +224,28 @@ public interface Routables<K extends Routable> extends Iterable<K>
      * Terminate once we hit {@code terminalValue}.
      */
     @Inline
-    static <T> T foldl(AbstractUnseekableKeys inputs, Unseekables<?> matching, IndexedFold<? super RoutingKey, T> fold, T initialValue)
+    static <T> T foldl(AbstractUnseekableKeys inputs, Unseekables<?> matching, IndexedFold<? super RoutingKey, T> fold, T initialValue, Predicate<T> terminate)
     {
         switch (matching.domain())
         {
             default: throw new AssertionError();
-            case Key: return Helper.foldl(AbstractUnseekableKeys::findNextSameKindIntersection, Helper::findLimit, inputs, (AbstractUnseekableKeys)matching, fold, initialValue);
-            case Range: return Helper.foldl(AbstractUnseekableKeys::findNextIntersection, Helper::findLimit, inputs, (AbstractRanges)matching, fold, initialValue);
+            case Key: return Helper.foldl(AbstractUnseekableKeys::findNextSameKindIntersection, Helper::findLimit, inputs, (AbstractUnseekableKeys)matching, fold, initialValue, terminate);
+            case Range: return Helper.foldl(AbstractUnseekableKeys::findNextIntersection, Helper::findLimit, inputs, (AbstractRanges)matching, fold, initialValue, terminate);
+        }
+    }
+
+    /**
+     * Fold-left over the {@code inputs} that intersect with {@code matching} in ascending order.
+     * Terminate once we hit {@code terminalValue}.
+     */
+    @Inline
+    static <P1, P2, T> T foldl(AbstractUnseekableKeys inputs, Unseekables<?> matching, IndexedTriFold<P1, P2, ? super RoutingKey, T> fold, P1 p1, P2 p2, T initialValue, Predicate<T> terminate)
+    {
+        switch (matching.domain())
+        {
+            default: throw new AssertionError();
+            case Key: return Helper.foldl(AbstractUnseekableKeys::findNextSameKindIntersection, Helper::findLimit, inputs, (AbstractUnseekableKeys)matching, fold, p1, p2, initialValue, terminate);
+            case Range: return Helper.foldl(AbstractUnseekableKeys::findNextIntersection, Helper::findLimit, inputs, (AbstractRanges)matching, fold, p1, p2, initialValue, terminate);
         }
     }
 
@@ -335,7 +353,7 @@ public interface Routables<K extends Routable> extends Iterable<K>
         @Inline
         static <Input extends Routable, Inputs extends Routables<Input>, Matches extends Routables<?>, T>
         T foldl(SetIntersections<Inputs, Matches> setIntersections, ValueIntersections<Inputs, Matches> valueIntersections,
-                Inputs is, Matches ms, IndexedFold<? super Input, T> fold, T accumulator)
+                Inputs is, Matches ms, IndexedFold<? super Input, T> fold, T accumulator, Predicate<T> terminate)
         {
             int i = 0, m = 0;
             while (true)
@@ -351,6 +369,8 @@ public interface Routables<K extends Routable> extends Iterable<K>
                 while (i < nexti)
                 {
                     accumulator = fold.apply(is.get(i), accumulator, i);
+                    if (terminate.test(accumulator))
+                        return accumulator;
                     ++i;
                 }
             }

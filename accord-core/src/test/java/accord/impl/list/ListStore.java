@@ -36,7 +36,7 @@ import accord.api.Scheduler;
 import accord.local.CommandStore;
 import accord.local.CommandStores;
 import accord.local.Node;
-import accord.local.PreLoadContext;
+import accord.local.ExecutionContext;
 import accord.local.RedundantBefore;
 import accord.local.SafeCommandStore;
 import accord.primitives.Range;
@@ -169,7 +169,7 @@ public class ListStore extends Snapshotter<ListStore.Snapshot> implements DataSt
         if (commandStore.node().isReplaying())
             return;
         snapshot(false).invoke((success, fail) -> {
-            if (fail == null) commandStore.execute((PreLoadContext.Empty)()->"Report DataStore Durable", safeStore -> safeStore.reportDurable(onSuccess, flags));
+            if (fail == null) commandStore.execute((ExecutionContext.Empty)()->"Report DataStore Durable", safeStore -> safeStore.reportDurable(onSuccess, flags));
         });
     }
 

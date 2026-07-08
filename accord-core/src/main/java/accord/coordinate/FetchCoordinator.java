@@ -24,7 +24,7 @@ import java.util.List;
 import accord.api.DataStore.StartingRangeFetch;
 import accord.api.DataStore.FetchRanges;
 import accord.local.Node;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.primitives.SyncPoint;
 import accord.primitives.Ranges;
 import accord.primitives.Route;
@@ -145,7 +145,7 @@ public abstract class FetchCoordinator extends AbstractSimpleCoordination<Route<
     private Ranges needed;
     private int inflight;
 
-    protected FetchCoordinator(Node node, SequentialAsyncExecutor executor, Ranges ranges, SyncPoint syncPoint, FetchRanges fetchRanges) throws TopologyException
+    protected FetchCoordinator(Node node, ExclusiveAsyncExecutor executor, Ranges ranges, SyncPoint syncPoint, FetchRanges fetchRanges) throws TopologyException
     {
         super(node, executor, syncPoint.syncId, syncPoint.route);
         this.ranges = remaining = ranges;

@@ -32,6 +32,7 @@ import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.LocalListeners;
 import accord.api.ProgressLog;
+import accord.api.ProtocolModifiers;
 import accord.api.RoutingKey;
 import accord.local.CommandStores.RangesForEpoch;
 import accord.local.CommandStores.RangesForEpochSupplier;
@@ -43,6 +44,7 @@ import accord.primitives.AbstractUnseekableKeys;
 import accord.primitives.KeyDeps;
 import accord.primitives.Participants;
 import accord.primitives.RangeDeps;
+import accord.primitives.RangeRoute;
 import accord.primitives.Ranges;
 import accord.primitives.RoutingKeys;
 import accord.primitives.SaveStatus;
@@ -57,9 +59,9 @@ import accord.utils.SortedList;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 
+import static accord.local.ExecutionContext.unsequencedIdempotentIncrementalWrite;
 import static accord.local.LoadKeys.INCR;
 import static accord.local.LoadKeys.NONE;
-import static accord.local.LoadKeysFor.WRITE;
 import static accord.local.RedundantStatus.Property.LOCALLY_APPLIED;
 import static accord.local.RedundantStatus.SomeStatus.LOCALLY_WITNESSED_ONLY;
 import static accord.local.RedundantStatus.Property.LOCALLY_REDUNDANT;
@@ -228,7 +230,7 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
                 return null;
         }
 
-        if (safeCommand.isUnset() || safeCommand.current().saveStatus() == Uninitialised)
+        if (safeCommand.isUninitialised() || safeCommand.current().saveStatus() == Uninitialised)
             return null;
 
         return maybeCleanup(safeCommand);
@@ -251,12 +253,17 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
     public final SafeCommandsForKey ifLoadedAndInitialised(RoutingKey key)
     {
         SafeCommandsForKey safeCfk = getInternal(key);
-        if (safeCfk != null)
-            return safeCfk;
-
-        safeCfk = ifLoadedInternal(key);
         if (safeCfk == null)
+        {
+            safeCfk = ifLoadedInternal(key);
+            if (safeCfk == null)
+                return null;
+        }
+        else if (safeCfk.isUninitialised())
+        {
             return null;
+        }
+
         return maybeCleanup(safeCfk);
     }
 
@@ -264,33 +271,37 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
     {
         SafeCommandsForKey safeCfk = getInternal(key);
         if (safeCfk != null)
+        {
+            if (safeCfk.isUninitialised())
+                return null;
             return maybeCleanup(safeCfk);
+        }
 
         if (context().loadKeys() != NONE && context().keys().contains(key)) throw illegalState("%s was specified in %s but was not returned by getInternal(key)", key, context().keys());
         else throw illegalArgument("%s was not specified in %s", key, context());
     }
 
-    /** Get anything already referenced (should include anything in PreLoadContext). If returned, should be initialised. */
+    /** Get anything already referenced (should include anything in ExecutionContext). If returned, should be initialised. */
     protected abstract SafeCommand getInternal(TxnId txnId);
     /** Get if available */
     protected abstract SafeCommand ifLoadedInternal(TxnId txnId);
-    /** Get anything already referenced (should include anything in PreLoadContext) */
+    /** Get anything already referenced (should include anything in ExecutionContext) */
     protected abstract SafeCommandsForKey getInternal(RoutingKey key);
     /** Get if available */
     protected abstract SafeCommandsForKey ifLoadedInternal(RoutingKey key);
 
-    public final boolean canExecuteWith(PreLoadContext context) { return canExecute(context) == context; }
+    public final boolean canExecuteWith(ExecutionContext context) { return canExecute(context) == context; }
 
     /**
      * Attempt to ready the provided PreLoadContext; if this can only be achieved partially, a new PreLoadContext
      * will be returned containing the readily available data. If nothing is available, null will be returned.
      */
-    public abstract @Nullable PreLoadContext canExecute(PreLoadContext context);
+    public abstract @Nullable ExecutionContext canExecute(ExecutionContext context);
 
     /**
      * The current PreLoadContext, excluding any upgrade.
      */
-    public abstract PreLoadContext context();
+    public abstract ExecutionContext context();
 
     protected void update(Command prev, Command updated, boolean force)
     {
@@ -326,7 +337,7 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
         {
             Ranges ranges = updated.participants().touches().toRanges();
             TxnId txnIdWithFlags = (TxnId)updated.executeAt();
-            commandStore().markExclusiveSyncPointLocallyApplied(this, txnIdWithFlags, ranges, prevSaveStatus);
+            commandStore().markExclusiveSyncPointLocallyApplied(this, updated.txnId, txnIdWithFlags, (RangeRoute) updated.route(), ranges, prevSaveStatus);
         }
 
         if (updated.partialDeps() != null && (prev == null || updated.partialDeps() != prev.partialDeps()))
@@ -402,26 +413,48 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
             return;
 
         // TODO (expected): we don't want to insert any dependencies for those we only touch; we just need to record them as decided/applied for execution
-        PreLoadContext context = PreLoadContext.contextFor(next.txnId(), update, INCR, WRITE, "Update CommandsForKey");
-        PreLoadContext execute = safeStore.canExecute(context);
+        ExecutionContext context = new UpdateManagedContext(next.txnId(), update);
+        ExecutionContext execute = safeStore.canExecute(context);
         if (execute != null)
         {
             updateManagedCommandsForKey(safeStore, execute.keys(), next.txnId(), forceNotify);
         }
         if (execute != context)
         {
+            Unseekables<?> remainingKeys = update;
             if (execute != null)
-                context = PreLoadContext.contextFor(next.txnId(), update.without(execute.keys()), INCR, WRITE, "Update CommandsForKey");
+                remainingKeys = remainingKeys.without(execute.keys());
 
-            Invariants.require(!context.keys().isEmpty());
-            safeStore = safeStore; // prevent accidental usage inside lambda
-            safeStore.commandStore().execute(context, safeStore0 -> {
-                PreLoadContext ctx = safeStore0.context();
-                TxnId txnId = ctx.primaryTxnId();
-                Unseekables<?> keys = ctx.keys();
-                updateManagedCommandsForKey(safeStore0, keys, txnId, forceNotify);
-            }, safeStore.commandStore().agent);
+            if (participants.hasTouched() != participants.touches())
+            {
+                // we update no-longer touched keys asynchronously so we don't need to include them when loading
+                Unseekables<?> asyncKeys = remainingKeys.without(participants.touches()).intersecting(participants.hasTouched(), Minimal);
+                if (!asyncKeys.isEmpty())
+                {
+                    ExecutionContext async = unsequencedIdempotentIncrementalWrite(asyncKeys, "Update CommandsForKey");
+                    updateManagedCommandsForKeyIncremental(async, safeStore.commandStore(), forceNotify);
+                    remainingKeys = remainingKeys.without(asyncKeys);
+                }
+            }
+
+            if (!remainingKeys.isEmpty())
+            {
+                if (remainingKeys != update)
+                    context = new UpdateManagedContext(next.txnId(), remainingKeys);
+                updateManagedCommandsForKeyIncremental(context, safeStore.commandStore(), forceNotify);
+            }
         }
+    }
+
+    private static void updateManagedCommandsForKeyIncremental(ExecutionContext context, CommandStore commandStore, boolean forceNotify)
+    {
+        Invariants.expect(ProtocolModifiers.permitAtomicIncrementalTasks());
+        commandStore.executeContinuation(context, safeStore -> {
+            ExecutionContext ctx = safeStore.context();
+            TxnId txnId = ctx.primaryTxnId();
+            Unseekables<?> keys = ctx.keys();
+            updateManagedCommandsForKey(safeStore, keys, txnId, forceNotify);
+        }, commandStore.agent);
     }
 
     private static void updateManagedCommandsForKey(SafeCommandStore safeStore, Unseekables<?> update, TxnId txnId, boolean forceNotify)
@@ -479,8 +512,8 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
         }
         // TODO (required): use StoreParticipants.executes()
         // TODO (required): consider how execution works for transactions that await future deps and where the command store inherits additional keys in execution epoch
-        PreLoadContext context = PreLoadContext.contextFor(txnId, keys, INCR, WRITE, "Update Unmanaged CommandsForKey");
-        PreLoadContext execute = safeStore.canExecute(context);
+        ExecutionContext context = new UpdateUnmanagedContext(txnId, keys);
+        ExecutionContext execute = safeStore.canExecute(context);
         // TODO (expected): execute immediately for any keys we already have loaded, and save only those we haven't for later
         if (execute != null)
         {
@@ -496,15 +529,54 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
         else
         {
             if (execute != null)
-                context = PreLoadContext.contextFor(txnId, keys.without(execute.keys()), INCR, WRITE, "Update Unmanaged CommandsForKey");
+                context = new UpdateUnmanagedContext(txnId, keys.without(execute.keys()));
 
             safeStore = safeStore;
             CommandStore unsafeStore = safeStore.commandStore();
             AsyncChain<Void> submit = unsafeStore.chain(context, safeStore0 -> { updateUnmanagedCommandsForKey(safeStore0, safeStore0.context().keys() , txnId, mode); });
             if (registerTransitive != null)
-                submit = submit.flatMap(success -> unsafeStore.chain(PreLoadContext.contextFor(txnId, "Register Transitive Dependencies"), registerTransitive));
+                submit = submit.flatMap(success -> unsafeStore.chain(ExecutionContext.unsequenced(txnId, "Register Transitive Dependencies"), registerTransitive));
             submit.begin(safeStore.commandStore().agent);
         }
+    }
+
+    static class UpdateManagedContext implements ExecutionContext
+    {
+        final TxnId primaryTxnId;
+        final Unseekables<?> keys;
+
+        public UpdateManagedContext(TxnId primaryTxnId, Unseekables<?> keys)
+        {
+            this.primaryTxnId = primaryTxnId;
+            this.keys = keys;
+        }
+
+        @Override public @Nullable TxnId primaryTxnId() { return primaryTxnId; }
+        @Override public Unseekables<?> keys() { return keys; }
+        @Override public LoadKeys loadKeys() { return INCR; }
+        @Override public ExecutionSequence executionSequence() { return ExecutionSequence.ATOMIC; }
+        @Override public boolean isIdempotent() { return true; }
+        @Override public String reason() { return "Update CommandsForKey"; }
+        @Override public String toString() { return describe(); }
+    }
+
+    static class UpdateUnmanagedContext implements ExecutionContext
+    {
+        final TxnId primaryTxnId;
+        final Unseekables<?> keys;
+
+        public UpdateUnmanagedContext(TxnId primaryTxnId, Unseekables<?> keys)
+        {
+            this.primaryTxnId = primaryTxnId;
+            this.keys = keys;
+        }
+
+        @Override public @Nullable TxnId primaryTxnId() { return primaryTxnId; }
+        @Override public Unseekables<?> keys() { return keys; }
+        @Override public LoadKeys loadKeys() { return INCR; }
+        @Override public boolean isIdempotent() { return true; }
+        @Override public String reason() { return "Update Unmanaged CommandsForKey"; }
+        @Override public String toString() { return describe(); }
     }
 
     private static void updateUnmanagedCommandsForKey(SafeCommandStore safeStore, Unseekables<?> update, TxnId txnId, UpdateUnmanagedMode mode)
@@ -532,7 +604,7 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
             RangeDeps rangeDeps = syncCommand.partialDeps().rangeDeps;
             rangeDeps.forEachUniqueTxnId(waitingOn, null, (ignore, txnIdWithFlags) -> {
                 TxnId txnId = txnIdWithFlags.withoutNonIdentityFlags();
-                PreLoadContext context = PreLoadContext.contextFor(txnId, "Register Transitive Range Deps");
+                ExecutionContext context = ExecutionContext.unsequenced(txnId, "Register Transitive Range Deps");
                 Ranges ranges = rangeDeps.ranges(txnId);
                 if (safeStore.canExecuteWith(context)) registerTransitive(safeStore, txnId, ranges);
                 else async.add(safeStore.commandStore().chain(context, safeStore0 -> {
@@ -542,11 +614,11 @@ public abstract class SafeCommandStore implements RangesForEpochSupplier, Redund
 
             AsyncChains.reduce(async, Reduce.toNull(), null)
                        .begin((success, fail) -> {
-                           if (fail == null) commandStore.execute((PreLoadContext.Empty)() -> "Mark Synced", (Consumer<? super SafeCommandStore>)  safeStore0 -> commandStore.markVisible(safeStore0, syncId, waitingOn), commandStore.agent());
+                           if (fail == null) commandStore.execute((ExecutionContext.Empty)() -> "Mark Synced", (Consumer<? super SafeCommandStore>) safeStore0 -> commandStore.markVisible(safeStore0, syncId, waitingOn), commandStore.agent());
                            else
                            {
                                // TODO (required): reset ensureReadyToCoordinate state
-                               commandStore.execute((PreLoadContext.Empty)() -> "Unmark Syncing", (Consumer<? super SafeCommandStore>)  safeStore0 -> commandStore.cancelMarkingVisible(syncId, waitingOn), commandStore.agent);
+                               commandStore.execute((ExecutionContext.Empty)() -> "Unmark Syncing", (Consumer<? super SafeCommandStore>) safeStore0 -> commandStore.cancelMarkingVisible(syncId, waitingOn), commandStore.agent);
                            }
                        });
         };

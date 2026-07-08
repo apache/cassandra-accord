@@ -27,7 +27,7 @@ import accord.api.VisibleForImplementation;
 import accord.coordinate.tracking.AbstractTracker;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.local.Node;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.messages.GetMaxConflict;
 import accord.messages.GetMaxConflict.GetMaxConflictOk;
 import accord.primitives.FullRoute;
@@ -56,7 +56,7 @@ public class CoordinateMaxConflict extends AbstractCoordinatePreAccept<Timestamp
     Timestamp maxConflict;
     long executionEpoch;
 
-    private CoordinateMaxConflict(Node node, SequentialAsyncExecutor executor, Topologies topologies, FullRoute<?> route, long executionEpoch, BiConsumer<? super Timestamp, Throwable> callback)
+    private CoordinateMaxConflict(Node node, ExclusiveAsyncExecutor executor, Topologies topologies, FullRoute<?> route, long executionEpoch, BiConsumer<? super Timestamp, Throwable> callback)
     {
         super(node, executor, topologies, route, TxnId.NONE, callback);
         this.maxConflict = Timestamp.NONE;
@@ -86,7 +86,7 @@ public class CoordinateMaxConflict extends AbstractCoordinatePreAccept<Timestamp
             long epoch = active.maxEpoch(Long.MIN_VALUE, ActiveEpoch::all, keysOrRanges);
             FullRoute<?> route = node.computeRoute(epoch, keysOrRanges, active);
             Topologies topologies = active.withUnsyncedEpochs(route, epoch, epoch, ALL);
-            coordinate = new CoordinateMaxConflict(node, node.someSequentialExecutor(), topologies, route, epoch, callback);
+            coordinate = new CoordinateMaxConflict(node, node.someExclusiveExecutor(), topologies, route, epoch, callback);
         }
         catch (Throwable t)
         {

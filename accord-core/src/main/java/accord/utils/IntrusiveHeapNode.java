@@ -16,10 +16,24 @@
  * limitations under the License.
  */
 
-package accord.api;
+package accord.utils;
 
-public interface AsyncExecutorFactory
+public abstract class IntrusiveHeapNode
 {
-    AsyncExecutor someExecutor();
-    ExclusiveAsyncExecutor someExclusiveExecutor();
+    int heapIndex = -1;
+
+    protected boolean isInHeap()
+    {
+        return heapIndex >= 0;
+    }
+
+    final void setHeapIndex(int heapIndex)
+    {
+        this.heapIndex = heapIndex;
+    }
+
+    protected final int heapIndex()
+    {
+        return heapIndex;
+    }
 }

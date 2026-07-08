@@ -47,7 +47,6 @@ import accord.local.durability.DurabilityService.SyncRemote;
 import accord.primitives.AbstractRanges;
 import accord.primitives.Deps;
 import accord.primitives.FullRangeRoute;
-import accord.primitives.MinimalSyncPoint;
 import accord.primitives.PartialSyncPoint;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
@@ -233,7 +232,7 @@ public class DurabilityQueueTest
                         }
                     }
 
-                    if (includingQuorum != null) quorum = new DurabilityResult(syncPoint, result(includingQuorum, topology, syncPoint), null);
+                    if (includingQuorum != null) quorum = new DurabilityResult(syncPoint, result(includingQuorum, topology), null);
                     else quorum = null;
                 }
 
@@ -249,7 +248,7 @@ public class DurabilityQueueTest
                         ((AsyncResults.SettableResult<DurabilityResult>)results.onQuorumOrDone()).trySuccess(quorum);
                     }, quorumLatencyMillis, TimeUnit.MILLISECONDS);
                 }
-                DurabilityResult result = new DurabilityResult(syncPoint, result(including, topology, syncPoint), null);
+                DurabilityResult result = new DurabilityResult(syncPoint, result(including, topology), null);
                 scheduler.once(() -> {
 
                     Ranges newQuorum = Ranges.EMPTY;
@@ -321,7 +320,7 @@ public class DurabilityQueueTest
             return results;
         }
 
-        private ReducingRangeMap<DurabilityLevel> result(SortedArrayList<Node.Id> including, Topology topology, MinimalSyncPoint syncPoint)
+        private ReducingRangeMap<DurabilityLevel> result(SortedArrayList<Node.Id> including, Topology topology)
         {
             SyncLocal syncLocal = including.contains(self) ? Self : NoLocal;
             ReducingRangeMap.Builder<DurabilityLevel> builder = new ReducingRangeMap.Builder<>(topology.size());

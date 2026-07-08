@@ -1314,10 +1314,11 @@ public abstract class Command extends MinimalWithConcreteDeps
                                          command.acceptedOrCommitted());
     }
 
-    static Command.Accepted accept(Command current, SaveStatus saveStatus, @Nonnull StoreParticipants participants, Ballot promised, Timestamp executeAt, PartialTxn partialTxn, PartialDeps partialDeps, Ballot acceptedOrCommitted)
+    // we accept txnId as a parameter to ensure we maintain the expectation that executeAt == txnId
+    static Command.Accepted accept(Command current, TxnId txnId, SaveStatus saveStatus, @Nonnull StoreParticipants participants, Ballot promised, Timestamp executeAt, PartialTxn partialTxn, PartialDeps partialDeps, Ballot acceptedOrCommitted)
     {
         Invariants.require(saveStatus.status == Status.AcceptedSlow || saveStatus.status == Status.AcceptedMedium || saveStatus.status == Status.PreCommitted);
-        return validate(new Command.Accepted(current.txnId(), saveStatus, current.durability(), participants, promised, executeAt, partialTxn, partialDeps, acceptedOrCommitted));
+        return validate(new Command.Accepted(txnId, saveStatus, current.durability(), participants, promised, executeAt, partialTxn, partialDeps, acceptedOrCommitted));
     }
 
     static Command notAccept(Status newStatus, Command copy, Ballot ballot)
@@ -1506,7 +1507,7 @@ public abstract class Command extends MinimalWithConcreteDeps
                     if (executeAt != txnId)
                     {
                         Invariants.require(executeAt != null);
-                        int c =  executeAt.compareTo(validate.txnId());
+                        int c = executeAt.compareTo(validate.txnId());
                         Invariants.require(c > 0 || (c == 0 && (executeAt.hasDistinctHlcAndUniqueHlc() || executeAt.hasNonIdentityFlags())));
                     }
                     break;

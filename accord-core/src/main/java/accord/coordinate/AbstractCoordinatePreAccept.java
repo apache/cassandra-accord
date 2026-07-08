@@ -22,7 +22,7 @@ import java.util.function.BiConsumer;
 import javax.annotation.Nonnull;
 
 import accord.local.Node;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.messages.Callback;
 import accord.primitives.FullRoute;
 import accord.primitives.TxnId;
@@ -38,7 +38,7 @@ abstract class AbstractCoordinatePreAccept<Result, Reply extends accord.messages
 {
     final Topologies topologies;
 
-    AbstractCoordinatePreAccept(Node node, SequentialAsyncExecutor executor, Topologies topologies, FullRoute<?> route, @Nonnull TxnId txnId, BiConsumer<? super Result, Throwable> callback)
+    AbstractCoordinatePreAccept(Node node, ExclusiveAsyncExecutor executor, Topologies topologies, FullRoute<?> route, @Nonnull TxnId txnId, BiConsumer<? super Result, Throwable> callback)
     {
         super(node, executor, txnId, route, topologies.nodes(), callback);
         this.topologies = topologies;

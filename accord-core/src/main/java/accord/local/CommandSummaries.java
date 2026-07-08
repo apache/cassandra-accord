@@ -257,7 +257,7 @@ public interface CommandSummaries
         private TxnId maxRx = TxnId.MAX; // a cached summary of minVisitedFutureRX to avoid consulting the full collection
 
         // TODO (expected): provide executeAt to PreLoadContext so we can more aggressively filter what we load, esp. by Kind
-        public static SummaryLoader loader(RedundantBefore redundantBefore, MaxDecidedRX maxDecidedRX, PreLoadContext context)
+        public static SummaryLoader loader(RedundantBefore redundantBefore, MaxDecidedRX maxDecidedRX, ExecutionContext context)
         {
             return loader(redundantBefore, maxDecidedRX, context.primaryTxnId(), context.executeAt(), context.loadKeysFor(), context.keys());
         }
@@ -267,7 +267,7 @@ public interface CommandSummaries
             return loader(redundantBefore, maxDecidedRX, primaryTxnId, executeAt, loadKeysFor, keysOrRanges, SummaryLoader::new);
         }
 
-        public static <L extends SummaryLoader> L loader(RedundantBefore redundantBefore, MaxDecidedRX maxDecidedRX, PreLoadContext context, Factory<L> factory)
+        public static <L extends SummaryLoader> L loader(RedundantBefore redundantBefore, MaxDecidedRX maxDecidedRX, ExecutionContext context, Factory<L> factory)
         {
             return loader(redundantBefore, maxDecidedRX, context.primaryTxnId(), context.executeAt(), context.loadKeysFor(), context.keys(), factory);
         }

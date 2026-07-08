@@ -25,7 +25,7 @@ import accord.local.CommandStores.LatentStoreSelector;
 import accord.coordinate.ExecuteFlag.CoordinationFlags;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.messages.CheckStatus;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.CheckStatusOkFull;
@@ -67,7 +67,7 @@ public class PrepareRecovery extends CheckShards<Outcome, FullRoute<?>>
     final Status witnessedByInvalidation;
     final LatentStoreSelector reportTo;
 
-    private PrepareRecovery(Node node, SequentialAsyncExecutor executor, Topologies topologies, TxnId txnId, Infer.InvalidIf invalidIf, FullRoute<?> route, Status witnessedByInvalidation, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback) throws TopologyException
+    private PrepareRecovery(Node node, ExclusiveAsyncExecutor executor, Topologies topologies, TxnId txnId, Infer.InvalidIf invalidIf, FullRoute<?> route, Status witnessedByInvalidation, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback) throws TopologyException
     {
         super(node, executor, txnId, route, IncludeInfo.All, node.uniqueTimestamp(Ballot::fromValues), invalidIf, callback);
         this.reportTo = reportTo;
@@ -79,7 +79,7 @@ public class PrepareRecovery extends CheckShards<Outcome, FullRoute<?>>
         assert topologies.oldestEpoch() == topologies.currentEpoch() && topologies.currentEpoch() == txnId.epoch();
     }
 
-    public static void recover(Node node, SequentialAsyncExecutor executor, TxnId txnId, Infer.InvalidIf invalidIf, FullRoute<?> route, @Nullable Status witnessedByInvalidation, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback)
+    public static void recover(Node node, ExclusiveAsyncExecutor executor, TxnId txnId, Infer.InvalidIf invalidIf, FullRoute<?> route, @Nullable Status witnessedByInvalidation, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback)
     {
         PrepareRecovery recover;
         try

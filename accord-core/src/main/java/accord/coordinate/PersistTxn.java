@@ -21,7 +21,7 @@ package accord.coordinate;
 import accord.api.Result.PersistableResult;
 import accord.coordinate.ExecuteFlag.CoordinationFlags;
 import accord.local.Node;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.messages.Apply;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
@@ -36,7 +36,7 @@ import accord.topology.Topologies;
 public class PersistTxn extends Persist
 {
     // TODO (desired): standardise parameter order with CoordinationAdapter (and others)
-    public PersistTxn(Node node, SequentialAsyncExecutor executor, Topologies topologies, TxnId txnId, Ballot ballot, Route<?> sendTo, Txn txn, Timestamp executeAt, Deps deps, Writes writes, PersistableResult result, FullRoute<?> route, CoordinationFlags flags, boolean informDurableOnDone, Apply.Factory factory, Apply.Kind applyKind)
+    public PersistTxn(Node node, ExclusiveAsyncExecutor executor, Topologies topologies, TxnId txnId, Ballot ballot, Route<?> sendTo, Txn txn, Timestamp executeAt, Deps deps, Writes writes, PersistableResult result, FullRoute<?> route, CoordinationFlags flags, boolean informDurableOnDone, Apply.Factory factory, Apply.Kind applyKind)
     {
         super(node, executor, topologies, txnId, ballot, sendTo, txn, executeAt, deps, writes, result, route, flags, informDurableOnDone, factory, applyKind);
     }

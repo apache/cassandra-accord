@@ -40,7 +40,7 @@ import accord.api.VisibleForImplementation;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.Node;
-import accord.local.PreLoadContext;
+import accord.local.ExecutionContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.primitives.SaveStatus;
@@ -385,7 +385,7 @@ public class DefaultProgressLog implements ProgressLog, Consumer<SafeCommandStor
             {
                 // the command might be invalidated, which should be established on load, so simply load the command
                 TxnId txnId = state.txnId;
-                safeStore.commandStore().execute(PreLoadContext.contextFor(txnId, "Clear Progress"), safeStore0 -> {
+                safeStore.commandStore().execute(ExecutionContext.unsequenced(txnId, "Clear Progress"), safeStore0 -> {
                     safeStore0.unsafeGet(txnId);
                 }, node.agent());
             }
@@ -631,7 +631,7 @@ public class DefaultProgressLog implements ProgressLog, Consumer<SafeCommandStor
             minEpoch = Math.min(awaitingEpochBuffer[i].run.txnId.epoch(), minEpoch);
         Invariants.requireArgument(minEpoch != Long.MAX_VALUE);
         isAwaitingEpoch = true;
-        node.withEpochAtLeast(minEpoch, commandStore, (success, fail) -> commandStore.execute((PreLoadContext.Empty) () -> "Run ProgressLog", ss -> {
+        node.withEpochAtLeast(minEpoch, commandStore, (success, fail) -> commandStore.execute((ExecutionContext.Empty) () -> "Run ProgressLog", ss -> {
             isAwaitingEpoch = false;
             accept(ss);
         }, node.agent()));
@@ -765,7 +765,7 @@ public class DefaultProgressLog implements ProgressLog, Consumer<SafeCommandStor
         return invoker;
     }
 
-    static final class RunInvoker extends PendingTask implements PreLoadContext, Consumer<SafeCommandStore>
+    static final class RunInvoker extends PendingTask implements ExecutionContext, Consumer<SafeCommandStore>
     {
         final DefaultProgressLog owner;
         final TxnState run;
@@ -924,7 +924,7 @@ public class DefaultProgressLog implements ProgressLog, Consumer<SafeCommandStor
     @VisibleForImplementation
     public void setMode(ModeFlag flag)
     {
-        commandStore.execute((PreLoadContext.Empty)() -> "Set ProgressLog ModeFlag", safeStore -> {
+        commandStore.execute((ExecutionContext.Empty)() -> "Set ProgressLog ModeFlag", safeStore -> {
             setModeExclusive(safeStore, flag);
         });
     }
@@ -985,7 +985,7 @@ public class DefaultProgressLog implements ProgressLog, Consumer<SafeCommandStor
         {
             long now = node.recentElapsed(MICROSECONDS);
             if (timers.shouldWake(now))
-                commandStore.execute((PreLoadContext.Empty) () -> "Run ProgressLog", this, node.agent());
+                commandStore.execute((ExecutionContext.Empty) () -> "Run ProgressLog", this, node.agent());
         }
     }
 

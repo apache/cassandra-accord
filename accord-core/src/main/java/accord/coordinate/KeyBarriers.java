@@ -29,7 +29,7 @@ import accord.local.CommandSummaries;
 import accord.local.MapReduceConsumeCommandStores;
 import accord.local.Node;
 import accord.local.SafeCommandStore;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.local.durability.DurabilityService.SyncLocal;
 import accord.local.durability.DurabilityService.SyncRemote;
 import accord.messages.Await;
@@ -197,7 +197,7 @@ public class KeyBarriers
         };
     }
 
-    public static AsyncChain<Boolean> await(Node node, SequentialAsyncExecutor executor, Found found, SyncLocal syncLocal, SyncRemote syncRemote)
+    public static AsyncChain<Boolean> await(Node node, ExclusiveAsyncExecutor executor, Found found, SyncLocal syncLocal, SyncRemote syncRemote)
     {
         if (found == null)
             return AsyncChains.success(false);
@@ -212,7 +212,7 @@ public class KeyBarriers
         return AsyncChains.success(true);
     }
 
-    public static AsyncChain<Boolean> awaitRemote(Node node, SequentialAsyncExecutor executor, Found found, SyncRemote syncRemote)
+    public static AsyncChain<Boolean> awaitRemote(Node node, ExclusiveAsyncExecutor executor, Found found, SyncRemote syncRemote)
     {
         if (found.knownRemote.compareTo(syncRemote) >= 0)
             return AsyncChains.success(true);
@@ -220,7 +220,7 @@ public class KeyBarriers
         return awaitRemote(node, executor, found.txnId, found.key);
     }
 
-    public static AsyncChain<Boolean> awaitRemote(Node node, SequentialAsyncExecutor executor, TxnId txnId, RoutingKey key)
+    public static AsyncChain<Boolean> awaitRemote(Node node, ExclusiveAsyncExecutor executor, TxnId txnId, RoutingKey key)
     {
         RoutingKeys keys = RoutingKeys.of(key);
         return SynchronousAwait.awaitQuorum(node, executor, txnId, keys, IsApplied, true);

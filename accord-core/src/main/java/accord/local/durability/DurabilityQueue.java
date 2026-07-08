@@ -48,6 +48,7 @@ import accord.primitives.Ranges;
 import accord.primitives.TxnId;
 import accord.topology.Topology;
 import accord.topology.TopologyRetiredException;
+import accord.utils.IntrusiveHeapNode;
 import accord.utils.IntrusivePriorityHeap;
 import accord.utils.Invariants;
 import accord.utils.SortedArrays.SortedArrayList;
@@ -144,7 +145,7 @@ public class DurabilityQueue
         @Override
         public DurabilityResults execute(PartialSyncPoint syncPoint, int attempt)
         {
-            return coordinateIncluding(node, syncPoint, node.someSequentialExecutor(), attempt);
+            return coordinateIncluding(node, syncPoint, node.someExclusiveExecutor(), attempt);
         }
     }
 
@@ -197,7 +198,7 @@ public class DurabilityQueue
 
     enum Status { QUEUED, ACTIVE, COMPLETING, RESTARTING, ABANDONED, DONE }
 
-    static class Pending extends IntrusivePriorityHeap.Node
+    static class Pending extends IntrusiveHeapNode
     {
         final @Nullable DurabilityRequest request;
         PartialSyncPoint syncPoint;
@@ -291,8 +292,8 @@ public class DurabilityQueue
         Pending poll() { heapify(); return super.pollNode(); }
         Pending peek() { heapify(); return super.peekNode(); }
         @Override public int compare(Pending o1, Pending o2) { return comparator.compare(o1, o2); }
-        @Override protected void append(Pending node) { super.append(node); }
-        @Override protected void remove(Pending node) { super.remove(node); }
+        void append(Pending node) { super.appendNode(node); }
+        void remove(Pending node) { super.removeNode(node); }
         @Override protected void clear() { super.clear(); }
     }
 

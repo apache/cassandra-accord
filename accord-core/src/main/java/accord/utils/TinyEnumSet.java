@@ -67,13 +67,17 @@ public class TinyEnumSet<E extends Enum<E>>
         return new TinyEnumSet<>(encode(values));
     }
 
+    public static <E extends Enum<E>> int encode(Enum<E> v1, Enum<E> v2)
+    {
+        return encode(v1) | encode(v2);
+    }
     public static <E extends Enum<E>> int encode(Enum<E> ... values)
     {
         int bitset = 0;
         for (Enum<E> v : values)
         {
             Invariants.requireArgument(v.ordinal() < 32);
-            bitset |= 1 << v.ordinal();
+            bitset |= encode(v);
         }
         return bitset;
     }

@@ -29,7 +29,7 @@ import accord.utils.async.AsyncChain;
 
 import static accord.primitives.Routables.Slice.Minimal;
 
-public abstract class MapReduceCommandStores<P extends Participants<?>, O> implements PreLoadContext, MapReduce<SafeCommandStore, O>
+public abstract class MapReduceCommandStores<P extends Participants<?>, O> implements ExecutionContext, MapReduce<SafeCommandStore, O>
 {
     public final P scope;
     private Tracing tracing;

@@ -34,7 +34,7 @@ import accord.local.LoadKeys;
 import accord.local.LoadKeysFor;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.local.StoreParticipants;
 import accord.messages.PreAccept.PreAcceptNack;
 import accord.messages.PreAccept.PreAcceptReply;
@@ -74,7 +74,7 @@ import static java.util.concurrent.TimeUnit.MICROSECONDS;
  */
 public class CoordinateTransaction extends CoordinatePreAccept<Result>
 {
-    private CoordinateTransaction(Node node, SequentialAsyncExecutor executor, Topologies topologies, FullRoute<?> route, TxnId txnId, Txn txn, BiConsumer<? super Result, Throwable> callback)
+    private CoordinateTransaction(Node node, ExclusiveAsyncExecutor executor, Topologies topologies, FullRoute<?> route, TxnId txnId, Txn txn, BiConsumer<? super Result, Throwable> callback)
     {
         super(node, executor, topologies, route, txnId, txn, callback);
     }
@@ -99,7 +99,7 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
         {
             FullRoute<?> route = node.computeRoute(txnId, txn.keys());
             Topologies topologies = node.topology().active().select(route, txnId, txnId, LIVE, ProtocolModifiers.QuorumEpochIntersections.preaccept.include);
-            coordinate = new CoordinateTransaction(node, node.someSequentialExecutor(), topologies, route, txnId, txn, callback);
+            coordinate = new CoordinateTransaction(node, node.someExclusiveExecutor(), topologies, route, txnId, txn, callback);
         }
         catch (Throwable t)
         {
@@ -298,6 +298,11 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
         public LoadKeysFor loadKeysFor()
         {
             return LoadKeysFor.READ_WRITE;
+        }
+
+        public ExecutionKind executionKind()
+        {
+            return ExecutionKind.PREACCEPT;
         }
     }
 }

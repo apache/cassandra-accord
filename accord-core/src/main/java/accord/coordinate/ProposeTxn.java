@@ -22,7 +22,7 @@ import java.util.function.BiConsumer;
 
 import accord.api.Result;
 import accord.local.Node;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.messages.Accept;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
@@ -36,7 +36,7 @@ import static accord.coordinate.CoordinationAdapter.Factory.Kind.Standard;
 
 class ProposeTxn extends Propose<Result>
 {
-    ProposeTxn(Node node, SequentialAsyncExecutor executor, Topologies topologies, FullRoute<?> route, Accept.Kind kind, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
+    ProposeTxn(Node node, ExclusiveAsyncExecutor executor, Topologies topologies, FullRoute<?> route, Accept.Kind kind, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
     {
         super(node, executor, topologies, kind, ballot, txnId, txn, route, route, executeAt, deps, callback);
     }

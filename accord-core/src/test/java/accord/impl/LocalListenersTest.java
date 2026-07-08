@@ -400,26 +400,10 @@ public class LocalListenersTest
 
     static class TestSafeCommand extends SafeCommand
     {
-        Command current;
         public TestSafeCommand(TxnId txnId, SaveStatus saveStatus, Durability durability)
         {
             super(txnId);
             current = new TestCommand(txnId, saveStatus, durability);
-        }
-
-        @Override
-        public Command current() { return current; }
-
-        @Override
-        public void markUnsafe() {}
-
-        @Override
-        public boolean isUnsafe() { return false; }
-
-        @Override
-        protected void set(Command command)
-        {
-            current = command;
         }
     }
 

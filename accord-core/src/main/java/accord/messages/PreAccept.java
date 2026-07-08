@@ -108,6 +108,12 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
     }
 
     @Override
+    public ExecutionKind executionKind()
+    {
+        return ExecutionKind.PREACCEPT;
+    }
+
+    @Override
     protected Cancellable submit()
     {
         return node.commandStores().mapReduceConsume(minEpoch, acceptEpoch, this);

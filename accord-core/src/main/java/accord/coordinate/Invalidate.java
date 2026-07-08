@@ -20,6 +20,7 @@ package accord.coordinate;
 
 import java.util.function.BiConsumer;
 
+import accord.api.ExclusiveAsyncExecutor;
 import accord.coordinate.tracking.AbstractTracker;
 import accord.coordinate.tracking.InvalidationTracker;
 import accord.coordinate.tracking.InvalidationTracker.InvalidationShardTracker;
@@ -58,7 +59,7 @@ public class Invalidate extends AbstractCoordination<Participants<?>, Outcome, I
     private final InvalidationTracker tracker;
     private final LatentStoreSelector reportTo;
 
-    private Invalidate(Node node, SequentialAsyncExecutor executor, Topologies topologies, Ballot ballot, TxnId txnId, Participants<?> invalidateWith, boolean transitivelyInvokedByPriorInvalidation, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback)
+    private Invalidate(Node node, ExclusiveAsyncExecutor executor, Topologies topologies, Ballot ballot, TxnId txnId, Participants<?> invalidateWith, boolean transitivelyInvokedByPriorInvalidation, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback)
     {
         super(node, executor, txnId, invalidateWith, topologies.nodes(), callback);
         Invariants.require(topologies.size() == 1);
@@ -85,7 +86,7 @@ public class Invalidate extends AbstractCoordination<Participants<?>, Outcome, I
         try
         {
             Topologies topologies = node.topology().active().forEpoch(invalidateWith, txnId.epoch(), ALL);
-            invalidate = new Invalidate(node, node.someSequentialExecutor(), topologies, ballot, txnId, invalidateWith, transitivelyInvokedByPriorInvalidation, reportTo, callback);
+            invalidate = new Invalidate(node, node.someExclusiveExecutor(), topologies, ballot, txnId, invalidateWith, transitivelyInvokedByPriorInvalidation, reportTo, callback);
         }
         catch (Throwable t)
         {

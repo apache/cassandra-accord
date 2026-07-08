@@ -46,7 +46,7 @@ import accord.local.CheckedCommands;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.Node;
-import accord.local.PreLoadContext;
+import accord.local.ExecutionContext;
 import accord.local.SafeCommand;
 import accord.primitives.SaveStatus;
 import accord.local.StoreParticipants;
@@ -153,7 +153,7 @@ class ReadDataTest
     {
         // status=Commit, will listen waiting for ReadyToExecute; obsolete marked by status listener
         test(state -> {
-            state.forEach(store -> check(store.chain(PreLoadContext.contextFor(state.txnId, "Test"), safe -> {
+            state.forEach(store -> check(store.chain(ExecutionContext.unsequenced(state.txnId, "Test"), safe -> {
                 CheckedCommands.preaccept(safe, state.txnId, state.partialTxn, state.route);
                 CheckedCommands.accept(safe, state.txnId, Ballot.ZERO, state.partialRoute, state.executeAt, state.deps);
 
@@ -190,7 +190,7 @@ class ReadDataTest
             state.readyToExecute(store);
 
             store = stores.get(1);
-            check(store.chain(PreLoadContext.contextFor(state.txnId, "Test"), safeStore -> {
+            check(store.chain(ExecutionContext.unsequenced(state.txnId, "Test"), safeStore -> {
                 StoreParticipants participants = StoreParticipants.notAccept(safeStore, state.route, state.txnId);
                 SafeCommand safeCommand = safeStore.get(state.txnId, participants);
                 Command prev = safeCommand.current();
@@ -208,7 +208,7 @@ class ReadDataTest
     {
         test(state -> {
             List<CommandStore> stores = stores(state);
-            stores.forEach(store -> check(store.chain(PreLoadContext.contextFor(state.txnId, "Test"), safeStore -> {
+            stores.forEach(store -> check(store.chain(ExecutionContext.unsequenced(state.txnId, "Test"), safeStore -> {
                 StoreParticipants participants = StoreParticipants.notAccept(safeStore, state.route, state.txnId);
                 SafeCommand command = safeStore.get(state.txnId, participants);
                 command.commitInvalidated(safeStore);
@@ -277,7 +277,7 @@ class ReadDataTest
 
         void readyToExecute(CommandStore store)
         {
-            check(store.chain(PreLoadContext.contextFor(txnId, "Test"), safe -> {
+            check(store.chain(ExecutionContext.unsequenced(txnId, "Test"), safe -> {
                 CheckedCommands.preaccept(safe, txnId, partialTxn, route);
                 CheckedCommands.accept(safe, txnId, Ballot.ZERO, partialRoute, executeAt, deps);
                 CheckedCommands.commit(safe, SaveStatus.Stable, Ballot.ZERO, txnId, route, partialTxn, executeAt, deps);
@@ -301,7 +301,7 @@ class ReadDataTest
             Mockito.when(write.apply(any(), any(), any(), any(), any())).thenAnswer(mock -> writeResult.chain());
             Writes writes = new Writes(txnId, executeAt, keys, write);
 
-            forEach(store -> check(store.chain(PreLoadContext.contextFor(txnId, "Test"), safe -> {
+            forEach(store -> check(store.chain(ExecutionContext.unsequenced(txnId, "Test"), safe -> {
                 CheckedCommands.apply(safe, txnId, route, executeAt, deps, partialTxn, writes, Mockito.mock(PersistableResult.class));
             })));
             return writeResult;

@@ -28,6 +28,7 @@ import java.lang.reflect.Array;
 import java.util.AbstractList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.function.IntFunction;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -1060,6 +1061,12 @@ public class ArrayBuffers
             for (E e : es)
                 buffer[size++] = e;
             return true;
+        }
+
+        @Override
+        public void sort(Comparator<? super E> c)
+        {
+            Arrays.sort(buffer, 0, size, (Comparator) c);
         }
 
         public void close()

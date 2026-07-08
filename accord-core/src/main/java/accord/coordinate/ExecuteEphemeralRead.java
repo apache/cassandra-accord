@@ -29,7 +29,7 @@ import accord.api.Timeouts;
 import accord.coordinate.ExecuteFlag.CoordinationFlags;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.StoreParticipants;
@@ -73,7 +73,7 @@ public class ExecuteEphemeralRead extends ReadCoordinator<Result, ReadReply>
     final CoordinationFlags flags;
     private Data data;
 
-    ExecuteEphemeralRead(Node node, SequentialAsyncExecutor executor, Topologies topologies, FullRoute<?> route, TxnId txnId, Txn txn, Deps deps, CoordinationFlags flags, BiConsumer<? super Result, Throwable> callback)
+    ExecuteEphemeralRead(Node node, ExclusiveAsyncExecutor executor, Topologies topologies, FullRoute<?> route, TxnId txnId, Txn txn, Deps deps, CoordinationFlags flags, BiConsumer<? super Result, Throwable> callback)
     {
         // we need to send Stable to the origin epoch as well as the execution epoch
         // TODO (desired): permit slicing Topologies by key (though unnecessary if we eliminate the concept of non-participating home keys)
@@ -249,6 +249,11 @@ public class ExecuteEphemeralRead extends ReadCoordinator<Result, ReadReply>
 
         @Override
         public ReadType kind() { throw new UnsupportedOperationException(); }
+
+        public ExecutionKind executionKind()
+        {
+            return ExecutionKind.STABLE;
+        }
     }
 
     @Override

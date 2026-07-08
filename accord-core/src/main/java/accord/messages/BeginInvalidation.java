@@ -37,7 +37,7 @@ import static accord.primitives.Route.castToFullRoute;
 import static accord.primitives.Route.isFullRoute;
 import static accord.utils.Functions.mapReduceNonNull;
 
-public class BeginInvalidation extends ParticipantsRequest<Participants<?>, BeginInvalidation.InvalidateReply> implements Request, PreLoadContext
+public class BeginInvalidation extends ParticipantsRequest<Participants<?>, BeginInvalidation.InvalidateReply> implements Request, ExecutionContext
 {
     public final Ballot ballot;
 

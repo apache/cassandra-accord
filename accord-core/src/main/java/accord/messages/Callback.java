@@ -88,9 +88,9 @@ public interface Callback<R>
             };
         }
 
-        static <R> void onSlow(AsyncExecutor executor, boolean unsafeToReplyImmediately, CallbackExclusive<R> callback, Node.Id from)
+        static <R> void onSlow(AsyncExecutor executor, boolean doNotReplyImmediately, CallbackExclusive<R> callback, Node.Id from)
         {
-            replyMaybeImmediately(executor, unsafeToReplyImmediately, runOnSlow(callback, from));
+            replyMaybeImmediately(executor, doNotReplyImmediately, runOnSlow(callback, from));
         }
 
         void onSuccessExclusive(Node.Id from, R reply);

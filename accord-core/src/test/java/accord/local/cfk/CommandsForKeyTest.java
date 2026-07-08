@@ -58,11 +58,10 @@ import accord.impl.IntKey;
 import accord.local.CommandBuilder;
 import accord.local.Command;
 import accord.local.CommandStore;
-import accord.local.CommandStores;
 import accord.local.CommandStores.RangesForEpoch;
 import accord.local.Node;
 import accord.local.NodeCommandStoreService;
-import accord.local.PreLoadContext;
+import accord.local.ExecutionContext;
 import accord.local.RedundantBefore;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
@@ -679,7 +678,7 @@ public class CommandsForKeyTest
                     result = prev.update(safeStore, update.next);
                     safeCfk.set(result.cfk());
                     if (rnd.decide(pruneChance))
-                        safeCfk.set(safeCfk.current.maybePrune(pruneInterval, pruneHlcDelta));
+                        safeCfk.set(safeCfk.current().maybePrune(pruneInterval, pruneHlcDelta));
                     result.postProcess(safeStore, prev, update.next, canon, false);
                 }
 
@@ -698,51 +697,24 @@ public class CommandsForKeyTest
         }
     }
 
-
     static class TestSafeCommand extends SafeCommand
     {
         final Canon canon;
-        Command current;
+        Command prev;
         public TestSafeCommand(TxnId txnId, Canon canon, Command command)
         {
             super(txnId);
             this.canon = canon;
-            current = command;
-        }
-
-        @Override
-        public Command current() { return current; }
-
-        @Override
-        public void markUnsafe() {}
-
-        @Override
-        public boolean isUnsafe() { return false; }
-
-        @Override
-        protected void set(Command command)
-        {
-            canon.set(current, command);
-            current = command;
+            current = prev = command;
         }
     }
 
     static class TestSafeCommandsForKey extends SafeCommandsForKey
     {
-        CommandsForKey current;
         public TestSafeCommandsForKey(CommandsForKey cfk)
         {
             super(cfk.key());
             current = cfk;
-        }
-
-        @Override
-        public CommandsForKey current() { return current; }
-
-        @Override
-        protected void set(CommandsForKey command)
-        {
-            current = command;
         }
 
         @Override
@@ -819,7 +791,7 @@ public class CommandsForKeyTest
         @Override
         public SafeCommand ifLoadedAndInitialised(TxnId txnId)
         {
-            if (txnId.compareTo(cfk.current.prunedBefore()) < 0)
+            if (txnId.compareTo(cfk.current().prunedBefore()) < 0)
                 return null;
 
             return getInternal(txnId);
@@ -846,13 +818,13 @@ public class CommandsForKeyTest
         }
 
         @Override
-        public PreLoadContext canExecute(PreLoadContext context)
+        public ExecutionContext canExecute(ExecutionContext context)
         {
             return context;
         }
 
         @Override
-        public PreLoadContext context()
+        public ExecutionContext context()
         {
             return null;
         }
@@ -1011,7 +983,7 @@ public class CommandsForKeyTest
         @Override protected void ensureDurable(Ranges ranges, RedundantBefore onDataStoreDurable) {}
 
         @Override
-        public AsyncChain<Void> chain(PreLoadContext context, Consumer<? super SafeCommandStore> consumer)
+        public AsyncChain<Void> chain(ExecutionContext context, Consumer<? super SafeCommandStore> consumer)
         {
             return new AsyncChains.Head<>()
             {
@@ -1026,15 +998,27 @@ public class CommandsForKeyTest
         }
 
         @Override
+        public AsyncChain<Void> continuationChain(ExecutionContext context, Consumer<? super SafeCommandStore> consumer)
+        {
+            return chain(context, consumer);
+        }
+
+        @Override
         public void execute(Runnable run)
         {
             queue.add(new Task(ignore -> run.run()));
         }
 
         @Override
-        public <T> AsyncChain<T> chain(PreLoadContext context, Function<? super SafeCommandStore, T> apply)
+        public <T> AsyncChain<T> chain(ExecutionContext context, Function<? super SafeCommandStore, T> apply)
         {
             throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public <T> AsyncChain<T> continuationChain(ExecutionContext context, Function<? super SafeCommandStore, T> apply)
+        {
+            return chain(context, apply);
         }
 
         @Override

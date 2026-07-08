@@ -24,9 +24,10 @@ import java.util.regex.Pattern;
 
 import javax.annotation.Nullable;
 
+import accord.local.LoadKeys;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
-import accord.primitives.Routable;
+import accord.primitives.Routable.Domain;
 import accord.primitives.SaveStatus;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
@@ -49,6 +50,7 @@ import static accord.api.ProtocolModifiers.QuorumEpochIntersections.Include.Unsy
 import static accord.api.ProtocolModifiers.SendStableMessages.FOR_READS;
 import static accord.api.ProtocolModifiers.SendStableMessages.FOR_READS_OR_NONE_IF_FASTEXEC;
 import static accord.api.ProtocolModifiers.SendStableMessages.TO_ALL_REPLICA_EXECUTABLE_ELSE_FOR_READS;
+import static accord.local.cfk.CommandsForKey.managesExecution;
 import static accord.primitives.Txn.Kind.EphemeralRead;
 import static accord.primitives.Txn.Kind.VisibilitySyncPoint;
 import static accord.primitives.TxnId.Cardinality.Any;
@@ -153,6 +155,9 @@ public class ProtocolModifiers
         private static boolean permitLocalDelivery = true;
         public static synchronized void setPermitLocalDelivery(boolean newPermitLocalDelivery) { pre(); permitLocalDelivery = newPermitLocalDelivery; }
 
+        private static boolean permitAtomicIncrementalTasks = true;
+        public static synchronized void setPermitAtomicIncrementalTasks(boolean newPermitAtomicIncrementalTasks) { pre(); permitAtomicIncrementalTasks = newPermitAtomicIncrementalTasks; }
+
         private static boolean dataStoreRequiresUniqueHlcs = true;
         public static synchronized void setDataStoreRequiresUniqueHlcs(boolean newDataStoreRequiresUniqueHlcs) { pre();dataStoreRequiresUniqueHlcs = newDataStoreRequiresUniqueHlcs; }
 
@@ -211,7 +216,7 @@ public class ProtocolModifiers
 
         public static void validate()
         {
-            Invariants.require(dataStoreDetectsFutureReads || fastWriteExecution != MAY_BYPASS_SAFESTORE && fastReadExecution != MAY_BYPASS_SAFESTORE, "MAY_BYPASS_SAFESTORE is only permitted when dataStoreDetectsFutureReads");
+            Invariants.require(dataStoreDetectsFutureReads || (fastWriteExecution != MAY_BYPASS_SAFESTORE && fastReadExecution != MAY_BYPASS_SAFESTORE), "MAY_BYPASS_SAFESTORE is only permitted when dataStoreDetectsFutureReads");
             Invariants.require(permitCoordinatorLocalExecution || (!permittedFastPaths.contains(PrivilegedCoordinatorWithDeps) && !permittedFastPaths.contains(PrivilegedCoordinatorWithoutDeps)), "Privileged coordinator optimisations require coordinator local execution");
         }
     }
@@ -311,8 +316,8 @@ public class ProtocolModifiers
     }
 
     private static FastExecution fastReadExecution = Configure.fastReadExecution;
-    public static boolean fastReadsMayBypassSafeStore(TxnId txnId) { return fastReadExecution == MAY_BYPASS_SAFESTORE && (dataStoreDetectsFutureReads() || txnId.is(EphemeralRead)) && txnId.is(Routable.Domain.Key); }
-    public static boolean fastReadsMayBypassCommandsForKey(TxnId txnId) { return fastReadExecution != FastExecution.DISABLED && !txnId.is(Txn.Kind.Write) && txnId.is(Routable.Domain.Key); }
+    public static boolean fastReadsMayBypassSafeStore(TxnId txnId) { return fastReadExecution == MAY_BYPASS_SAFESTORE && (dataStoreDetectsFutureReads() || txnId.is(EphemeralRead)) && txnId.is(Domain.Key); }
+    public static boolean fastReadsMayBypassCommandsForKey(TxnId txnId) { return fastReadExecution != FastExecution.DISABLED && !txnId.is(Txn.Kind.Write) && txnId.is(Domain.Key); }
 
     private static final boolean fastReadExecutionMayResendTxn = Configure.fastReadExecMayResendTxn;
     public static boolean fastReadExecutionMayResendTxn() { return fastReadExecutionMayResendTxn; }
@@ -341,6 +346,15 @@ public class ProtocolModifiers
     
     private static final boolean permitLocalDelivery = Configure.permitLocalDelivery;
     public static boolean permitLocalDelivery() { return permitLocalDelivery; }
+
+    private static final boolean permitAtomicIncrementalTasks = Configure.permitAtomicIncrementalTasks;
+    public static boolean permitAtomicIncrementalTasks() { return permitAtomicIncrementalTasks; }
+    public static LoadKeys loadKeysAsyncIfPermitted(TxnId txnId)
+    {
+        if (permitAtomicIncrementalTasks())
+            return LoadKeys.ASYNC;
+        return managesExecution(txnId) ? LoadKeys.SYNC : LoadKeys.ASYNC;
+    }
 
     private static ReplicaExecution replicaExecution = Configure.replicaExecution;
     public static boolean executeAtReplica(TxnId txnId, @Nullable Txn txn)

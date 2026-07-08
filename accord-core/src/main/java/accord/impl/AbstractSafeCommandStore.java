@@ -23,9 +23,8 @@ import java.util.List;
 import java.util.NavigableMap;
 
 import accord.api.RoutingKey;
-import accord.local.CommandStore;
 import accord.local.LoadKeys;
-import accord.local.PreLoadContext;
+import accord.local.ExecutionContext;
 import accord.local.RedundantBefore;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
@@ -45,21 +44,12 @@ public abstract class AbstractSafeCommandStore<C extends SafeCommand,
                                               Caches extends AbstractSafeCommandStore.CommandStoreCaches<C, CFK>>
 extends SafeCommandStore
 {
-    protected final PreLoadContext context;
-
-    private final CommandStore commandStore;
+    protected final ExecutionContext context;
     private FieldUpdates fieldUpdates;
 
-    protected AbstractSafeCommandStore(PreLoadContext context, CommandStore commandStore)
+    protected AbstractSafeCommandStore(ExecutionContext context)
     {
         this.context = context;
-        this.commandStore = commandStore;
-    }
-
-    @Override
-    public CommandStore commandStore()
-    {
-        return commandStore;
     }
 
     public interface CommandStoreCaches<C, CFK> extends AutoCloseable
@@ -75,7 +65,7 @@ extends SafeCommandStore
     protected abstract CFK add(CFK safeCfk, Caches caches);
 
     @Override
-    public PreLoadContext canExecute(PreLoadContext with)
+    public ExecutionContext canExecute(ExecutionContext with)
     {
         if (with.isEmpty()) return with;
         if (with.keys().domain() == Routable.Domain.Range)
@@ -84,7 +74,7 @@ extends SafeCommandStore
         LoadKeys require = with.loadKeys();
         if (require != LoadKeys.NONE)
         {
-            PreLoadContext context = context();
+            ExecutionContext context = context();
             if (!context.loadKeys().satisfiesIfPresent(require))
                 return null;
 
@@ -144,12 +134,12 @@ extends SafeCommandStore
             if (unavailable.size() == keys.size())
                 return null;
 
-            return PreLoadContext.contextFor(with.primaryTxnId(), with.additionalTxnId(), keys.without(RoutingKeys.ofSortedUnique(unavailable)), loadKeys, context.loadKeysFor(), context.reason());
+            return ExecutionContext.contextFor(with.primaryTxnId(), with.additionalTxnId(), keys.without(RoutingKeys.ofSortedUnique(unavailable)), loadKeys, context.loadKeysFor(), context.reason());
         }
     }
 
     @Override
-    public PreLoadContext context()
+    public ExecutionContext context()
     {
         return context;
     }
@@ -265,10 +255,12 @@ extends SafeCommandStore
     @Override
     public RangesForEpoch ranges()
     {
+        // TODO (expected): do we even need this? We should probably reflect this immediately in CommandStore, and revert if we fail
+        // if we remove it
         if (fieldUpdates != null && fieldUpdates.newRangesForEpoch != null)
             return fieldUpdates.newRangesForEpoch;
 
-        return commandStore.unsafeGetRangesForEpoch();
+        return commandStore().unsafeGetRangesForEpoch();
     }
 
     @Override

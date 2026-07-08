@@ -22,7 +22,7 @@ import java.util.function.BiConsumer;
 
 import javax.annotation.Nullable;
 
-import accord.local.PreLoadContext;
+import accord.local.ExecutionContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.primitives.TxnId;
@@ -30,7 +30,7 @@ import accord.primitives.TxnId;
 import static accord.impl.progresslog.TxnStateKind.Home;
 import static accord.impl.progresslog.TxnStateKind.Waiting;
 
-final class CallbackInvoker<P, V> extends DefaultProgressLog.PendingTask implements BiConsumer<V, Throwable>, PreLoadContext
+final class CallbackInvoker<P, V> extends DefaultProgressLog.PendingTask implements BiConsumer<V, Throwable>, ExecutionContext
 {
     static <P, V> CallbackInvoker<P, V> invokeWaitingCallback(DefaultProgressLog instance, TxnId txnId, P param, Callback<P, V> callback)
     {

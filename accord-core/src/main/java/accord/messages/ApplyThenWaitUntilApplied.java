@@ -153,6 +153,11 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
         return APPLY_THEN_WAIT_UNTIL_APPLIED_REQ;
     }
 
+    public ExecutionKind executionKind()
+    {
+        return ExecutionKind.APPLY;
+    }
+
     @Override
     public String toString()
     {

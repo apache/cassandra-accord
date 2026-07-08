@@ -40,6 +40,7 @@ import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 
+import static accord.api.ProtocolModifiers.loadKeysAsyncIfPermitted;
 import static accord.messages.MessageType.StandardMessage.STABLE_THEN_READ_REQ;
 import static accord.messages.ReadData.CommitOrReadNack.Kind.InsufficientEpochs;
 import static accord.primitives.SaveStatus.ReadyToExecute;
@@ -139,7 +140,7 @@ public class StableThenRead extends ReadData
     @Override
     public LoadKeys loadKeys()
     {
-        return LoadKeys.ASYNC;
+        return loadKeysAsyncIfPermitted(txnId);
     }
 
     @Override

@@ -36,8 +36,9 @@ import accord.api.VisibleForImplementation;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.Commands;
+import accord.local.ExecutionContext.ExecutionSequence;
 import accord.local.Node;
-import accord.local.PreLoadContext;
+import accord.local.ExecutionContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.primitives.SaveStatus;
@@ -103,6 +104,7 @@ public class DefaultLocalListeners implements LocalListeners
             if (listener != null && safeStore.tryRecurse())
             {
                 try { Commands.listenerUpdate(safeStore, listener, safeCommand); }
+                catch (Throwable t) { safeStore.agent().onException(t); }
                 finally { safeStore.unrecurse(); }
             }
             else
@@ -110,7 +112,7 @@ public class DefaultLocalListeners implements LocalListeners
                 //noinspection SillyAssignment,ConstantConditions
                 safeStore = safeStore; // prevent use in lambda
                 TxnId updatedId = safeCommand.txnId();
-                PreLoadContext context = PreLoadContext.contextFor(listenerId, updatedId, "Notify");
+                ExecutionContext context = new NotifyContext(listenerId, updatedId);
                 safeStore.commandStore().execute(context, safeStore0 -> { notify(safeStore0, listenerId, updatedId); }, safeStore.agent());
             }
         }
@@ -123,9 +125,28 @@ public class DefaultLocalListeners implements LocalListeners
         @Override
         public boolean notify(SafeCommandStore safeStore, SafeCommand safeCommand, ComplexListener listener)
         {
-            return listener.notify(safeStore, safeCommand);
+            try { return listener.notify(safeStore, safeCommand); }
+            catch (Throwable t) { safeStore.agent().onException(t); return false; }
         }
     }
+
+        static class NotifyContext implements ExecutionContext
+        {
+            final TxnId primaryTxnId;
+            final TxnId additionalTxnId;
+
+            NotifyContext(TxnId primaryTxnId, TxnId additionalTxnId)
+            {
+                this.primaryTxnId = primaryTxnId;
+                this.additionalTxnId = additionalTxnId;
+            }
+
+            @Override public @Nullable TxnId primaryTxnId() { return primaryTxnId; }
+            @Override public @Nullable TxnId additionalTxnId() { return additionalTxnId; }
+            @Override public ExecutionSequence executionSequence() { return ExecutionSequence.UNSEQUENCED; }
+            @Override public String reason() { return "Notify"; }
+            @Override public String toString() { return describe(); }
+        };
 
     /*
      * A list that allows duplicates and sorts and removes duplicates on notify and when the list would have to resize
@@ -133,7 +154,7 @@ public class DefaultLocalListeners implements LocalListeners
      *      - encoding SaveStatus as byte
      *      - encoding listeners as any of: single TxnId, array of TxnId (for small size), btree for a large collection
      */
-    static class TxnListeners extends TxnId implements PreLoadContext
+    static class TxnListeners extends TxnId implements ExecutionContext
     {
         final SaveStatus await;
         TxnId[] listeners = NO_TXNIDS;

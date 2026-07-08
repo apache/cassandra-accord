@@ -29,17 +29,24 @@ import java.util.concurrent.atomic.AtomicLong;
 import javax.annotation.Nullable;
 
 import accord.api.Agent;
+import accord.impl.AbstractAsyncExecutor;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
-public class SimulatedDelayedExecutorService extends TaskExecutorService implements ScheduledExecutorService
+public class SimulatedDelayedExecutorService extends TaskExecutorService implements ScheduledExecutorService, AbstractAsyncExecutor
 {
     @Override
     public AsyncChain<Void> chain(Runnable run)
     {
         return AsyncChains.chain(this, run);
+    }
+
+    @Override
+    public AsyncChain<Void> continuationChain(Runnable run)
+    {
+        return AsyncChains.continuationChain(this, run);
     }
 
     @Override

@@ -25,7 +25,7 @@ import accord.api.Key;
 import accord.api.DataStore;
 import accord.local.CommandStore;
 import accord.local.Node;
-import accord.local.PreLoadContext;
+import accord.local.ExecutionContext;
 import accord.local.RedundantBefore;
 import accord.local.SafeCommandStore;
 import accord.primitives.Ranges;
@@ -64,5 +64,5 @@ public class MaelstromStore implements DataStore
     @Override
     public void ensureDurable(CommandStore commandStore, RedundantBefore reportOnSuccess, int flags)
     {
-        commandStore.execute((PreLoadContext.Empty)() -> "Report CommandStore Durable", safeStore -> safeStore.reportDurable(reportOnSuccess, flags));
+        commandStore.execute((ExecutionContext.Empty)() -> "Report CommandStore Durable", safeStore -> safeStore.reportDurable(reportOnSuccess, flags));
     }}

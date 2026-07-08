@@ -2234,6 +2234,15 @@ public class CommandsForKey extends CommandsForKeyUpdate
         return Objects.equals(key, that.key) && equalContents(that);
     }
 
+    /**
+     * A quick check to see if anything we need to save may have been changed;
+     * ignores in-place updates that would not be serialized, and changes to QuickBounds
+     */
+    public boolean hasChanges(CommandsForKey cfk)
+    {
+        return byId != cfk.byId || unmanageds != cfk.unmanageds;
+    }
+
     @Override
     public int hashCode()
     {

@@ -19,7 +19,9 @@
 package accord.utils;
 
 import java.util.List;
+import java.util.concurrent.Callable;
 import java.util.function.BiFunction;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -113,5 +115,43 @@ public class Functions
                 result = foldl.apply((O)in, result);
         }
         return result;
+    }
+
+    public static <V> Function<V, Void> returningVoid(Consumer<V> wrap)
+    {
+        return new Function<>()
+        {
+            @Override
+            public Void apply(V v)
+            {
+                wrap.accept(v);
+                return null;
+            }
+
+            @Override
+            public String toString()
+            {
+                return wrap.toString();
+            }
+        };
+    }
+
+    public static <V> Callable<Void> returningVoid(Runnable wrap)
+    {
+        return new Callable<>()
+        {
+            @Override
+            public Void call()
+            {
+                wrap.run();
+                return null;
+            }
+
+            @Override
+            public String toString()
+            {
+                return wrap.toString();
+            }
+        };
     }
 }

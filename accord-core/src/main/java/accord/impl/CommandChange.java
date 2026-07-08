@@ -152,7 +152,7 @@ public class CommandChange
                 mask |= setIsNullAndChanged(DURABILITY, mask);
             eraseKnownFieldsMask[i] = mask;
         }
-        eraseKnownFieldsMask[VESTIGIAL.ordinal()] = eraseKnownFieldsMask[ERASE.ordinal()];
+        eraseKnownFieldsMask[SaveStatus.Vestigial.ordinal()] = eraseKnownFieldsMask[SaveStatus.Erased.ordinal()];
     }
 
     private static <T> boolean forceFieldChangedToNullFlag(SaveStatus saveStatus, Predicate<T> predicate, T erased)

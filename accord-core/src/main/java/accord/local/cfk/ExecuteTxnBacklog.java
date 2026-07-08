@@ -26,7 +26,7 @@ import accord.coordinate.ExecutePath;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.Node;
-import accord.local.PreLoadContext;
+import accord.local.ExecutionContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.cfk.CommandsForKey.TxnInfo;
@@ -64,7 +64,7 @@ public class ExecuteTxnBacklog implements NotifySink
 
     private void execute(CommandStore commandStore, TxnId txnId)
     {
-        commandStore.execute(PreLoadContext.contextFor(txnId, "Load for ExecuteBacklog"), safeStore -> {
+        commandStore.execute(ExecutionContext.unsequenced(txnId, "Load for ExecuteBacklog"), safeStore -> {
             SafeCommand safeCommand = safeStore.unsafeGet(txnId);
             Command command = safeCommand.current();
             if (command.saveStatus() != ReadyToExecute || command.participants().stillExecutes().isEmpty())
@@ -82,7 +82,7 @@ public class ExecuteTxnBacklog implements NotifySink
 
             node.withEpochAtLeast(executeAt.epoch(), null, node.agent(), () -> {
                 node.agent().coordinatorEvents().onRecoveryStarted(txnId, ballot);
-                Adapters.standard().execute(node, node.someSequentialExecutor(), null, route, command.acceptedOrCommitted(), path, CoordinationFlags.none(), txnId, txn, executeAt, deps, deps, (result, fail) -> {
+                Adapters.standard().execute(node, node.someExclusiveExecutor(), null, route, command.acceptedOrCommitted(), path, CoordinationFlags.none(), txnId, txn, executeAt, deps, deps, (result, fail) -> {
                     if (fail == null) node.reportLocalExecution(txnId, route, ballot, null, null, result);
                     else node.agent().onException(fail);
                 });

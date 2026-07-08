@@ -24,7 +24,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.local.Node;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.messages.Accept;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
@@ -40,7 +40,7 @@ public class ProposeSyncPoint<R> extends Propose<R>
     private static final Logger logger = LoggerFactory.getLogger(ProposeSyncPoint.class);
     private final CoordinationAdapter<R> adapter;
 
-    ProposeSyncPoint(CoordinationAdapter<R> adapter, Node node, SequentialAsyncExecutor executor, Topologies topologies, FullRoute<?> route, Accept.Kind kind, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super R, Throwable> callback)
+    ProposeSyncPoint(CoordinationAdapter<R> adapter, Node node, ExclusiveAsyncExecutor executor, Topologies topologies, FullRoute<?> route, Accept.Kind kind, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super R, Throwable> callback)
     {
         super(node, executor, topologies, kind, ballot, txnId, txn, route, route, executeAt, deps, callback);
         this.adapter = adapter;

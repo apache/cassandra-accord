@@ -25,7 +25,7 @@ import javax.annotation.Nullable;
 import accord.coordinate.Recover.InferredFastPath;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.messages.Await;
 import accord.messages.RecoverAwait;
 import accord.messages.RecoverAwait.RecoverAwaitOk;
@@ -46,6 +46,9 @@ import static accord.coordinate.Recover.InferredFastPath.Unknown;
  * Synchronously await some set of replicas reaching a given wait condition.
  * This may or may not be a condition we expect to reach promptly, but we will wait only until the timeout passes
  * at which point we will report failure.
+ *
+ * TODO (required): protocol has diverged: latest version does not use concept equivalent to recovery await,
+ *  instead waits for some commit
  */
 public class SynchronousRecoverAwait extends ReadCoordinator<InferredFastPath, RecoverAwaitOk>
 {
@@ -56,7 +59,7 @@ public class SynchronousRecoverAwait extends ReadCoordinator<InferredFastPath, R
 
     private InferredFastPath outcome = Unknown;
     private Participants<?> waitingOn;
-    public SynchronousRecoverAwait(Node node, SequentialAsyncExecutor executor, Topologies topologies, TxnId txnId, Participants<?> participants, Await.Until until, boolean notifyProgressLog, TxnId recoverId, BiConsumer<? super InferredFastPath, Throwable> callback)
+    public SynchronousRecoverAwait(Node node, ExclusiveAsyncExecutor executor, Topologies topologies, TxnId txnId, Participants<?> participants, Await.Until until, boolean notifyProgressLog, TxnId recoverId, BiConsumer<? super InferredFastPath, Throwable> callback)
     {
         super(node, executor, topologies, txnId, participants, callback);
         this.participants = participants;
@@ -66,14 +69,14 @@ public class SynchronousRecoverAwait extends ReadCoordinator<InferredFastPath, R
         this.waitingOn = participants;
     }
 
-    public static SynchronousRecoverAwait awaitAny(Node node, SequentialAsyncExecutor executor, Topologies topologies, TxnId txnId, Await.Until until, boolean notifyProgressLog, Participants<?> participants, TxnId recoverId, BiConsumer<? super InferredFastPath, Throwable> callback)
+    public static SynchronousRecoverAwait awaitAny(Node node, ExclusiveAsyncExecutor executor, Topologies topologies, TxnId txnId, Await.Until until, boolean notifyProgressLog, Participants<?> participants, TxnId recoverId, BiConsumer<? super InferredFastPath, Throwable> callback)
     {
         SynchronousRecoverAwait result = new SynchronousRecoverAwait(node, executor, topologies, txnId, participants, until, notifyProgressLog, recoverId, callback);
         result.start();
         return result;
     }
 
-    public static AsyncChain<InferredFastPath> awaitAny(Node node, SequentialAsyncExecutor executor, Topologies topologies, TxnId txnId, Await.Until until, boolean notifyProgressLog, Participants<?> participants, TxnId recoverId)
+    public static AsyncChain<InferredFastPath> awaitAny(Node node, ExclusiveAsyncExecutor executor, Topologies topologies, TxnId txnId, Await.Until until, boolean notifyProgressLog, Participants<?> participants, TxnId recoverId)
     {
         return new AsyncChains.Head<>()
         {

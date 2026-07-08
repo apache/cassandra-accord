@@ -31,7 +31,7 @@ import accord.coordinate.tracking.ReadTracker;
 import accord.coordinate.tracking.RequestStatus;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.messages.Callback;
 import accord.messages.Callback.CallbackExclusive;
 import accord.primitives.Participants;
@@ -112,7 +112,7 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
 
     private final long coordinationId;
     protected final Node node;
-    protected final SequentialAsyncExecutor executor;
+    protected final ExclusiveAsyncExecutor executor;
     protected final TxnId txnId;
     protected final @Nullable Tracing tracing;
     private final DebugMap debug;
@@ -122,7 +122,7 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
     private Throwable failure;
     boolean unsafeToReplyImmediately;
 
-    protected ReadCoordinator(Node node, SequentialAsyncExecutor executor, Topologies topologies, TxnId txnId, Participants<?> participants, BiConsumer<? super Result, Throwable> callback)
+    protected ReadCoordinator(Node node, ExclusiveAsyncExecutor executor, Topologies topologies, TxnId txnId, Participants<?> participants, BiConsumer<? super Result, Throwable> callback)
     {
         super(topologies);
         this.coordinationId = node.nextCoordinationId();
@@ -453,7 +453,7 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
     }
 
     @Override
-    public SequentialAsyncExecutor executor()
+    public ExclusiveAsyncExecutor executor()
     {
         return executor;
     }

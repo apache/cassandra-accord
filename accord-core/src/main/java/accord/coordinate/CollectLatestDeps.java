@@ -55,7 +55,7 @@ public class CollectLatestDeps extends AbstractCoordination<Route<?>, List<Lates
 
     CollectLatestDeps(Node node, Topologies topologies, TxnId txnId, Route<?> route, @Nullable Ballot ballot, Timestamp executeAt, BiConsumer<List<LatestDeps>, Throwable> callback)
     {
-        super(node, node.someSequentialExecutor(), txnId, route, topologies.nodes(), callback);
+        super(node, node.someExclusiveExecutor(), txnId, route, topologies.nodes(), callback);
         this.executeAt = executeAt;
         this.ballot = ballot;
         this.tracker = new QuorumTracker(topologies);

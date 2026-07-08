@@ -22,14 +22,14 @@ import javax.annotation.Nullable;
 
 import accord.local.DurableBefore;
 import accord.local.Node;
-import accord.local.PreLoadContext;
+import accord.local.ExecutionContext;
 import accord.primitives.TxnId;
 import accord.utils.async.Cancellable;
 
 import static accord.messages.MessageType.StandardMessage.SET_GLOBALLY_DURABLE_REQ;
 import static accord.messages.SimpleReply.Ok;
 
-public class SetGloballyDurable implements Request, PreLoadContext
+public class SetGloballyDurable implements Request, ExecutionContext
 {
     public final DurableBefore durableBefore;
 

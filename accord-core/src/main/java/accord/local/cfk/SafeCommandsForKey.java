@@ -23,7 +23,7 @@ import javax.annotation.Nullable;
 import accord.api.Agent;
 import accord.api.ProgressLog;
 import accord.api.RoutingKey;
-import accord.impl.SafeState;
+import accord.local.SafeState;
 import accord.local.Command;
 import accord.local.RedundantBefore;
 import accord.local.SafeCommand;
@@ -33,8 +33,9 @@ import accord.primitives.SaveStatus;
 import accord.primitives.Status;
 import accord.primitives.Status.Durability;
 import accord.primitives.TxnId;
+import accord.utils.Invariants;
 
-public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
+public abstract class SafeCommandsForKey extends SafeState<CommandsForKey>
 {
     public static class RecordingNotifySink implements NotifySink
     {
@@ -69,16 +70,13 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
         }
     }
 
-    private final RoutingKey key;
-
+    public final RoutingKey key;
     public SafeCommandsForKey(RoutingKey key)
     {
         this.key = key;
     }
 
-    protected abstract void set(CommandsForKey update);
-
-    public RoutingKey key()
+    public final RoutingKey key()
     {
         return key;
     }
@@ -148,7 +146,8 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
 
     public void initialize()
     {
-        set(new CommandsForKey(key));
+        Invariants.require(isUninitialised());
+        current = new CommandsForKey(key);
     }
 
     public void refresh(SafeCommandStore safeStore)
@@ -159,5 +158,14 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
     public void setDurable(TxnId txnId, Durability durability)
     {
         set(current().setDurable(txnId, durability));
+    }
+
+    @Override
+    protected final boolean hasChanged(CommandsForKey original, CommandsForKey updated)
+    {
+        if (original == null)
+            return !updated.isEmpty();
+
+        return original != updated && updated.hasChanges(original);
     }
 }

@@ -20,31 +20,18 @@ package accord.impl;
 
 import accord.api.RoutingKey;
 import accord.impl.InMemoryCommandStore.GlobalCommandsForKey;
-import accord.local.cfk.CommandsForKey;
 import accord.local.cfk.NotifySink;
 import accord.local.cfk.SafeCommandsForKey;
 
 public class InMemorySafeCommandsForKey extends SafeCommandsForKey
 {
-    private boolean invalidated = false;
     private final GlobalCommandsForKey global;
+    private boolean touched;
 
     public InMemorySafeCommandsForKey(RoutingKey key, GlobalCommandsForKey global)
     {
         super(key);
         this.global = global;
-    }
-
-    @Override
-    public CommandsForKey current()
-    {
-        return global.value();
-    }
-
-    @Override
-    protected void set(CommandsForKey update)
-    {
-        global.value(update);
     }
 
     @Override
@@ -59,13 +46,30 @@ public class InMemorySafeCommandsForKey extends SafeCommandsForKey
         return global.overrideSink;
     }
 
-    public void invalidate()
+    public final void preExecute()
     {
-        invalidated = true;
+        requireUninitialised();
+        current = global.value();
+        if (current == null)
+            initialize();
+        global.lock(this);
+        setSafe();
     }
 
-    public boolean invalidated()
+    protected void postExecute(InMemoryCommandStore commandStore)
     {
-        return invalidated;
+        if (isModified())
+            global.value(current);
+        else if (global.isEmpty())
+            commandStore.commandsForKey.remove(key);
+        global.unlock(this);
+        setReleased();
+    }
+
+    protected boolean touch()
+    {
+        if (touched)
+            return false;
+        return touched = true;
     }
 }

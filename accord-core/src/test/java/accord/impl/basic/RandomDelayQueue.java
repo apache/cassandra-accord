@@ -35,6 +35,7 @@ import java.util.stream.Stream;
 
 import accord.burn.random.FrequentLargeRange;
 import accord.impl.basic.DelayedCommandStores.DelayedCommandStore.DelayedTask;
+import accord.utils.IntrusiveHeapNode;
 import accord.utils.IntrusivePriorityHeap;
 import accord.utils.Invariants;
 import accord.utils.RandomSource;
@@ -62,7 +63,7 @@ public class RandomDelayQueue implements PendingQueue
         }
     }
 
-    static class Item extends IntrusivePriorityHeap.Node implements Comparable<Item>
+    static class Item extends IntrusiveHeapNode implements Comparable<Item>
     {
         long time;
         int seq;
@@ -115,9 +116,9 @@ public class RandomDelayQueue implements PendingQueue
     static class Queue extends IntrusivePriorityHeap<Item>
     {
         @Override public int compare(Item o1, Item o2) { return o1.compareTo(o2); }
-        @Override protected void append(Item node) { super.append(node); }
-        @Override protected void remove(Item node) { super.remove(node); }
-        @Override protected boolean contains(Item node) { return super.contains(node); }
+        void append(Item node) { super.appendNode(node); }
+        void remove(Item node) { super.removeNode(node); }
+        boolean contains(Item node) { return super.containsNode(node); }
         @Override protected void clear() { super.clear(); }
         @Override protected Stream<Item> stream() { return super.stream(); }
         Item poll()

@@ -20,7 +20,7 @@ package accord.impl;
 
 import accord.impl.basic.NodeSink;
 import accord.local.Node;
-import accord.local.PreLoadContext;
+import accord.local.ExecutionContext;
 import accord.messages.Message;
 import accord.messages.ReadData.ReadOk;
 import accord.messages.Request;
@@ -202,8 +202,8 @@ public interface MessageListener
             if (message instanceof RouteRequest<?>)
                 return txnIdFilter.contains(((RouteRequest<?>) message).txnId);
             // this includes txn that depend on the txn, should this limit for the first txnId?
-            if (message instanceof PreLoadContext)
-                return ((PreLoadContext) message).txnIds().stream().anyMatch(txnIdFilter::contains);
+            if (message instanceof ExecutionContext)
+                return ((ExecutionContext) message).txnIds().stream().anyMatch(txnIdFilter::contains);
             return false;
         }
 

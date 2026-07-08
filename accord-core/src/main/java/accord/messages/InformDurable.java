@@ -26,7 +26,7 @@ import accord.local.Commands;
 import accord.local.LoadKeys;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.local.PreLoadContext;
+import accord.local.ExecutionContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.primitives.Ballot;
@@ -50,7 +50,7 @@ import static accord.api.ProtocolModifiers.informOfDurability;
 import static accord.messages.MessageType.StandardMessage.INFORM_DURABLE_REQ;
 import static accord.messages.SimpleReply.Ok;
 
-public class InformDurable extends RouteRequest<Reply> implements PreLoadContext
+public class InformDurable extends RouteRequest<Reply> implements ExecutionContext
 {
     public static class SerializationSupport
     {

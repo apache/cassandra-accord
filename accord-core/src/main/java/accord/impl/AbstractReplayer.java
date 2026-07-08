@@ -141,7 +141,7 @@ public abstract class AbstractReplayer implements Journal.Replayer
             {
                 if (command.txnId().is(Write) && replay.includes(TO_DATA_STORE))
                 {
-                    Commands.applyChain(safeStore, command)
+                    Commands.applyChain(safeStore, command.asExecuted())
                             .begin(safeStore.agent());
                 }
                 else Invariants.expect(command.hasBeen(Applied), "%s is Applying but is not a Write transaction", txnId);

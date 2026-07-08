@@ -32,7 +32,7 @@ import accord.coordinate.tracking.RequestStatus;
 import accord.coordinate.tracking.SimpleTracker;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.messages.Apply;
 import accord.messages.Apply.ApplyReply;
 import accord.messages.InformDurable;
@@ -69,12 +69,12 @@ public abstract class Persist extends AbstractCoordination<FullRoute<?>, Void, A
     protected final Apply.Kind applyKind;
     protected final boolean informDurableOnDone;
 
-    protected Persist(Node node, SequentialAsyncExecutor executor, Topologies all, TxnId txnId, Ballot ballot, Route<?> sendTo, Txn txn, Timestamp executeAt, Deps stableDeps, Writes writes, PersistableResult result, FullRoute<?> route, CoordinationFlags flags, boolean informDurableOnDone, Apply.Factory factory, Apply.Kind applyKind)
+    protected Persist(Node node, ExclusiveAsyncExecutor executor, Topologies all, TxnId txnId, Ballot ballot, Route<?> sendTo, Txn txn, Timestamp executeAt, Deps stableDeps, Writes writes, PersistableResult result, FullRoute<?> route, CoordinationFlags flags, boolean informDurableOnDone, Apply.Factory factory, Apply.Kind applyKind)
     {
         this(node, executor, all, txnId, ballot, sendTo, txn, executeAt, stableDeps, writes, result, route, flags, informDurableOnDone, factory, applyKind, QuorumTracker::new, node.agent());
     }
 
-    protected Persist(Node node, SequentialAsyncExecutor executor, Topologies all, TxnId txnId, Ballot ballot, Route<?> sendTo, Txn txn, Timestamp executeAt, Deps stableDeps, Writes writes, PersistableResult result, FullRoute<?> route, CoordinationFlags flags, boolean informDurableOnDone, Apply.Factory factory, Apply.Kind applyKind, Function<Topologies, SimpleTracker<?>> trackerFactory, BiConsumer<? super Void, Throwable> callback)
+    protected Persist(Node node, ExclusiveAsyncExecutor executor, Topologies all, TxnId txnId, Ballot ballot, Route<?> sendTo, Txn txn, Timestamp executeAt, Deps stableDeps, Writes writes, PersistableResult result, FullRoute<?> route, CoordinationFlags flags, boolean informDurableOnDone, Apply.Factory factory, Apply.Kind applyKind, Function<Topologies, SimpleTracker<?>> trackerFactory, BiConsumer<? super Void, Throwable> callback)
     {
         super(node, executor, txnId, route, all.nodes(), callback);
         this.ballot = ballot;

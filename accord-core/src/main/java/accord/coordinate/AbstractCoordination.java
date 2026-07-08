@@ -32,7 +32,7 @@ import accord.coordinate.tracking.AbstractTracker;
 import accord.coordinate.tracking.RequestStatus;
 import accord.local.MapReduceConsumeCommandStores;
 import accord.local.Node;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.messages.Request;
 import accord.messages.Callback;
 import accord.primitives.Participants;
@@ -65,9 +65,9 @@ public abstract class AbstractCoordination<P extends Participants<?>, Result, Re
     private BiConsumer<? super Result, Throwable> callback;
     private Object[] replyState;
     private int replyCount;
-    private boolean unsafeToReplyImmediately;
+    private boolean unsafeToReply;
 
-    protected AbstractCoordination(Node node, SequentialAsyncExecutor executor, TxnId txnId, P scope, SortedArrayList<Node.Id> nodes, BiConsumer<? super Result, Throwable> callback)
+    protected AbstractCoordination(Node node, ExclusiveAsyncExecutor executor, TxnId txnId, P scope, SortedArrayList<Node.Id> nodes, BiConsumer<? super Result, Throwable> callback)
     {
         super(node, executor, txnId, scope);
         this.nodes = nodes;
@@ -198,38 +198,45 @@ public abstract class AbstractCoordination<P extends Participants<?>, Result, Re
     void contact(Function<Node.Id, Request> request, @Nullable Predicate<Node.Id> include)
     {
         executor.executeMaybeImmediately(() -> {
-            unsafeToReplyImmediately = true;
-            AbstractTracker<?> tracker = tracker();
-            Topologies topologies = tracker.topologies();
-            if (tracing != null)
-                tracing.trace(null, "contacting %s", nodes);
-
-            for (int i = 0; i < nodes.size() ; ++i)
+            unsafeToReply = true;
+            try
             {
-                Node.Id to = nodes.get(i);
-                if (include == null || include.test(to))
+
+                AbstractTracker<?> tracker = tracker();
+                Topologies topologies = tracker.topologies();
+                if (tracing != null)
+                    tracing.trace(null, "contacting %s", nodes);
+
+                for (int i = 0; i < nodes.size() ; ++i)
                 {
-                    if (topologies.isFaulty(to))
+                    Node.Id to = nodes.get(i);
+                    if (include == null || include.test(to))
                     {
-                        if (tracing != null)
-                            tracing.trace(null, "%s is considered faulty; recording failure instead", to);
-                        if (RequestStatus.Failed == tracker.prerecordFailure(to))
+                        if (topologies.isFaulty(to))
                         {
-                            finishOnExaustion();
-                            return;
+                            if (tracing != null)
+                                tracing.trace(null, "%s is considered faulty; recording failure instead", to);
+                            if (RequestStatus.Failed == tracker.prerecordFailure(to))
+                            {
+                                finishOnExaustion();
+                                return;
+                            }
                         }
-                    }
-                    else
-                    {
-                        Invariants.require(replyState[i] == null);
-                        expectingReply.set(i);
-                        // TODO (expected): do not cancel PreAccept, Accept, Commit, Stable or Apply to self on done
-                        replyState[i] = node.send(to, request.apply(to), executor, this, tracing);
-                        Invariants.require(expectingReply.get(i) || replyState[i] == null);
+                        else
+                        {
+                            Invariants.require(replyState[i] == null);
+                            expectingReply.set(i);
+                            // TODO (expected): do not cancel PreAccept, Accept, Commit, Stable or Apply to self on done
+                            replyState[i] = node.send(to, request.apply(to), executor, this, tracing);
+                            Invariants.require(expectingReply.get(i) || replyState[i] == null);
+                        }
                     }
                 }
             }
-            unsafeToReplyImmediately = false;
+            finally
+            {
+                unsafeToReply = false;
+            }
         });
     }
 
@@ -245,19 +252,19 @@ public abstract class AbstractCoordination<P extends Participants<?>, Result, Re
     @Override
     public final void onSuccess(Node.Id from, Reply reply)
     {
-        CallbackExclusive.onSuccess(executor, unsafeToReplyImmediately, this, from, reply);
+        CallbackExclusive.onSuccess(executor, unsafeToReply, this, from, reply);
     }
 
     @Override
     public final void onSlow(Node.Id from)
     {
-        CallbackExclusive.onSlow(executor, unsafeToReplyImmediately, this, from);
+        CallbackExclusive.onSlow(executor, unsafeToReply, this, from);
     }
 
     @Override
     public final void onFailure(Node.Id from, Throwable failure)
     {
-        CallbackExclusive.onFailure(executor, unsafeToReplyImmediately, this, from, failure);
+        CallbackExclusive.onFailure(executor, unsafeToReply, this, from, failure);
     }
 
     @Override
@@ -308,6 +315,7 @@ public abstract class AbstractCoordination<P extends Participants<?>, Result, Re
 
     private int onReply(Node.Id from, Object reply, boolean isFinal)
     {
+        Invariants.require(!unsafeToReply);
         int fromIndex = nodes.find(from);
         if (isDoneWithReplies())
         {

@@ -19,10 +19,13 @@
 package accord.impl;
 
 import java.util.concurrent.Callable;
+import java.util.function.BiConsumer;
 
 import accord.api.AsyncExecutor;
+import accord.utils.async.AsyncCallbacks;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
+import accord.utils.async.Cancellable;
 
 // we keep this as a separate interface for simulator compatibility,
 // else we use the wrong class loader's AsyncChain.Head.
@@ -35,6 +38,12 @@ public interface AbstractAsyncExecutor extends AsyncExecutor
     }
 
     @Override
+    default AsyncChain<Void> continuationChain(Runnable run)
+    {
+        return AsyncChains.continuationChain(this, run);
+    }
+
+    @Override
     default <V> AsyncChain<V> chain(Callable<V> call)
     {
         return AsyncChains.chain(this, call);
@@ -44,5 +53,20 @@ public interface AbstractAsyncExecutor extends AsyncExecutor
     default <V> AsyncChain<V> flatChain(Callable<? extends AsyncChain<V>> call)
     {
         return AsyncChains.flatChain(this, call);
+    }
+
+    default Cancellable execute(Runnable run, BiConsumer<? super Void, Throwable> callback)
+    {
+        return AsyncCallbacks.execute(this, new AsyncCallbacks.RunAndCallback(run, callback));
+    }
+
+    default <V> Cancellable execute(Callable<V> call, BiConsumer<? super V, Throwable> callback)
+    {
+        return AsyncCallbacks.execute(this, new AsyncCallbacks.CallAndCallback<>(call, callback));
+    }
+
+    default <V> Cancellable flatExecute(Callable<? extends AsyncChain<V>> call, BiConsumer<? super V, Throwable> callback)
+    {
+        return AsyncCallbacks.execute(this, new AsyncCallbacks.FlatCallAndCallback<>(call, callback));
     }
 }

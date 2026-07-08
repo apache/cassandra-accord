@@ -193,8 +193,13 @@ public class Commit extends RouteRequest.WithUnsynced<CommitOrReadNack>
     @Override
     public LoadKeys loadKeys()
     {
-        // TODO (expected): need to guarantee execution order then can make this ASYNC
-        return LoadKeys.SYNC;
+        return LoadKeys.ASYNC;
+    }
+
+    @Override
+    public ExecutionKind executionKind()
+    {
+        return ExecutionKind.COMMIT;
     }
 
     @Override

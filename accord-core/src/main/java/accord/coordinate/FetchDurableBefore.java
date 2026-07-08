@@ -44,7 +44,7 @@ public class FetchDurableBefore extends AbstractCoordination<Ranges, DurableBefo
 
     public FetchDurableBefore(Node node, Topology topology, BiConsumer<? super DurableBefore, Throwable> callback)
     {
-        super(node, node.someSequentialExecutor(), TxnId.NONE, topology.ranges(), topology.nodes(), callback);
+        super(node, node.someExclusiveExecutor(), TxnId.NONE, topology.ranges(), topology.nodes(), callback);
         this.tracker = new QuorumTracker(new Topologies.Single(node.topology().sorter(), topology));
     }
 

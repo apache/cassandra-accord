@@ -26,7 +26,7 @@ import accord.coordinate.Infer.InvalidIf;
 import accord.local.Command;
 import accord.local.Commands;
 import accord.local.Node.Id;
-import accord.local.PreLoadContext;
+import accord.local.ExecutionContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.primitives.KnownMap.MinAndMaxKnown;
@@ -85,7 +85,7 @@ import static accord.primitives.Route.castToRoute;
 import static accord.primitives.Route.isRoute;
 
 public class CheckStatus extends ParticipantsRequest<Participants<?>, CheckStatus.CheckStatusReply>
-        implements Request, PreLoadContext, MapReduceConsume<SafeCommandStore, CheckStatus.CheckStatusReply>
+        implements Request, ExecutionContext, MapReduceConsume<SafeCommandStore, CheckStatus.CheckStatusReply>
 {
     public static class SerializationSupport
     {

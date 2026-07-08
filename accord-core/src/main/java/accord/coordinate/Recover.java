@@ -23,9 +23,9 @@ import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
-
 import javax.annotation.Nullable;
 
+import accord.api.ExclusiveAsyncExecutor;
 import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.coordinate.ExecuteFlag.CoordinationFlags;
@@ -34,13 +34,8 @@ import accord.coordinate.tracking.RecoveryTracker;
 import accord.local.CommandStores.LatentStoreSelector;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.local.SequentialAsyncExecutor;
 import accord.messages.Accept;
 import accord.messages.Await;
-import accord.primitives.Range;
-import accord.primitives.Ranges;
-import accord.primitives.RoutingKeys;
-import accord.primitives.Status;
 import accord.messages.BeginRecovery;
 import accord.messages.BeginRecovery.RecoverOk;
 import accord.messages.BeginRecovery.RecoverReply;
@@ -52,6 +47,10 @@ import accord.primitives.FullRoute;
 import accord.primitives.LatestDeps;
 import accord.primitives.Participants;
 import accord.primitives.ProgressToken;
+import accord.primitives.Range;
+import accord.primitives.Ranges;
+import accord.primitives.RoutingKeys;
+import accord.primitives.Status;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
@@ -62,10 +61,10 @@ import accord.topology.TopologyException;
 import accord.topology.TopologyMismatch;
 import accord.utils.ArrayBuffers.BufferList;
 import accord.utils.Invariants;
+import accord.utils.Rethrowable;
 import accord.utils.SortedListMap;
 import accord.utils.TinyEnumSet;
 import accord.utils.UnhandledEnum;
-import accord.utils.Rethrowable;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 
@@ -81,8 +80,8 @@ import static accord.coordinate.tracking.RequestStatus.Failed;
 import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.messages.Accept.Kind.SLOW;
 import static accord.messages.Await.Until.CommittedOrNotFastPathCommit;
-import static accord.messages.Await.Until.HasCommittedDeps;
 import static accord.messages.Await.Until.HasDecidedExecuteAt;
+import static accord.messages.Await.Until.HasStableDeps;
 import static accord.messages.BeginRecovery.RecoverOk.maxAccepted;
 import static accord.messages.BeginRecovery.RecoverOk.maxAcceptedNotTruncated;
 import static accord.messages.BeginRecovery.RecoveryFlags.FAST_PATH_DECIDED;
@@ -124,7 +123,7 @@ public class Recover extends AbstractCoordination<FullRoute<?>, Outcome, Recover
 
     private final RecoveryTracker tracker;
 
-    private Recover(Node node, SequentialAsyncExecutor executor, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route,
+    private Recover(Node node, ExclusiveAsyncExecutor executor, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route,
                     @Nullable Timestamp committedExecuteAt, boolean isFastPathDecided, LatentStoreSelector reportTo,
                     BiConsumer<? super Outcome, Throwable> callback)
     {
@@ -188,7 +187,7 @@ public class Recover extends AbstractCoordination<FullRoute<?>, Outcome, Recover
         {
             if (topologies == null || (committedExecuteAt != null && topologies.currentEpoch() != committedExecuteAt.epoch()))
                 topologies = node.topology().active().select(route, txnId, committedExecuteAt == null ? txnId : committedExecuteAt, ALL, QuorumEpochIntersections.recover);
-            recover = new Recover(node, node.someSequentialExecutor(), topologies, ballot, txnId, txn, route, committedExecuteAt, isFastPathDecided, reportTo, callback);
+            recover = new Recover(node, node.someExclusiveExecutor(), topologies, ballot, txnId, txn, route, committedExecuteAt, isFastPathDecided, reportTo, callback);
         }
         catch (Throwable t)
         {
@@ -478,7 +477,9 @@ public class Recover extends AbstractCoordination<FullRoute<?>, Outcome, Recover
                     // we have to be certain these commands have not successfully committed without witnessing us (thereby
                     // ruling out a fast path decision for us and changing our recovery decision).
                     // So, we wait for these commands to commit and recompute supersedingRejects for them.
-                    awaitToFinish(AsyncChains.reduce(awaitSimple(node, simpleWait, HasCommittedDeps),
+                    // TODO (required): we diverge from the paper by preferring phase over ballot, so that we do not move phase backwards;
+                    //  Fedor points out we should therefore wait for Stable rather than Committed deps here (TBC by Lean)
+                    awaitToFinish(AsyncChains.reduce(awaitSimple(node, simpleWait, HasStableDeps),
                                                      awaitSupersedingCoord(node, laterWitnessedCoordRejects, CommittedOrNotFastPathCommit, extraCoordVotes),
                                                      InferredFastPath::merge)
                                              .invokeIfSuccess((inferred) -> {

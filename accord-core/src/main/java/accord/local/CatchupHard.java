@@ -31,7 +31,7 @@ import org.slf4j.LoggerFactory;
 
 import accord.api.DataStore.FetchRanges;
 import accord.coordinate.FetchDurableBefore;
-import accord.local.PreLoadContext.Empty;
+import accord.local.ExecutionContext.Empty;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.SaveStatus;
@@ -142,7 +142,7 @@ public class CatchupHard
         List<AsyncChain<Void>> chains = new ArrayList<>(bounds.size());
         for (TxnId txnId : bounds)
         {
-            chains.add(commandStore.chain(PreLoadContext.contextFor(txnId,"Mark CatchupHard bounds applied"), safeStore -> {
+            chains.add(commandStore.chain(ExecutionContext.unsequenced(txnId, "Mark CatchupHard bounds applied"), safeStore -> {
                 SafeCommand safeCommand = safeStore.get(txnId);
                 Command command = safeCommand.current();
                 if (command.saveStatus() == SaveStatus.PreApplied)

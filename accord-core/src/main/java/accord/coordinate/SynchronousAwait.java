@@ -27,7 +27,7 @@ import accord.coordinate.tracking.QuorumTracker;
 import accord.coordinate.tracking.RequestStatus;
 import accord.coordinate.tracking.SimpleTracker;
 import accord.local.Node;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.messages.Await;
 import accord.primitives.Participants;
 import accord.primitives.TxnId;
@@ -49,7 +49,7 @@ public class SynchronousAwait extends AbstractCoordination<Participants<?>, Bool
     final Await.Until until;
     final boolean notifyProgressLog;
 
-    public SynchronousAwait(Node node, SequentialAsyncExecutor executor, TxnId txnId, Participants<?> participants, SimpleTracker<?> tracker, Await.Until until, boolean notifyProgressLog, BiConsumer<? super Boolean, Throwable> callback)
+    public SynchronousAwait(Node node, ExclusiveAsyncExecutor executor, TxnId txnId, Participants<?> participants, SimpleTracker<?> tracker, Await.Until until, boolean notifyProgressLog, BiConsumer<? super Boolean, Throwable> callback)
     {
         super(node, executor, txnId, participants, tracker.nodes(), callback);
         this.until = until;
@@ -64,7 +64,7 @@ public class SynchronousAwait extends AbstractCoordination<Participants<?>, Bool
         contact(to -> new Await(to, tracker.topologies(), txnId, scope, until, notifyProgressLog));
     }
 
-    public static AsyncChain<Boolean> awaitQuorum(Node node, SequentialAsyncExecutor executor, TxnId txnId, Participants<?> participants, Await.Until until, boolean notifyProgressLog)
+    public static AsyncChain<Boolean> awaitQuorum(Node node, ExclusiveAsyncExecutor executor, TxnId txnId, Participants<?> participants, Await.Until until, boolean notifyProgressLog)
     {
         // TODO (expected): copy this pattern elsewhere; should also make it easier to share exception handling logic etc
         return new AsyncChains.Head<>()

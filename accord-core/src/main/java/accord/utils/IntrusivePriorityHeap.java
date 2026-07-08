@@ -30,34 +30,14 @@ import java.util.stream.Stream;
  * and removed without an intervening poll/peek incurs only constant time costs.
  * @param <N>
  */
-public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node> implements Comparator<N>
+public abstract class IntrusivePriorityHeap<N extends IntrusiveHeapNode> implements Comparator<N>
 {
     private static final int NORMAL_MIN_SIZE = 8;
     private static final int MAX_EMPTY_SIZE = 1024;
-    private static final Node[] EMPTY = new Node[0];
-    private static final Node[] TINY_EMPTY = new Node[0];
+    private static final IntrusiveHeapNode[] EMPTY = new IntrusiveHeapNode[0];
+    private static final IntrusiveHeapNode[] TINY_EMPTY = new IntrusiveHeapNode[0];
 
-    public static abstract class Node
-    {
-        private int heapIndex = -1;
-
-        protected boolean isInHeap()
-        {
-            return heapIndex >= 0;
-        }
-
-        final void setHeapIndex(int heapIndex)
-        {
-            this.heapIndex = heapIndex;
-        }
-
-        protected final int heapIndex()
-        {
-            return heapIndex;
-        }
-    }
-
-    Node[] heap = EMPTY;
+    IntrusiveHeapNode[] heap = EMPTY;
     int heapifiedSize;
     int size;
 
@@ -75,13 +55,13 @@ public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node
     /**
      * insert unsorted; can be used as a simple list
      */
-    protected void append(N node)
+    protected final void appendNode(N node)
     {
         Invariants.require(node.heapIndex() < 0);
         if (size == heap.length)
         {
             if (heap.length >= NORMAL_MIN_SIZE) heap = Arrays.copyOf(heap, size * 2);
-            else if (heap == EMPTY) heap = new Node[NORMAL_MIN_SIZE];
+            else if (heap == EMPTY) heap = new IntrusiveHeapNode[NORMAL_MIN_SIZE];
             else heap = Arrays.copyOf(heap, Math.max(size + 2, size * 2));
         }
 
@@ -90,45 +70,67 @@ public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node
     }
 
     /**
-     * insert unsorted; can be used as a simple list
+     * Maintains heap property ONLY IF ALREADY IMPOSED
+     * Returns -1 if we were empty, and 1 if our head was heapified and we updated it; otherwise returns 0
      */
-    protected void update(N node)
+    protected final int insertNode(N node)
+    {
+        boolean wasHeapified = isHeapified();
+        appendNode(node);
+        if (size == 1)
+            return -1;
+
+        if (!wasHeapified)
+            return 0;
+
+        int result = compare(node, (N)heap[0]) < 0 ? 1 : 0;
+        heapify();
+        return result;
+    }
+
+    /**
+     * Update the ordering of a node; if the node is in the heapified portion, sift it to its correct position.
+     * Return the previous index of the node; if this was unheapified this will be returned as a negative integer,
+     * but if it was heapified it will be a positive integer.
+     */
+    protected final int updateNode(N node)
     {
         int index = node.heapIndex();
         Invariants.require(heap[index] == node);
         if (index >= heapifiedSize)
-            return;
+            return -index;
 
         if (index == 0 || compare((N)heap[(index-1)/2], node) <= 0) siftDown(node, index);
         else siftUp(node, index);
+        return index;
     }
 
-    protected boolean contains(N node)
+    protected final boolean containsNode(N node)
     {
         int i = node.heapIndex();
         return i >= 0 && i < size && heap[i] == node;
     }
 
-    protected boolean removeIfContains(N node)
+    protected final boolean removeNodeIfContains(N node)
     {
         int i = node.heapIndex();
         if (i < 0 || i >= heap.length || heap[i] != node)
             return false;
-        removeInternal(i, node);
+        removeNode(i, node);
         return true;
     }
 
     /**
      * remove; can be used as a simple list
      */
-    protected void remove(N node)
+    protected final void removeNode(N node)
     {
         int i = node.heapIndex();
         Invariants.requireArgument(i >= 0 && i < heap.length && heap[i] == node);
-        removeInternal(i, node);
+        removeNode(i, node);
     }
 
-    private void removeInternal(int i, N node)
+    private void removeNode(int i, N node)
     {
         if (size > 1)
         {
@@ -157,16 +159,16 @@ public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node
         node.setHeapIndex(-1);
     }
 
-    protected N peekNode()
+    protected final N peekNode()
     {
         if (size == 0)
             return null;
 
-        Invariants.require(heapifiedSize == size);
+        Invariants.require(isHeapified());
         return (N) heap[0];
     }
 
-    protected N pollNode()
+    protected final N pollNode()
     {
         if (size == 0)
             return null;
@@ -186,7 +188,7 @@ public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node
         else siftDown(with, i);
     }
 
-    protected void replaceHead()
+    private void replaceHead()
     {
         --size;
         --heapifiedSize;
@@ -204,17 +206,24 @@ public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node
 
     private boolean maybeShrink()
     {
-        if (heap.length <= MAX_EMPTY_SIZE)
+        IntrusiveHeapNode[] shrink = maybeShrink(heap);
+        if (shrink == heap)
             return false;
-
-        heap = new Node[MAX_EMPTY_SIZE];
+        heap = shrink;
         return true;
+    }
+
+    protected IntrusiveHeapNode[] maybeShrink(IntrusiveHeapNode[] current)
+    {
+        if (current.length <= MAX_EMPTY_SIZE)
+            return current;
+        return new IntrusiveHeapNode[MAX_EMPTY_SIZE];
     }
 
     /**
      * {@code i} is a free position in the heap, siftDown must be safely inserted at a position >= i
      */
-    protected void siftDown(N siftDown, int i)
+    private void siftDown(N siftDown, int i)
     {
         while (true)
         {
@@ -288,17 +297,22 @@ public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node
             siftUp((N)heap[heapifiedSize], heapifiedSize++);
     }
 
-    protected N get(int i)
+    protected final N getNode(int i)
     {
         return (N) heap[i];
     }
 
-    public int size()
+    public final int size()
     {
         return size;
     }
 
-    public boolean isEmpty()
+    protected final int heapifiedSize()
+    {
+        return heapifiedSize;
+    }
+
+    protected final boolean isEmptyInternal()
     {
         return size == 0;
     }
@@ -309,7 +323,7 @@ public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node
             heapify();
     }
 
-    protected boolean isHeapified()
+    protected final boolean isHeapified()
     {
         return heapifiedSize == size;
     }
@@ -321,7 +335,12 @@ public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node
         maybeShrink();
     }
 
-    protected <P> void drain(P param, BiConsumer<P, N> consumer)
+    protected final int heapIndex(N node)
+    {
+        return node.heapIndex;
+    }
+
+    protected final <P> void drain(P param, BiConsumer<P, N> consumer)
     {
         for (int i = 0 ; i < size ; ++i)
         {
@@ -336,10 +355,10 @@ public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node
 
     /**
      * Note that this heap immediately passes ownership of any removed node to the caller;
-     * if the Node is not inserted into another heap then {@link Node#setHeapIndex(-1)}
+     * if the Node is not inserted into another heap then {@link IntrusiveHeapNode#setHeapIndex(-1)}
      * should be invoked.
      */
-    protected <P> void filterUnheapified(P param, BiPredicate<P, N> remove)
+    protected final <P> void filterUnheapified(P param, BiPredicate<P, N> remove)
     {
         int removedCount = 0;
         for (int i = heapifiedSize ; i < size ; ++i)
@@ -351,7 +370,7 @@ public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node
             }
             else if (removedCount > 0)
             {
-                Node n = heap[i];
+                IntrusiveHeapNode n = heap[i];
                 heap[i - removedCount] = n;
                 n.heapIndex = i - removedCount;
             }

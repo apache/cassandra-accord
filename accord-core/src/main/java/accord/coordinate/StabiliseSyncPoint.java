@@ -21,7 +21,7 @@ package accord.coordinate;
 import java.util.function.BiConsumer;
 
 import accord.local.Node;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
@@ -33,7 +33,7 @@ import accord.topology.Topologies;
 public class StabiliseSyncPoint<R> extends Stabilise<R>
 {
     final CoordinationAdapter<R> adapter;
-    StabiliseSyncPoint(CoordinationAdapter<R> adapter, Node node, SequentialAsyncExecutor executor, Topologies coordinates, Topologies all, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps unstableDeps, BiConsumer<? super R, Throwable> callback)
+    StabiliseSyncPoint(CoordinationAdapter<R> adapter, Node node, ExclusiveAsyncExecutor executor, Topologies coordinates, Topologies all, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps unstableDeps, BiConsumer<? super R, Throwable> callback)
     {
         super(node, executor, coordinates, all, route, route, txnId, ballot, txn, executeAt, unstableDeps, callback);
         this.adapter = adapter;

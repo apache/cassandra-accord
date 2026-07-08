@@ -28,7 +28,7 @@ import accord.coordinate.tracking.AbstractTracker;
 import accord.coordinate.tracking.DurabilityTracker;
 import accord.coordinate.tracking.RequestStatus;
 import accord.local.Node;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.local.durability.DurabilityResult;
 import accord.local.durability.DurabilityService.SyncRemote;
 import accord.messages.ApplyThenWaitUntilApplied;
@@ -97,12 +97,12 @@ public class ExecuteSyncPoint extends AbstractCoordination<Route<Range>, Durabil
     boolean reportedQuorum, reportedMinorityQuorum, knownToSelf;
     long retryInFutureEpoch;
 
-    protected ExecuteSyncPoint(Node node, SequentialAsyncExecutor executor, Topologies topologies, PartialSyncPoint syncPoint, int attempt, DurabilityResults callback)
+    protected ExecuteSyncPoint(Node node, ExclusiveAsyncExecutor executor, Topologies topologies, PartialSyncPoint syncPoint, int attempt, DurabilityResults callback)
     {
         this(node, executor, topologies, syncPoint, syncPoint.route, attempt, null, callback);
     }
 
-    ExecuteSyncPoint(Node node, SequentialAsyncExecutor executor, Topologies topologies, PartialSyncPoint syncPoint, Route<Range> route, int attempt, DurabilityResult partialResult, DurabilityResults callback)
+    ExecuteSyncPoint(Node node, ExclusiveAsyncExecutor executor, Topologies topologies, PartialSyncPoint syncPoint, Route<Range> route, int attempt, DurabilityResult partialResult, DurabilityResults callback)
     {
         super(node, executor, syncPoint.syncId, route, topologies.nodes(), callback);
         this.syncPoint = syncPoint;
@@ -266,17 +266,17 @@ public class ExecuteSyncPoint extends AbstractCoordination<Route<Range>, Durabil
         return partialResult.min(cur);
     }
 
-    public static DurabilityResults coordinateIncluding(Node node, PartialSyncPoint syncPoint, SequentialAsyncExecutor executor, int attempt)
+    public static DurabilityResults coordinateIncluding(Node node, PartialSyncPoint syncPoint, ExclusiveAsyncExecutor executor, int attempt)
     {
         return coordinate(node, syncPoint, executor, attempt);
     }
 
     public static DurabilityResults coordinate(Node node, SyncPoint syncPoint, int attempt)
     {
-        return coordinate(node, syncPoint, node.someSequentialExecutor(), attempt);
+        return coordinate(node, syncPoint, node.someExclusiveExecutor(), attempt);
     }
 
-    public static DurabilityResults coordinate(Node node, PartialSyncPoint syncPoint, SequentialAsyncExecutor executor, int attempt)
+    public static DurabilityResults coordinate(Node node, PartialSyncPoint syncPoint, ExclusiveAsyncExecutor executor, int attempt)
     {
         DurabilityResults result = new DurabilityResults();
         try

@@ -28,7 +28,7 @@ import accord.coordinate.ExecuteFlag.CoordinationFlags;
 import accord.coordinate.tracking.PreAcceptExclusiveSyncPointTracker;
 import accord.coordinate.tracking.PreAcceptTracker;
 import accord.local.Node;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.local.durability.DurabilityResult;
 import accord.local.durability.DurabilityLevel;
 import accord.messages.Accept;
@@ -70,13 +70,13 @@ public interface CoordinationAdapter<R>
         <R> CoordinationAdapter<R> get(TxnId txnId, Kind kind);
     }
 
-    void propose(Node node, SequentialAsyncExecutor executor, @Nullable Topologies preaccept, FullRoute<?> route, Accept.Kind kind, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super R, Throwable> callback);
-    void proposeOnly(Node node, SequentialAsyncExecutor executor, Route<?> require, Route<?> sendTo, FullRoute<?> route, Accept.Kind kind, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super Deps, Throwable> callback);
-    void stabilise(Node node, SequentialAsyncExecutor executor, @Nullable Topologies any, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super R, Throwable> callback);
-    void stabiliseOnly(Node node, SequentialAsyncExecutor executor, Route<?> require, Route<?> sendTo, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super Deps, Throwable> callback);
-    void execute(Node node, SequentialAsyncExecutor executor, @Nullable Topologies any, FullRoute<?> route, Ballot ballot, ExecutePath path, CoordinationFlags flags, TxnId txnId, Txn txn, Timestamp executeAt, Deps stableDeps, Deps sendDeps, BiConsumer<? super R, Throwable> callback);
-    void persist(Node node, SequentialAsyncExecutor executor, @Nullable Topologies any, Route<?> require, Route<?> sendTo, FullRoute<?> route, Ballot ballot, CoordinationFlags flags, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result, boolean informDurableOnDone, BiConsumer<? super R, Throwable> callback);
-    default void persist(Node node, SequentialAsyncExecutor executor, @Nullable Topologies any, FullRoute<?> route, Ballot ballot, CoordinationFlags flags, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result, BiConsumer<? super R, Throwable> callback)
+    void propose(Node node, ExclusiveAsyncExecutor executor, @Nullable Topologies preaccept, FullRoute<?> route, Accept.Kind kind, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super R, Throwable> callback);
+    void proposeOnly(Node node, ExclusiveAsyncExecutor executor, Route<?> require, Route<?> sendTo, FullRoute<?> route, Accept.Kind kind, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super Deps, Throwable> callback);
+    void stabilise(Node node, ExclusiveAsyncExecutor executor, @Nullable Topologies any, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super R, Throwable> callback);
+    void stabiliseOnly(Node node, ExclusiveAsyncExecutor executor, Route<?> require, Route<?> sendTo, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super Deps, Throwable> callback);
+    void execute(Node node, ExclusiveAsyncExecutor executor, @Nullable Topologies any, FullRoute<?> route, Ballot ballot, ExecutePath path, CoordinationFlags flags, TxnId txnId, Txn txn, Timestamp executeAt, Deps stableDeps, Deps sendDeps, BiConsumer<? super R, Throwable> callback);
+    void persist(Node node, ExclusiveAsyncExecutor executor, @Nullable Topologies any, Route<?> require, Route<?> sendTo, FullRoute<?> route, Ballot ballot, CoordinationFlags flags, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result, boolean informDurableOnDone, BiConsumer<? super R, Throwable> callback);
+    default void persist(Node node, ExclusiveAsyncExecutor executor, @Nullable Topologies any, FullRoute<?> route, Ballot ballot, CoordinationFlags flags, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result, BiConsumer<? super R, Throwable> callback)
     {
         persist(node, executor, any, route, route, route, ballot, flags, txnId, txn, executeAt, deps, writes, result, true, callback);
     }
@@ -137,7 +137,7 @@ public interface CoordinationAdapter<R>
             }
 
             @Override
-            public void propose(Node node, SequentialAsyncExecutor executor, @Nullable Topologies preacceptOrRecovery, FullRoute<?> route, Accept.Kind kind, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
+            public void propose(Node node, ExclusiveAsyncExecutor executor, @Nullable Topologies preacceptOrRecovery, FullRoute<?> route, Accept.Kind kind, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
             {
                 ProposeTxn propose;
                 try
@@ -156,7 +156,7 @@ public interface CoordinationAdapter<R>
             }
 
             @Override
-            public void proposeOnly(Node node, SequentialAsyncExecutor executor, Route<?> require, Route<?> sendTo, FullRoute<?> route, Accept.Kind kind, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super Deps, Throwable> callback)
+            public void proposeOnly(Node node, ExclusiveAsyncExecutor executor, Route<?> require, Route<?> sendTo, FullRoute<?> route, Accept.Kind kind, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super Deps, Throwable> callback)
             {
                 ProposeOnly propose;
                 try
@@ -175,7 +175,7 @@ public interface CoordinationAdapter<R>
             }
 
             @Override
-            public void stabilise(Node node, SequentialAsyncExecutor executor, Topologies accept, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
+            public void stabilise(Node node, ExclusiveAsyncExecutor executor, Topologies accept, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
             {
                 ActiveEpochs epochs = node.topology().active();
                 if (!epochs.hasAtLeastEpoch(executeAt.epoch()))
@@ -211,7 +211,7 @@ public interface CoordinationAdapter<R>
             }
 
             @Override
-            public void stabiliseOnly(Node node, SequentialAsyncExecutor executor, Route<?> require, Route<?> sendTo, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super Deps, Throwable> callback)
+            public void stabiliseOnly(Node node, ExclusiveAsyncExecutor executor, Route<?> require, Route<?> sendTo, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super Deps, Throwable> callback)
             {
                 ActiveEpochs epochs = node.topology().active();
                 if (!epochs.hasAtLeastEpoch(executeAt.epoch()))
@@ -241,7 +241,7 @@ public interface CoordinationAdapter<R>
             }
 
             @Override
-            public void execute(Node node, SequentialAsyncExecutor executor, Topologies any, FullRoute<?> route, Ballot ballot, ExecutePath path, CoordinationFlags flags, TxnId txnId, Txn txn, Timestamp executeAt, Deps stableDeps, Deps sendDeps, BiConsumer<? super Result, Throwable> callback)
+            public void execute(Node node, ExclusiveAsyncExecutor executor, Topologies any, FullRoute<?> route, Ballot ballot, ExecutePath path, CoordinationFlags flags, TxnId txnId, Txn txn, Timestamp executeAt, Deps stableDeps, Deps sendDeps, BiConsumer<? super Result, Throwable> callback)
             {
                 ExecuteTxn execute;
                 try
@@ -286,14 +286,14 @@ public interface CoordinationAdapter<R>
             }
 
             @Override
-            public void persist(Node node, SequentialAsyncExecutor executor, Topologies any, Route<?> require, Route<?> sendTo, FullRoute<?> route, Ballot ballot, CoordinationFlags flags, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result, boolean informDurableOnDone, BiConsumer<? super Result, Throwable> callback)
+            public void persist(Node node, ExclusiveAsyncExecutor executor, Topologies any, Route<?> require, Route<?> sendTo, FullRoute<?> route, Ballot ballot, CoordinationFlags flags, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result, boolean informDurableOnDone, BiConsumer<? super Result, Throwable> callback)
             {
                 if (callback != null) callback.accept(result, null);
 
                 try
                 {
                     Topologies all = execution(node, any, sendTo, route, txnId, executeAt);
-                    new PersistTxn(node, executor, all, txnId, ballot, require, txn, executeAt, deps, writes, result.toPersistable(), route, flags, informDurableOnDone, Apply.FACTORY, applyKind)
+                    new PersistTxn(node, executor, all, txnId, ballot, require, txn, executeAt, deps, writes, result == null ? null : result.toPersistable(), route, flags, informDurableOnDone, Apply.FACTORY, applyKind)
                     .start();
                 }
                 catch (TopologyException e)
@@ -325,7 +325,7 @@ public interface CoordinationAdapter<R>
             abstract void invokeSuccess(Node node, FullRoute<?> route, TxnId txnId, Timestamp executeAt, Txn txn, Deps deps, BiConsumer<? super R, Throwable> callback);
 
             @Override
-            public void propose(Node node, SequentialAsyncExecutor executor, Topologies any, FullRoute<?> route, Accept.Kind kind, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super R, Throwable> callback)
+            public void propose(Node node, ExclusiveAsyncExecutor executor, Topologies any, FullRoute<?> route, Accept.Kind kind, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super R, Throwable> callback)
             {
                 ProposeSyncPoint<R> propose;
                 try
@@ -342,7 +342,7 @@ public interface CoordinationAdapter<R>
             }
 
             @Override
-            public void proposeOnly(Node node, SequentialAsyncExecutor executor, Route<?> require, Route<?> sendTo, FullRoute<?> route, Accept.Kind kind, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super Deps, Throwable> callback)
+            public void proposeOnly(Node node, ExclusiveAsyncExecutor executor, Route<?> require, Route<?> sendTo, FullRoute<?> route, Accept.Kind kind, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super Deps, Throwable> callback)
             {
                 ProposeOnly propose;
                 try
@@ -359,7 +359,7 @@ public interface CoordinationAdapter<R>
             }
 
             @Override
-            public void stabilise(Node node, SequentialAsyncExecutor executor, Topologies any, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super R, Throwable> callback)
+            public void stabilise(Node node, ExclusiveAsyncExecutor executor, Topologies any, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super R, Throwable> callback)
             {
                 StabiliseSyncPoint<R> stabilise;
                 try
@@ -377,7 +377,7 @@ public interface CoordinationAdapter<R>
             }
 
             @Override
-            public void stabiliseOnly(Node node, SequentialAsyncExecutor executor, Route<?> require, Route<?> sendTo, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super Deps, Throwable> callback)
+            public void stabiliseOnly(Node node, ExclusiveAsyncExecutor executor, Route<?> require, Route<?> sendTo, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super Deps, Throwable> callback)
             {
                 StabiliseOnly stabilise;
                 try
@@ -395,13 +395,13 @@ public interface CoordinationAdapter<R>
             }
 
             @Override
-            public void execute(Node node, SequentialAsyncExecutor executor, Topologies any, FullRoute<?> route, Ballot ballot, ExecutePath path, CoordinationFlags flags, TxnId txnId, Txn txn, Timestamp executeAt, Deps stableDeps, Deps sendDeps, BiConsumer<? super R, Throwable> callback)
+            public void execute(Node node, ExclusiveAsyncExecutor executor, Topologies any, FullRoute<?> route, Ballot ballot, ExecutePath path, CoordinationFlags flags, TxnId txnId, Txn txn, Timestamp executeAt, Deps stableDeps, Deps sendDeps, BiConsumer<? super R, Throwable> callback)
             {
                 persist(node, executor, null, route, ballot, flags, txnId, txn, executeAt, stableDeps, null, txn.result(txnId, executeAt, null), callback);
             }
 
             @Override
-            public void persist(Node node, SequentialAsyncExecutor executor, Topologies ignore, Route<?> require, Route<?> sendTo, FullRoute<?> route, Ballot ballot, CoordinationFlags flags, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result, boolean informDurableOnDone, BiConsumer<? super R, Throwable> callback)
+            public void persist(Node node, ExclusiveAsyncExecutor executor, Topologies ignore, Route<?> require, Route<?> sendTo, FullRoute<?> route, Ballot ballot, CoordinationFlags flags, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result, boolean informDurableOnDone, BiConsumer<? super R, Throwable> callback)
             {
                 invokeSuccess(node, route, txnId, executeAt, txn, deps, callback);
 
@@ -438,7 +438,7 @@ public interface CoordinationAdapter<R>
             }
 
             @Override
-            public void execute(Node node, SequentialAsyncExecutor executor, Topologies any, FullRoute<?> route, Ballot ballot, ExecutePath path, CoordinationFlags flags, TxnId txnId, Txn txn, Timestamp executeAt, Deps stableDeps, Deps sendDeps, BiConsumer<? super R, Throwable> callback)
+            public void execute(Node node, ExclusiveAsyncExecutor executor, Topologies any, FullRoute<?> route, Ballot ballot, ExecutePath path, CoordinationFlags flags, TxnId txnId, Txn txn, Timestamp executeAt, Deps stableDeps, Deps sendDeps, BiConsumer<? super R, Throwable> callback)
             {
                 // We cannot use the fast path for sync points as their visibility is asymmetric wrt other transactions,
                 // so we could recover to include different transactions than those we fast path committed with.

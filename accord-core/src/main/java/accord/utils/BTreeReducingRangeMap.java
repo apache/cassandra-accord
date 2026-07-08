@@ -35,7 +35,6 @@ import java.util.stream.StreamSupport;
 
 import javax.annotation.Nonnull;
 
-import static accord.utils.Invariants.require;
 import static accord.utils.Invariants.requireArgument;
 
 /**

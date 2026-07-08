@@ -29,7 +29,7 @@ import accord.coordinate.ExecuteFlag.ExecuteFlags;
 import accord.coordinate.tracking.AbstractTracker;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.local.Node;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.messages.GetEphemeralReadDeps;
 import accord.messages.GetEphemeralReadDeps.GetEphemeralReadDepsOk;
 import accord.primitives.Deps;
@@ -86,7 +86,7 @@ public class CoordinateEphemeralRead extends AbstractCoordinatePreAccept<Result,
         {
             FullRoute<?> route = node.computeRoute(txnId, txn.keys());
             Topologies topologies = node.topology().active().withUnsyncedEpochs(route, txnId, txnId);
-            coordinate = new CoordinateEphemeralRead(node, node.someSequentialExecutor(), topologies, route, txnId, txn, callback);
+            coordinate = new CoordinateEphemeralRead(node, node.someExclusiveExecutor(), topologies, route, txnId, txn, callback);
         }
         catch (Throwable t)
         {
@@ -102,7 +102,7 @@ public class CoordinateEphemeralRead extends AbstractCoordinatePreAccept<Result,
     private long executeAtEpoch;
     private long retryInEpoch;
 
-    CoordinateEphemeralRead(Node node, SequentialAsyncExecutor executor, Topologies topologies, FullRoute<?> route, TxnId txnId, Txn txn, BiConsumer<? super Result, Throwable> callback)
+    CoordinateEphemeralRead(Node node, ExclusiveAsyncExecutor executor, Topologies topologies, FullRoute<?> route, TxnId txnId, Txn txn, BiConsumer<? super Result, Throwable> callback)
     {
         super(node, executor, topologies, route, txnId, callback);
         this.txn = txn;

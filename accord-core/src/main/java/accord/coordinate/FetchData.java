@@ -24,7 +24,7 @@ import accord.api.Tracing;
 import accord.coordinate.Infer.InvalidIf;
 import accord.local.CommandStores.LatentStoreSelector;
 import accord.local.Node;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.primitives.Known;
 import accord.messages.CheckStatus;
 import accord.messages.CheckStatus.CheckStatusOkFull;
@@ -70,7 +70,7 @@ public class FetchData extends CheckShards<FetchData.FetchResult, Route<?>>
     // TODO (expected): separate keys we fetch deps and txns for
     public static class FetchRequest implements BiConsumer<FetchResult, Throwable>
     {
-        final SequentialAsyncExecutor executor;
+        final ExclusiveAsyncExecutor executor;
         final Known fetch;
         final TxnId txnId;
         final InvalidIf invalidIf;
@@ -82,7 +82,7 @@ public class FetchData extends CheckShards<FetchData.FetchResult, Route<?>>
         final BiConsumer<? super FetchResult, Throwable> callback;
         final @Nullable Tracing tracing;
 
-        public FetchRequest(SequentialAsyncExecutor executor, Known fetch, TxnId txnId, InvalidIf invalidIf, @Nullable Timestamp executeAt, Participants<?> contactable, LatentStoreSelector reportTo, BiConsumer<? super FetchResult, Throwable> callback, @Nullable Tracing tracing)
+        public FetchRequest(ExclusiveAsyncExecutor executor, Known fetch, TxnId txnId, InvalidIf invalidIf, @Nullable Timestamp executeAt, Participants<?> contactable, LatentStoreSelector reportTo, BiConsumer<? super FetchResult, Throwable> callback, @Nullable Tracing tracing)
         {
             this.executor = executor;
             this.fetch = fetch;
@@ -116,7 +116,7 @@ public class FetchData extends CheckShards<FetchData.FetchResult, Route<?>>
      */
     public static Object fetchSpecific(Known fetch, Node node, TxnId txnId, InvalidIf invalidIf, @Nullable Timestamp executeAt, Route<?> query, Route<?> maxRoute, LatentStoreSelector reportTo, BiConsumer<? super FetchResult, Throwable> callback)
     {
-        return fetchSpecific(node, query, maxRoute, new FetchRequest(node.someSequentialExecutor(), fetch, txnId, invalidIf, executeAt, maxRoute, reportTo, callback, null));
+        return fetchSpecific(node, query, maxRoute, new FetchRequest(node.someExclusiveExecutor(), fetch, txnId, invalidIf, executeAt, maxRoute, reportTo, callback, null));
     }
 
     public static Object fetchSpecific(Node node, Route<?> query, Route<?> maxRoute, FetchRequest request)
@@ -151,7 +151,7 @@ public class FetchData extends CheckShards<FetchData.FetchResult, Route<?>>
     private FetchData(Node node, Known target, TxnId txnId, InvalidIf invalidIf, Route<?> route, Route<?> routeWithHomeKey, Route<?> maxRoute, long sourceEpoch, LatentStoreSelector reportTo, BiConsumer<? super FetchResult, Throwable> callback) throws TopologyException
     {
         // TODO (desired, efficiency): restore behaviour of only collecting info if e.g. Committed or Executed
-        super(node, node.someSequentialExecutor(), txnId, routeWithHomeKey, sourceEpoch, CheckStatus.IncludeInfo.All, null, invalidIf, callback);
+        super(node, node.someExclusiveExecutor(), txnId, routeWithHomeKey, sourceEpoch, CheckStatus.IncludeInfo.All, null, invalidIf, callback);
         this.reportTo = reportTo;
         this.maxRoute = maxRoute;
         Invariants.requireArgument(routeWithHomeKey.contains(route.homeKey()), "route %s does not contain %s", routeWithHomeKey, route.homeKey());

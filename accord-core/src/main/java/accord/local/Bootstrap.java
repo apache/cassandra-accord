@@ -104,7 +104,7 @@ class Bootstrap
             if (!node.topology().active().hasAtLeastEpoch(globalSyncId.epoch()))
             {
                 // Ignore timeouts fetching the epoch, always keep trying to bootstrap
-                node.withEpochAtLeast(globalSyncId.epoch(), null, (ignored, failure) -> commandStore.execute((PreLoadContext.Empty) () -> "Start Bootstrap", (Consumer<SafeCommandStore>) Attempt.this::start, (ignored1, failure2) -> {
+                node.withEpochAtLeast(globalSyncId.epoch(), null, (ignored, failure) -> commandStore.execute((ExecutionContext.Empty) () -> "Start Bootstrap", (Consumer<SafeCommandStore>) Attempt.this::start, (ignored1, failure2) -> {
                     if (failure2 != null)
                         node.agent().acceptAndWrap(null, failure2);
                 }));
@@ -117,14 +117,14 @@ class Bootstrap
             safeStore = safeStore;
             CommandStore commandStore = safeStore.commandStore();
             CoordinateSyncPoint.exclusive(node, globalSyncId, commitRanges)
-                               .flatMap(success -> commandStore.chain((PreLoadContext.Empty) () -> "Mark Bootstrapping", safeStore0 -> {
+                               .flatMap(success -> commandStore.chain((ExecutionContext.Empty) () -> "Mark Bootstrapping", safeStore0 -> {
 
                                    // we submit a separate execution so that we know markBootstrapping is durable before we initiate the fetch
                                    if (!valid.isEmpty())
                                        commandStore.markBootstrapping(safeStore0, globalSyncId, valid);
                                    return success;
                                }))
-                               .flatMap(syncPoint -> node.withEpochAtLeast(epoch, null, () -> commandStore.chain((PreLoadContext.Empty) () -> "Start Bootstrap Fetch", safeStore1 -> {
+                               .flatMap(syncPoint -> node.withEpochAtLeast(epoch, null, () -> commandStore.chain((ExecutionContext.Empty) () -> "Start Bootstrap Fetch", safeStore1 -> {
                                    if (valid.isEmpty()) // we've lost ownership of the range
                                        return AsyncResults.success(Ranges.EMPTY);
                                    return fetch = safeStore1.dataStore().fetch(node, safeStore1, valid, syncPoint, this, Image);
@@ -139,7 +139,7 @@ class Bootstrap
         {
             Runnable retry = () -> {
                 node.scheduler().selfRecurring(() -> {
-                    commandStore.execute((PreLoadContext.Empty) () -> "Restart Bootstrap", safeStore -> {
+                    commandStore.execute((ExecutionContext.Empty) () -> "Restart Bootstrap", safeStore -> {
                         restart(safeStore, newlyFailed.slice(allValid, Minimal), attempt + 1);
                     }, commandStore.agent());
                 }, 0L, TimeUnit.NANOSECONDS);
@@ -174,7 +174,7 @@ class Bootstrap
             {
                 Runnable retry = () -> {
                     node.scheduler().selfRecurring(() -> {
-                        commandStore.execute((PreLoadContext.Empty) () -> "Restart Bootstrap", safeStore -> {
+                        commandStore.execute((ExecutionContext.Empty) () -> "Restart Bootstrap", safeStore -> {
                             restart(safeStore, missing, attempt + 1);
                         }, node.agent());
                     }, 0L, TimeUnit.NANOSECONDS);

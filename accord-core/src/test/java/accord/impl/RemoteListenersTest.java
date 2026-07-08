@@ -48,7 +48,7 @@ import accord.local.CommandStore;
 import accord.local.CommandStores;
 import accord.local.Node;
 import accord.local.NodeCommandStoreService;
-import accord.local.PreLoadContext;
+import accord.local.ExecutionContext;
 import accord.local.RedundantBefore;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
@@ -66,6 +66,7 @@ import accord.utils.AccordGens;
 import accord.utils.RandomSource;
 import accord.utils.RandomTestRunner;
 import accord.utils.async.AsyncChain;
+
 import org.agrona.collections.IntHashSet;
 import org.agrona.collections.ObjectHashSet;
 
@@ -411,8 +412,10 @@ public class RemoteListenersTest
 
         @Override protected void ensureDurable(Ranges ranges, RedundantBefore onCommandStoreDurable) {}
         @Override public boolean inStore() { return true; }
-        @Override public AsyncChain<Void> chain(PreLoadContext context, Consumer<? super SafeCommandStore> consumer) { return null; }
-        @Override public <T> AsyncChain<T> chain(PreLoadContext context, Function<? super SafeCommandStore, T> apply) { return null; }
+        @Override public AsyncChain<Void> chain(ExecutionContext context, Consumer<? super SafeCommandStore> consumer) { return null; }
+        @Override public <T> AsyncChain<T> chain(ExecutionContext context, Function<? super SafeCommandStore, T> apply) { return null; }
+        @Override public AsyncChain<Void> continuationChain(ExecutionContext context, Consumer<? super SafeCommandStore> consumer) { return null; }
+        @Override public <T> AsyncChain<T> continuationChain(ExecutionContext context, Function<? super SafeCommandStore, T> apply) { return null; }
         @Override public void shutdown() {}
         @Override public <T> AsyncChain<T> chain(Callable<T> call) { return null; }
         @Override public void execute(Runnable run) { throw new UnsupportedOperationException(); }
@@ -434,8 +437,8 @@ public class RemoteListenersTest
         @Override protected SafeCommandsForKey getInternal(RoutingKey key) { return null;}
         @Override protected SafeCommandsForKey ifLoadedInternal(RoutingKey key) { return null;}
 
-        @Override public PreLoadContext canExecute(PreLoadContext context) { return null;}
-        @Override public PreLoadContext context() { return null; }
+        @Override public ExecutionContext canExecute(ExecutionContext context) { return null;}
+        @Override public ExecutionContext context() { return null; }
         @Override protected void persistFieldUpdates() {}
 
         @Override

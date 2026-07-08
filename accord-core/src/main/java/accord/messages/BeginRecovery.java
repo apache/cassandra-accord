@@ -267,6 +267,12 @@ public class BeginRecovery extends RouteRequest.WithUnsynced<BeginRecovery.Recov
     }
 
     @Override
+    public ExecutionKind executionKind()
+    {
+        return ExecutionKind.PREACCEPT;
+    }
+
+    @Override
     public LoadKeysFor loadKeysFor()
     {
         if (recoverFastPath())

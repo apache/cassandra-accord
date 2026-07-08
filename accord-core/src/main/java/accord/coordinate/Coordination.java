@@ -23,7 +23,7 @@ import javax.annotation.Nullable;
 import accord.api.Tracing;
 import accord.coordinate.tracking.AbstractTracker;
 import accord.local.Node.Id;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.primitives.Ballot;
 import accord.primitives.Participants;
 import accord.primitives.TxnId;
@@ -73,7 +73,7 @@ public interface Coordination
 
     default @Nullable SortedListMap<Id, ?> replies() { return null; }
 
-    SequentialAsyncExecutor executor();
+    ExclusiveAsyncExecutor executor();
 
     /**
      * Try to abort the coordination; must be invoked by {@link #executor}

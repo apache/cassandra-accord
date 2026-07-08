@@ -39,7 +39,7 @@ import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.local.StoreParticipants;
 import accord.local.cfk.CommandsForKey;
 import accord.local.cfk.CommandsForKey.TxnInfo;
@@ -201,7 +201,7 @@ public class ExecuteTxn extends ReadCoordinator<Result, ReadReply>
     private long uniqueHlc;
     private boolean isPrivilegedVoteCommitting;
 
-    ExecuteTxn(Node node, SequentialAsyncExecutor executor, Topologies topologies, FullRoute<?> route, Ballot ballot, ExecutePath path, CoordinationFlags flags, TxnId txnId, Txn txn, Timestamp executeAt, Deps stableDeps, Deps sendDeps, BiConsumer<? super Result, Throwable> callback)
+    ExecuteTxn(Node node, ExclusiveAsyncExecutor executor, Topologies topologies, FullRoute<?> route, Ballot ballot, ExecutePath path, CoordinationFlags flags, TxnId txnId, Txn txn, Timestamp executeAt, Deps stableDeps, Deps sendDeps, BiConsumer<? super Result, Throwable> callback)
     {
         super(node, executor, topologies.forEpoch(executeAt.epoch()), txnId, route, callback);
         if (!ballot.equals(Ballot.ZERO))
@@ -513,7 +513,7 @@ public class ExecuteTxn extends ReadCoordinator<Result, ReadReply>
 
     private void onExternalSuccess(Result result)
     {
-        executor.execute(() -> {
+        executor.executeMaybeImmediately(() -> {
             if (!trySetDone())
                 return;
 

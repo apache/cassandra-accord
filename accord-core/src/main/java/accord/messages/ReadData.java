@@ -211,6 +211,11 @@ public abstract class ReadData extends AbstractRequest<Participants<?>, ReadData
         return executeAtEpoch;
     }
 
+    public ExecutionKind executionKind()
+    {
+        return ExecutionKind.STABLE;
+    }
+
     @Override
     public final Cancellable process(Node on, Node.Id replyTo, ReplyContext replyContext)
     {
@@ -475,7 +480,7 @@ public abstract class ReadData extends AbstractRequest<Participants<?>, ReadData
         return unavailable(txnId, executeAt, scope, unsafeStore.unsafeGetRangesForEpoch(), unsafeStore.unsafeGetSafeToRead());
     }
 
-    static Ranges unavailable(TxnId txnId, Timestamp executeAt, Participants<?> scope, CommandStores.RangesForEpoch ranges, NavigableMap<Timestamp, Ranges> safeToReadAt)
+    public static Ranges unavailable(TxnId txnId, Timestamp executeAt, Participants<?> scope, CommandStores.RangesForEpoch ranges, NavigableMap<Timestamp, Ranges> safeToReadAt)
     {
         // note: syncpoints and ephemeral reads simply consume the latest information (whatever it is),
         //  which is represented by the latest possible safeToRead entry (which is only updated on successful bootstrap)

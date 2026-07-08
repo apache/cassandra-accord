@@ -99,7 +99,7 @@ public class Catchup
         {
             //noinspection DataFlowIssue
             safeStore = safeStore;
-            PreLoadContext ctx = PreLoadContext.contextFor(txnId, "Catchup");
+            ExecutionContext ctx = ExecutionContext.unsequenced(txnId, "Catchup");
             if (safeStore.canExecuteWith(ctx)) markWaiting(safeStore, safeStore.get(txnId), range);
             else safeStore.commandStore().execute(ctx, (Consumer<? super SafeCommandStore>) safeStore0 -> markWaiting(safeStore0, safeStore0.get(txnId), range), safeStore.agent());
         }
@@ -182,7 +182,7 @@ public class Catchup
             List<AsyncChain<CommandStoreListener>> chains = new ArrayList<>();
             for (CommandStore commandStore : commandStores)
             {
-                chains.add(commandStore.chain((PreLoadContext.Empty)() -> "Catchup", safeStore -> {
+                chains.add(commandStore.chain((ExecutionContext.Empty)() -> "Catchup", safeStore -> {
                     CommandStoreListener listener = new CommandStoreListener(durableBefore);
                     if (listener.register(safeStore))
                         return listener;

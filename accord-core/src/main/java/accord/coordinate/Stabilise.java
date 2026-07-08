@@ -25,7 +25,7 @@ import accord.coordinate.tracking.AbstractTracker;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.coordinate.tracking.RequestStatus;
 import accord.local.Node;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.messages.Callback;
 import accord.messages.Commit;
 import accord.messages.ReadData.CommitOrReadNack;
@@ -60,7 +60,7 @@ public abstract class Stabilise<R> extends AbstractCoordination<FullRoute<?>, R,
     final QuorumTracker tracker;
     final Topologies allTopologies;
 
-    public Stabilise(Node node, SequentialAsyncExecutor executor, Topologies coordinates, Topologies allTopologies, Route<?> sendTo, FullRoute<?> route, TxnId txnId, Ballot ballot, Txn txn, Timestamp executeAt, Deps stabiliseDeps, BiConsumer<? super R, Throwable> callback)
+    public Stabilise(Node node, ExclusiveAsyncExecutor executor, Topologies coordinates, Topologies allTopologies, Route<?> sendTo, FullRoute<?> route, TxnId txnId, Ballot ballot, Txn txn, Timestamp executeAt, Deps stabiliseDeps, BiConsumer<? super R, Throwable> callback)
     {
         super(node, executor, txnId, route, coordinates.nodes(), callback);
         this.txn = txn;

@@ -16,17 +16,11 @@
  * limitations under the License.
  */
 
-package accord.impl;
+package accord.api;
 
 /**
- * State scoped to a single request that references global state
+ * A single-threaded AsyncExecutor
  */
-public interface SafeState<T>
+public interface ExclusiveAsyncExecutor extends AsyncExecutor
 {
-    T current();
-
-    default boolean isUnset()
-    {
-        return current() == null;
-    }
 }

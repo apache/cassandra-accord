@@ -32,9 +32,19 @@ public class UnhandledEnum extends AssertionError
         super(prefix + value.getClass().getSimpleName() + ": " + value);
     }
 
+    private UnhandledEnum(String prefix, @Nonnull Enum<?> value, String explain)
+    {
+        super(prefix + value.getClass().getSimpleName() + ": " + value + ". " + explain + '.');
+    }
+
     public static UnhandledEnum invalid(@Nonnull Enum<?> value)
     {
         return new UnhandledEnum("Invalid ", value);
+    }
+
+    public static UnhandledEnum invalid(@Nonnull Enum<?> value, String explain)
+    {
+        return new UnhandledEnum("Invalid ", value, explain);
     }
 
     public static UnhandledEnum unknown(@Nonnull Enum<?> value)

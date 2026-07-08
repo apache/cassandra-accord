@@ -35,7 +35,7 @@ import accord.coordinate.tracking.SimpleTracker;
 import accord.local.Commands.AcceptOutcome;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.messages.Accept;
 import accord.messages.Accept.AcceptFlags;
 import accord.messages.Accept.AcceptReply;
@@ -77,7 +77,7 @@ abstract class Propose<R> extends AbstractCoordination<FullRoute<?>, R, AcceptRe
     final PreAcceptTracker<?> tracker;
     final int acceptFlags;
 
-    Propose(Node node, SequentialAsyncExecutor executor, Topologies topologies, Accept.Kind kind, Ballot ballot, TxnId txnId, Txn txn, Route<?> require, FullRoute<?> route, Timestamp executeAt, Deps deps, BiConsumer<? super R, Throwable> callback)
+    Propose(Node node, ExclusiveAsyncExecutor executor, Topologies topologies, Accept.Kind kind, Ballot ballot, TxnId txnId, Txn txn, Route<?> require, FullRoute<?> route, Timestamp executeAt, Deps deps, BiConsumer<? super R, Throwable> callback)
     {
         super(node, executor, txnId, route, topologies.nodes(), callback);
         this.kind = kind;
@@ -249,7 +249,7 @@ abstract class Propose<R> extends AbstractCoordination<FullRoute<?>, R, AcceptRe
 
         private final SimpleTracker<?> tracker;
 
-        NotAccept(Node node, SequentialAsyncExecutor executor, Status status, Topologies topologies, Ballot ballot, TxnId txnId, Participants<?> someParticipants, BiConsumer<Void, Throwable> callback)
+        NotAccept(Node node, ExclusiveAsyncExecutor executor, Status status, Topologies topologies, Ballot ballot, TxnId txnId, Participants<?> someParticipants, BiConsumer<Void, Throwable> callback)
         {
             super(node, executor, txnId, someParticipants, topologies.nodes(), callback);
             this.status = status;
@@ -265,12 +265,12 @@ abstract class Propose<R> extends AbstractCoordination<FullRoute<?>, R, AcceptRe
             contact(to -> new Accept.NotAccept(status, ballot, txnId, scope));
         }
 
-        public static void proposeInvalidate(Node node, SequentialAsyncExecutor executor, Ballot ballot, TxnId txnId, RoutingKey invalidateWithParticipant, BiConsumer<Void, Throwable> callback)
+        public static void proposeInvalidate(Node node, ExclusiveAsyncExecutor executor, Ballot ballot, TxnId txnId, RoutingKey invalidateWithParticipant, BiConsumer<Void, Throwable> callback)
         {
             proposeNotAccept(node, executor, AcceptedInvalidate, ballot, txnId, invalidateWithParticipant, callback);
         }
 
-        public static void proposeNotAccept(Node node, SequentialAsyncExecutor executor, Status status, Ballot ballot, TxnId txnId, RoutingKey participatingKey, BiConsumer<Void, Throwable> callback)
+        public static void proposeNotAccept(Node node, ExclusiveAsyncExecutor executor, Status status, Ballot ballot, TxnId txnId, RoutingKey participatingKey, BiConsumer<Void, Throwable> callback)
         {
             try
             {
@@ -285,7 +285,7 @@ abstract class Propose<R> extends AbstractCoordination<FullRoute<?>, R, AcceptRe
             }
         }
 
-        public static void proposeAndCommitInvalidate(Node node, SequentialAsyncExecutor executor, Ballot ballot, TxnId txnId, RoutingKey invalidateWithParticipant, Route<?> commitInvalidationTo, Timestamp invalidateUntil, @Nullable Tracing tracing, BiConsumer<?, Throwable> callback)
+        public static void proposeAndCommitInvalidate(Node node, ExclusiveAsyncExecutor executor, Ballot ballot, TxnId txnId, RoutingKey invalidateWithParticipant, Route<?> commitInvalidationTo, Timestamp invalidateUntil, @Nullable Tracing tracing, BiConsumer<?, Throwable> callback)
         {
             proposeInvalidate(node, executor, ballot, txnId, invalidateWithParticipant, (success, fail) -> {
                 if (fail != null)

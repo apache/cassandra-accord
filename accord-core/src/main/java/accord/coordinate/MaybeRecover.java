@@ -21,7 +21,7 @@ package accord.coordinate;
 import java.util.function.BiConsumer;
 
 import accord.local.CommandStores.LatentStoreSelector;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.messages.InformDurable;
 import accord.primitives.*;
 import accord.topology.TopologyException;
@@ -47,7 +47,7 @@ public class MaybeRecover extends CheckShards<Outcome, Route<?>>
     final boolean recoverIfAlreadyDurable;
     final LatentStoreSelector reportTo;
 
-    MaybeRecover(Node node, SequentialAsyncExecutor executor, TxnId txnId, Infer.InvalidIf invalidIf, Route<?> someRoute, ProgressToken prevProgress, boolean recoverIfAlreadyDurable, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback) throws TopologyException
+    MaybeRecover(Node node, ExclusiveAsyncExecutor executor, TxnId txnId, Infer.InvalidIf invalidIf, Route<?> someRoute, ProgressToken prevProgress, boolean recoverIfAlreadyDurable, LatentStoreSelector reportTo, BiConsumer<? super Outcome, Throwable> callback) throws TopologyException
     {
         // we only want to enquire with the home shard, but we prefer maximal route information for running Invalidation against, if necessary
         super(node, executor, txnId, someRoute.withHomeKey(), IncludeInfo.Route, null, invalidIf, callback);
@@ -60,7 +60,7 @@ public class MaybeRecover extends CheckShards<Outcome, Route<?>>
         MaybeRecover maybeRecover;
         try
         {
-            maybeRecover = new MaybeRecover(node, node.someSequentialExecutor(), txnId, invalidIf, someRoute, prevProgress, recoverIfAlreadyDurable, reportTo, callback);
+            maybeRecover = new MaybeRecover(node, node.someExclusiveExecutor(), txnId, invalidIf, someRoute, prevProgress, recoverIfAlreadyDurable, reportTo, callback);
         }
         catch (Throwable t)
         {

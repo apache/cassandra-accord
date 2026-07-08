@@ -37,27 +37,16 @@ import accord.utils.Invariants;
 import static accord.local.StoreParticipants.Filter.LOAD;
 import static accord.primitives.Status.Stable;
 
-public abstract class SafeCommand
+public abstract class SafeCommand extends SafeState<Command>
 {
-    private final TxnId txnId;
+    public final TxnId txnId;
 
     public SafeCommand(TxnId txnId)
     {
         this.txnId = txnId;
     }
 
-    public abstract Command current();
-    public abstract void markUnsafe();
-    public abstract boolean isUnsafe();
-
-    public boolean isUnset()
-    {
-        return current() == null;
-    }
-
-    protected abstract void set(Command command);
-
-    public TxnId txnId()
+    public final TxnId txnId()
     {
         return txnId;
     }
@@ -119,9 +108,9 @@ public abstract class SafeCommand
         return incidentalUpdate(current().updatePromised(promised));
     }
 
-    public Command.Accepted accept(SafeCommandStore safeStore, SaveStatus status, @Nonnull StoreParticipants participants, Ballot promised, Timestamp executeAt, PartialTxn partialTxn, PartialDeps partialDeps, Ballot acceptedOrCommitted)
+    public Command.Accepted accept(SafeCommandStore safeStore, TxnId txnId, SaveStatus status, @Nonnull StoreParticipants participants, Ballot promised, Timestamp executeAt, PartialTxn partialTxn, PartialDeps partialDeps, Ballot acceptedOrCommitted)
     {
-        return update(safeStore, Command.accept(current(), status, participants, promised, executeAt, partialTxn, partialDeps, acceptedOrCommitted));
+        return update(safeStore, Command.accept(current(), txnId, status, participants, promised, executeAt, partialTxn, partialDeps, acceptedOrCommitted));
     }
 
     public Command notAccept(SafeCommandStore safeStore, Status status, Ballot ballot)
@@ -193,18 +182,10 @@ public abstract class SafeCommand
         return update(safeStore, Command.applied(current(), participants, executeAt, partialTxn, partialDeps, waitingOn, writes, result));
     }
 
-    public Command.NotDefined uninitialised()
+    protected void initialise()
     {
-        Invariants.requireArgument(current() == null);
-        return incidentalUpdate(Command.NotDefined.uninitialised(txnId));
-    }
-
-    public Command initialise()
-    {
-        Command current = current();
-        if (!current.saveStatus().isUninitialised())
-            return current;
-        return incidentalUpdate(Command.NotDefined.notDefined(current, current.promised()));
+        Invariants.require(isUninitialised());
+        current = Command.NotDefined.uninitialised(txnId);
     }
 
     public static @Nullable Participants<?> maxParticipants(@Nullable SafeCommand safeCommand)

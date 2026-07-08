@@ -36,7 +36,7 @@ import accord.api.RoutingKey;
 import accord.coordinate.CollectLatestDeps;
 import accord.coordinate.CoordinationAdapter;
 import accord.local.Node;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.primitives.Known.KnownDeps;
 import accord.topology.SelectShards;
 import accord.utils.Invariants;
@@ -66,7 +66,7 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
         }
     }
 
-    public static void withCommitted(CoordinationAdapter<?> adapter, Node node, SequentialAsyncExecutor executor, Merge merge, FullRoute<?> route, Ballot ballot, TxnId txnId, Timestamp executeAt, Txn txn, BiConsumer<?, Throwable> failureCallback, Consumer<Deps> withDeps)
+    public static void withCommitted(CoordinationAdapter<?> adapter, Node node, ExclusiveAsyncExecutor executor, Merge merge, FullRoute<?> route, Ballot ballot, TxnId txnId, Timestamp executeAt, Txn txn, BiConsumer<?, Throwable> failureCallback, Consumer<Deps> withDeps)
     {
         if (!node.topology().active().hasAtLeastEpoch(executeAt.epoch()))
         {
@@ -93,7 +93,7 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
         }
     }
 
-    public static void withStable(CoordinationAdapter<?> adapter, Node node, SequentialAsyncExecutor executor, Merge merge, Deps alreadyStableDeps, Route<?> require, @Nullable Route<?> sendTo, @Nullable SelectShards selectSendTo, FullRoute<?> route, Ballot ballot, TxnId txnId, Timestamp executeAt, Txn txn, BiConsumer<?, ? super Throwable> failureCallback, Consumer<Deps> withDeps)
+    public static void withStable(CoordinationAdapter<?> adapter, Node node, ExclusiveAsyncExecutor executor, Merge merge, Deps alreadyStableDeps, Route<?> require, @Nullable Route<?> sendTo, @Nullable SelectShards selectSendTo, FullRoute<?> route, Ballot ballot, TxnId txnId, Timestamp executeAt, Txn txn, BiConsumer<?, ? super Throwable> failureCallback, Consumer<Deps> withDeps)
     {
         Invariants.require(sendTo == null || selectSendTo != null);
         if (!node.topology().active().hasAtLeastEpoch(executeAt.epoch()))
@@ -133,7 +133,7 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
         }
     }
 
-    public static void stabilise(CoordinationAdapter<?> adapter, Node node, SequentialAsyncExecutor executor, Deps deps, Route<?> stabilise, @Nullable Route<?> sendTo, SelectShards selectSendTo, FullRoute<?> route, Ballot ballot, TxnId txnId, Timestamp executeAt, Txn txn, BiConsumer<?, ? super Throwable> failureCallback, Consumer<Deps> withDeps)
+    public static void stabilise(CoordinationAdapter<?> adapter, Node node, ExclusiveAsyncExecutor executor, Deps deps, Route<?> stabilise, @Nullable Route<?> sendTo, SelectShards selectSendTo, FullRoute<?> route, Ballot ballot, TxnId txnId, Timestamp executeAt, Txn txn, BiConsumer<?, ? super Throwable> failureCallback, Consumer<Deps> withDeps)
     {
         Invariants.require(sendTo == null || selectSendTo != null);
         adapter.stabiliseOnly(node, executor, stabilise, sendTo == null ? stabilise : sendTo, route, ballot, txnId, txn, executeAt, deps, (success, fail) -> {
@@ -142,7 +142,7 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
         });
     }
 
-    public static void withStable(CoordinationAdapter<?> adapter, Node node, SequentialAsyncExecutor executor, TxnId txnId, Timestamp executeAt, Txn txn, Deps alreadyStableDeps, Route<?> require, @Nullable Route<?> sendTo, SelectShards selectSendTo, FullRoute<?> route, BiConsumer<?, ? super Throwable> failureCallback, Consumer<Deps> withDeps)
+    public static void withStable(CoordinationAdapter<?> adapter, Node node, ExclusiveAsyncExecutor executor, TxnId txnId, Timestamp executeAt, Txn txn, Deps alreadyStableDeps, Route<?> require, @Nullable Route<?> sendTo, SelectShards selectSendTo, FullRoute<?> route, BiConsumer<?, ? super Throwable> failureCallback, Consumer<Deps> withDeps)
     {
         Invariants.require(sendTo == null || selectSendTo != null);
         if (!node.topology().active().hasAtLeastEpoch(executeAt.epoch()))

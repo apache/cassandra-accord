@@ -40,7 +40,7 @@ import accord.primitives.SaveStatus;
 import accord.local.cfk.CommandsForKey;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.local.PreLoadContext;
+import accord.local.ExecutionContext;
 import accord.primitives.Status;
 import accord.primitives.Ballot;
 import accord.primitives.FullRoute;
@@ -61,8 +61,6 @@ import static accord.Utils.id;
 import static accord.Utils.writeTxn;
 import static accord.impl.InMemoryCommandStore.inMemory;
 import static accord.impl.IntKey.routing;
-import static accord.local.LoadKeys.SYNC;
-import static accord.local.LoadKeysFor.WRITE;
 import static accord.primitives.Routable.Domain.Key;
 import static accord.primitives.Txn.Kind.Write;
 import static accord.topology.SelectShards.ALL;
@@ -106,7 +104,7 @@ public class PreAcceptTest
             clock.increment(10);
             preAccept.process(node, ID2, REPLY_CONTEXT);
 
-            commandStore.chain(PreLoadContext.contextFor(txnId, txn.keys().toParticipants(), SYNC, WRITE, "Test"), safeStore -> {
+            commandStore.chain(ExecutionContext.unsequencedWrite(txnId, txn.keys().toParticipants(), "Test"), safeStore -> {
                 CommandsForKey cfk = safeStore.get(key.toUnseekable()).current();
                 TxnId commandId = cfk.get(0).plainTxnId();
                 Command command = safeStore.ifInitialised(commandId).current();
@@ -275,7 +273,7 @@ public class PreAcceptTest
             clock.increment(10);
             preAccept.process(node, ID2, REPLY_CONTEXT);
 
-            commandStore.chain(PreLoadContext.contextFor(txnId, txn.keys().toParticipants(), SYNC, WRITE, "Test"), safeStore -> {
+            commandStore.chain(ExecutionContext.unsequencedWrite(txnId, txn.keys().toParticipants(), "Test"), safeStore -> {
                 CommandsForKey cfk = safeStore.get(key.toUnseekable()).current();
                 TxnId commandId = cfk.get(0).plainTxnId();
                 Command command = safeStore.ifInitialised(commandId).current();

@@ -53,7 +53,7 @@ public class FetchRoute extends CheckShards<Route<?>, Participants<?>>
 
     FetchRoute(Node node, TxnId txnId, Infer.InvalidIf invalidIf, Participants<?> contactable, LatentStoreSelector reportTo, BiConsumer<Route<?>, Throwable> callback) throws TopologyException
     {
-        super(node, node.someSequentialExecutor(), txnId, contactable, txnId.epoch(), IncludeInfo.Route, null, invalidIf, callback);
+        super(node, node.someExclusiveExecutor(), txnId, contactable, txnId.epoch(), IncludeInfo.Route, null, invalidIf, callback);
         this.reportTo = reportTo;
     }
 

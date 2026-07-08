@@ -590,7 +590,19 @@ public class AsyncChains
             @Override
             protected @Nullable Cancellable start(BiConsumer<? super Void, Throwable> callback)
             {
-                return executor.execute(new AsyncCallbacks.RunAndCallback(run, callback));
+                return executor.execute(run, callback);
+            }
+        };
+    }
+
+    public static AsyncChain<Void> continuationChain(AsyncExecutor executor, Runnable run)
+    {
+        return new AsyncChains.Head<>()
+        {
+            @Override
+            protected @Nullable Cancellable start(BiConsumer<? super Void, Throwable> callback)
+            {
+                return executor.executeContinuation(run, callback);
             }
         };
     }
@@ -602,7 +614,7 @@ public class AsyncChains
             @Override
             protected @Nullable Cancellable start(BiConsumer<? super V, Throwable> callback)
             {
-                return executor.execute(new AsyncCallbacks.CallAndCallback<>(call, callback));
+                return executor.execute(call, callback);
             }
 
             @Override
@@ -620,7 +632,7 @@ public class AsyncChains
             @Override
             protected @Nullable Cancellable start(BiConsumer<? super V, Throwable> callback)
             {
-                return executor.execute(new AsyncCallbacks.FlatCallAndCallback<>(call, callback));
+                return executor.flatExecute(call, callback);
             }
         };
     }

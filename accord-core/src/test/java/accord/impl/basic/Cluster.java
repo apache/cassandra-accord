@@ -128,8 +128,6 @@ import static accord.local.Cleanup.INVALIDATE;
 import static accord.local.Cleanup.Input.FULL;
 import static accord.local.Command.NotDefined.uninitialised;
 import static accord.local.StoreParticipants.Filter.LOAD;
-import static accord.utils.Invariants.Paranoia.LINEAR;
-import static accord.utils.Invariants.ParanoiaCostFactor.HIGH;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonMap;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -561,8 +559,11 @@ public class Cluster
                         return;
 
                     List<ReflectionUtils.Difference<?>> diff = ReflectionUtils.recursiveEquals(command, reconstructed);
-                    if (!diff.isEmpty() && command.saveStatus().compareTo(SaveStatus.Erased) >= 0)
-                        diff.removeIf(v -> v.path.equals(".participants."));
+                    if (!diff.isEmpty())
+                    {
+                        if (command.saveStatus().compareTo(SaveStatus.Erased) >= 0 || command.participants.equals(reconstructed.participants))
+                            diff.removeIf(v -> v.path.equals(".participants."));
+                    }
                     Invariants.require(diff.isEmpty(), "Commands did not match: expected %s, given %s on %s, diff %s", command, reconstructed, commandStore, new LazyToString(() -> String.join("\n", Iterables.transform(diff, Object::toString))));
                 }
 

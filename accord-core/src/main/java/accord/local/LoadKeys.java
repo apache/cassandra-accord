@@ -36,8 +36,9 @@ public enum LoadKeys
 
     /**
      * Load and process the requested keys incrementally; the operation will be invoked multiples times
-     * as keys are loaded, until all the keys have been processed. The keys to be processed must be loaded
-     * into memory
+     * as keys are loaded, until all the keys have been processed. If submitted by an already running execution
+     * this task must declare a subset of the keys and txnIds declared by the originating task.
+     * It is not permitted to chain INCR tasks together; INCR may only be submitted by an ASYNC or SYNC task.
      */
     INCR,
 

@@ -30,9 +30,23 @@ public class AsyncCallbacks
     // a runnable interface that may be directly failed
     public interface RunOrFail extends Runnable
     {
-        // run should not throw any exception
-        void run();
+        /**
+         * Does not throw exceptions ordinarily; failure should be reported to any callback it carries
+         * and only a boolean indicating success/failure is returned to the caller.
+         * Exceptions are thrown to the caller only if there was a problem reporting the outcome to any callback
+         */
+        boolean runMayThrow();
+
+        /**
+         * Notify any callback that the task will not be run due to the provided exception
+         */
         void fail(Throwable fail);
+
+        @Override
+        default void run()
+        {
+            runMayThrow();
+        }
     }
 
     public static class RunAndCallback implements RunOrFail
@@ -47,9 +61,9 @@ public class AsyncCallbacks
         }
 
         @Override
-        public void run()
+        public boolean runMayThrow()
         {
-            runAndCallback(run, callback);
+            return runAndCallback(run, callback);
         }
 
         @Override
@@ -77,9 +91,9 @@ public class AsyncCallbacks
         }
 
         @Override
-        public void run()
+        public boolean runMayThrow()
         {
-            callAndCallback(call, callback);
+            return callAndCallback(call, callback);
         }
 
         @Override
@@ -107,9 +121,9 @@ public class AsyncCallbacks
         }
 
         @Override
-        public void run()
+        public boolean runMayThrow()
         {
-            flatCallAndCallback(call, callback);
+            return flatCallAndCallback(call, callback);
         }
 
         @Override
@@ -124,6 +138,7 @@ public class AsyncCallbacks
             return "[FlatCall " + call.toString() + "; callback " + callback + ']';
         }
     }
+
     public static <T> BiConsumer<? super T, Throwable> inExecutor(BiConsumer<? super T, Throwable> callback, Executor executor)
     {
         return (success, fail) -> {
@@ -159,7 +174,7 @@ public class AsyncCallbacks
         };
     }
 
-    public static void runAndCallback(Runnable run, BiConsumer<? super Void, Throwable> receiver)
+    public static boolean runAndCallback(Runnable run, BiConsumer<? super Void, Throwable> receiver)
     {
         try
         {
@@ -168,12 +183,13 @@ public class AsyncCallbacks
         catch (Throwable t)
         {
             receiver.accept(null, t);
-            return;
+            return false;
         }
         receiver.accept(null, null);
+        return true;
     }
 
-    public static <V> void callAndCallback(Callable<V> call, BiConsumer<? super V, Throwable> receiver)
+    public static <V> boolean callAndCallback(Callable<V> call, BiConsumer<? super V, Throwable> receiver)
     {
         V v;
         try
@@ -183,12 +199,13 @@ public class AsyncCallbacks
         catch (Throwable t)
         {
             receiver.accept(null, t);
-            return;
+            return false;
         }
         receiver.accept(v, null);
+        return true;
     }
 
-    public static <V> void flatCallAndCallback(Callable<? extends AsyncChain<V>> call, BiConsumer<? super V, Throwable> receiver)
+    public static <V> boolean flatCallAndCallback(Callable<? extends AsyncChain<V>> call, BiConsumer<? super V, Throwable> receiver)
     {
         AsyncChain<V> v;
         try
@@ -198,9 +215,18 @@ public class AsyncCallbacks
         catch (Throwable t)
         {
             receiver.accept(null, t);
-            return;
+            return false;
         }
         v.begin(receiver);
+        return true;
+    }
+
+    public static <V> BiConsumer<AsyncChain<V>, Throwable> flatCallback(BiConsumer<? super V, Throwable> callback)
+    {
+        return (success, fail) -> {
+            if (fail != null) callback.accept(null, fail);
+            else success.begin(callback);
+        };
     }
 
     public static Cancellable execute(Executor executor, RunOrFail runOrFail)

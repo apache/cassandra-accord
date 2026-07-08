@@ -51,7 +51,7 @@ import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.CommandStores;
 import accord.local.NodeCommandStoreService;
-import accord.local.PreLoadContext;
+import accord.local.ExecutionContext;
 import accord.local.RedundantBefore;
 import accord.local.SafeCommandStore;
 import accord.local.ShardDistributor;
@@ -321,13 +321,25 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         }
 
         @Override
-        public AsyncChain<Void> chain(PreLoadContext context, Consumer<? super SafeCommandStore> consumer)
+        public AsyncChain<Void> chain(ExecutionContext context, Consumer<? super SafeCommandStore> consumer)
         {
             return chain(context, i -> { consumer.accept(i); return null; });
         }
 
         @Override
-        public <T> AsyncChain<T> chain(PreLoadContext context, Function<? super SafeCommandStore, T> function)
+        public AsyncChain<Void> continuationChain(ExecutionContext context, Consumer<? super SafeCommandStore> consumer)
+        {
+            return chain(context, i -> { consumer.accept(i); return null; });
+        }
+
+        @Override
+        public <T> AsyncChain<T> chain(ExecutionContext context, Function<? super SafeCommandStore, T> function)
+        {
+            return submit(newTask(context, cfrLoad(context), function));
+        }
+
+        @Override
+        public <T> AsyncChain<T> continuationChain(ExecutionContext context, Function<? super SafeCommandStore, T> function)
         {
             return submit(newTask(context, cfrLoad(context), function));
         }
@@ -356,7 +368,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
                 runNextTask();
         }
 
-        private <T> DelayedTask<T> newTask(PreLoadContext context, @Nullable CommandsForRangeLoad cfrLoad, Function<? super SafeCommandStore, T> function)
+        private <T> DelayedTask<T> newTask(ExecutionContext context, @Nullable CommandsForRangeLoad cfrLoad, Function<? super SafeCommandStore, T> function)
         {
             Pending origin = Pending.Global.activeOrigin();
             if (RecurringPendingRunnable.isRecurring(origin) && context.primaryTxnId() != null && !context.primaryTxnId().isSystemTxn())
@@ -421,7 +433,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         }
 
         @Override
-        protected InMemorySafeStore createSafeStore(PreLoadContext context, CommandsForRangeLoad cfrLoad, Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKeys)
+        protected InMemorySafeStore createSafeStore(ExecutionContext context, CommandsForRangeLoad cfrLoad, Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKeys)
         {
             return new DelayedSafeStore(this, context, cfrLoad, commands, commandsForKeys, cacheLoading);
         }
@@ -434,7 +446,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         private final CacheLoading cacheLoading;
 
         public DelayedSafeStore(DelayedCommandStore commandStore,
-                                PreLoadContext context,
+                                ExecutionContext context,
                                 CommandsForRangeLoad cfrLoad,
                                 Map<TxnId, InMemorySafeCommand> commands,
                                 Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKey,

@@ -255,7 +255,7 @@ public class MaybeExecuteAdapterTest
                                         Recorder rec)
     {
         commands.execute(() -> {
-            SafeCommandStore safeStore = commands.beginOperation(PreLoadContext.contextFor(txnId, "Test"), null);
+            SafeCommandStore safeStore = commands.beginOperation(ExecutionContext.unsequenced(txnId, "Test"), null);
             try
             {
                 SafeCommand safeCommand = safeStore.unsafeGet(txnId);

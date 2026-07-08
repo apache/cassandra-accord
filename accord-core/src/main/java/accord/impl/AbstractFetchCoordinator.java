@@ -24,9 +24,8 @@ import java.util.List;
 import java.util.Map;
 
 import accord.local.Command;
-import accord.local.MaxConflicts;
 import accord.local.SafeCommandStore;
-import accord.local.SequentialAsyncExecutor;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.messages.Callback.ConcreteCallbackExclusive;
 import accord.messages.ReadData;
 import accord.primitives.SyncPoint;
@@ -117,7 +116,7 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
     final FetchResult result = new FetchResult(this);
     protected final List<AsyncResult<Void>> persisting = new ArrayList<>();
 
-    protected AbstractFetchCoordinator(Node node, SequentialAsyncExecutor executor, Ranges ranges, SyncPoint syncPoint, DataStore.FetchRanges fetchRanges, CommandStore commandStore) throws TopologyException
+    protected AbstractFetchCoordinator(Node node, ExclusiveAsyncExecutor executor, Ranges ranges, SyncPoint syncPoint, DataStore.FetchRanges fetchRanges, CommandStore commandStore) throws TopologyException
     {
         super(node, executor, ranges, syncPoint, fetchRanges);
         this.fetchRanges = fetchRanges;

@@ -57,7 +57,7 @@ import java.util.function.BiConsumer;
 @SuppressWarnings({ "rawtypes", "unchecked" })
 public class LogGroupTimers<T extends LogGroupTimers.Timer>
 {
-    public static class Timer extends IntrusivePriorityHeap.Node
+    public static class Timer extends IntrusiveHeapNode
     {
         private long deadline;
         protected final long deadline()
@@ -86,6 +86,11 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
             super.heapify();
         }
 
+        final boolean isEmpty()
+        {
+            return isEmptyInternal();
+        }
+
         void setSpan(long newSpan)
         {
             this.span = newSpan;
@@ -108,18 +113,16 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
             return true;
         }
 
-        @Override
         protected void append(T timer)
         {
             Invariants.require(epoch + span > timer.deadline());
-            super.append(timer);
+            appendNode(timer);
         }
 
-        @Override
         protected void update(T timer)
         {
             Invariants.require(epoch + span > timer.deadline());
-            super.update(timer);
+            updateNode(timer);
         }
 
         @Override
@@ -302,7 +305,7 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
         }
         else
         {
-            bucket.remove(timer);
+            bucket.removeNode(timer);
             addInternal(deadline, timer);
         }
         refreshWakeAt(prevDeadline, deadline);
@@ -328,7 +331,7 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
         long prevDeadline = t.deadline;
         Bucket<T> bucket = findBucket(t.deadline);
         Invariants.require(bucket != null);
-        bucket.remove(timer);
+        bucket.removeNode(timer);
         --timerCount;
         refreshWakeAt(prevDeadline, Long.MAX_VALUE);
     }
