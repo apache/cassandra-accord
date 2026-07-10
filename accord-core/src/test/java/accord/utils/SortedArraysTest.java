@@ -206,6 +206,39 @@ class SortedArraysTest
     }
 
     @Test
+    public void testIntLinearIntersection()
+    {
+        Gen<Integer[]> gen = sortedUniqueIntegerArray(0);
+        qt().forAll(gen, Gens.random()).check((a, rs) -> {
+            int mutations = a.length == 0 ? 0 : rs.nextInt(1, a.length + 1);
+
+            List<Integer> b = new ArrayList<>();
+            while (mutations != 0)
+            {
+                if (rs.nextBoolean())
+                    b.add(a[rs.nextInt(0, a.length)]);
+                else
+                    b.add(rs.nextInt(a[0] - 10, a[a.length - 1] + 10));
+                mutations--;
+            }
+
+            b.sort(Integer::compareTo);
+            int[] bInt = b.stream().mapToInt(i->i).toArray();
+            int[] aInt = Arrays.stream(a).mapToInt(i->i).toArray();
+
+            Set<Integer> left = new HashSet<>(Arrays.asList(a));
+            Set<Integer> right = new HashSet<>(b);
+            Set<Integer> intersection = Sets.intersection(left, right);
+
+            int[] expected = intersection.stream().mapToInt(i->i).toArray();
+            Arrays.sort(expected);
+
+            Assertions.assertArrayEquals(expected, SortedArrays.linearIntersection(aInt, 0, a.length, bInt, 0, bInt.length, new ArrayBuffers.IntBufferCache(4, 1 << 14)));
+            Assertions.assertArrayEquals(expected, SortedArrays.linearIntersection(bInt, 0, bInt.length, aInt, 0, aInt.length, new ArrayBuffers.IntBufferCache(4, 1 << 14)));
+        });
+    }
+
+    @Test
     public void testLinearIntersectionWithSubset()
     {
         class P
