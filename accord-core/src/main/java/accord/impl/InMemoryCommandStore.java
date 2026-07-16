@@ -41,6 +41,7 @@ import java.util.function.Predicate;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import accord.local.CommandStores.RangesForEpoch;
 import accord.local.cfk.NotifySink;
 import accord.primitives.*;
 import com.google.common.annotations.VisibleForTesting;
@@ -216,9 +217,9 @@ public abstract class InMemoryCommandStore extends CommandStore
     private InMemorySafeStore current;
     private final Journal journal;
 
-    public InMemoryCommandStore(int id, NodeCommandStoreService node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder, Journal journal)
+    public InMemoryCommandStore(int id, NodeCommandStoreService node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, RangesForEpoch rangesForEpoch, Journal journal)
     {
-        super(id, node, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder);
+        super(id, node, agent, store, progressLogFactory, listenersFactory, rangesForEpoch);
         this.journal = journal;
         this.commandsForRanges = new InMemoryRangeSummaryIndex();
         progressLog.unsafeStart();
@@ -475,9 +476,7 @@ public abstract class InMemoryCommandStore extends CommandStore
     {
         if (current != null)
             throw illegalState("Another operation is in progress or it's store was not cleared");
-        current = createSafeStore(context, cfrLoad);
-        updateRangesForEpoch(current);
-        return current;
+        return current = createSafeStore(context, cfrLoad);
     }
 
     public void completeOperation(SafeCommandStore store)
@@ -951,9 +950,9 @@ public abstract class InMemoryCommandStore extends CommandStore
         Thread activeThread;
         final Queue<Runnable> queue = new ConcurrentLinkedQueue<>();
 
-        public Synchronized(int id, NodeCommandStoreService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder, Journal journal)
+        public Synchronized(int id, NodeCommandStoreService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, RangesForEpoch rangesForEpoch, Journal journal)
         {
-            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder, journal);
+            super(id, time, agent, store, progressLogFactory, listenersFactory, rangesForEpoch, journal);
         }
 
         private synchronized void maybeRun()
@@ -1026,9 +1025,9 @@ public abstract class InMemoryCommandStore extends CommandStore
         private Thread thread; // when run in the executor this will be non-null, null implies not running in this store
         private final ExecutorService executor;
 
-        public SingleThread(int id, NodeCommandStoreService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder, Journal journal)
+        public SingleThread(int id, NodeCommandStoreService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, RangesForEpoch rangesForEpoch, Journal journal)
         {
-            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder, journal);
+            super(id, time, agent, store, progressLogFactory, listenersFactory, rangesForEpoch, journal);
             this.executor = Executors.newSingleThreadExecutor(r -> {
                 Thread thread = new Thread(r);
                 thread.setName(CommandStore.class.getSimpleName() + '[' + time.id() + ']');
@@ -1110,9 +1109,9 @@ public abstract class InMemoryCommandStore extends CommandStore
             }
         }
 
-        public Debug(int id, NodeCommandStoreService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder, Journal journal)
+        public Debug(int id, NodeCommandStoreService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, RangesForEpoch rangesForEpoch, Journal journal)
         {
-            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder, journal);
+            super(id, time, agent, store, progressLogFactory, listenersFactory, rangesForEpoch, journal);
         }
 
         @Override

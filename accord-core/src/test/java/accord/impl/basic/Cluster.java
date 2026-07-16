@@ -441,7 +441,7 @@ public class Cluster
         return stats;
     }
 
-    static class RandomLoader
+    public static class RandomLoader
     {
         private final BooleanSupplier cacheEmptyChance;
         private final BooleanSupplier cacheFullChance;
@@ -451,22 +451,27 @@ public class Cluster
 
         final BooleanSupplier cmdCheckChance;
         final BooleanSupplier cfkCheckChance;
+
+        public static float CMD_BASE_CHECK_CHANCE = 0.01f;
         static int cmdCounter, cfkCounter;
 
         RandomLoader(RandomSource random)
         {
-            this(random.nextBoolean() ? 1.0f : random.nextFloat(), random);
+            this(random.nextBoolean() ? 1.0f : random.nextFloat(),
+                 random.nextFloat() * CMD_BASE_CHECK_CHANCE,
+                 random.nextFloat() * 0.2f,
+                 random);
         }
 
-        RandomLoader(float presentChance, RandomSource random)
+        RandomLoader(float presentChance, float cmdCheckChance, float cfkCheckChance, RandomSource random)
         {
             this(Gens.supplier(Gens.bools().mixedDistribution().next(random), random),
                  Gens.supplier(Gens.bools().mixedDistribution().next(random), random),
                  random.biasedUniformBools(presentChance),
                  random.biasedUniformBools(presentChance),
                  random.biasedUniformBools(presentChance),
-                 Invariants.testParanoia(LINEAR, LINEAR, HIGH) ? Gens.supplier(Gens.bools().mixedDistribution().next(random), random) : () -> random.decide(0.001f),
-                 () -> random.decide(0.1f)
+                 random.biasedUniformBools(cmdCheckChance),
+                 random.biasedUniformBools(cfkCheckChance)
             );
         }
 
@@ -578,7 +583,6 @@ public class Cluster
                 }
             };
         }
-
     }
 
     public static Map<MessageType, Stats> run(Id[] nodes, int[] prefixes, MessageListener messageListener, Supplier<PendingQueue> queueSupplier,

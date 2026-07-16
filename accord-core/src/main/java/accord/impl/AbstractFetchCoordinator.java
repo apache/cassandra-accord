@@ -267,7 +267,7 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
         // must be invoked by implementations some time after the read has started OR must override safeToReadAt()
         protected void readStarted(SafeCommandStore safeStore)
         {
-            safeToReadAfter = Timestamp.nonNullOrMax(Timestamp.NONE, Timestamp.nonNullOrMax(safeToReadAfter, safeStore.commandStore().unsafeGetMaxConflicts().foldl(MaxConflicts.Entry::get, Timestamp.NONE, TxnId.NONE)));
+            safeToReadAfter = Timestamp.nonNullOrMax(Timestamp.NONE, Timestamp.nonNullOrMax(safeToReadAfter, safeStore.commandStore().unsafeGetMaxConflicts().foldl(TxnId.NONE, (id, e, min) -> e.get(min, id), Timestamp.NONE)));
         }
 
         protected Timestamp safeToReadAfter()

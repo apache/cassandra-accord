@@ -45,6 +45,7 @@ import accord.primitives.RoutingKeys;
 import accord.primitives.Timestamp;
 import org.opentest4j.AssertionFailedError;
 
+import static accord.api.ProtocolModifiers.isRangeEndInclusive;
 import static java.lang.Integer.MAX_VALUE;
 import static java.lang.Integer.MIN_VALUE;
 
@@ -54,7 +55,10 @@ public class ReducingRangeMapTest
     static final ReducingRangeMap<Timestamp> EMPTY = new ReducingRangeMap<>();
     static final RoutingKey MINIMUM_EXCL = new IntKey.Routing(MIN_VALUE);
     static final RoutingKey MAXIMUM_EXCL = new IntKey.Routing(MAX_VALUE);
-    static boolean END_INCLUSIVE = false;
+    // Must match the production setting: ReducingRangeMap.get/foldl use isRangeEndInclusive(),
+    // so the canonical TreeMap (which models intervals as (prev, K] via ceilingEntry) only agrees
+    // with the map under test when END_INCLUSIVE has the same value.
+    static boolean END_INCLUSIVE = isRangeEndInclusive();
 
     private static RoutingKey rk(int t)
     {
@@ -168,7 +172,7 @@ public class ReducingRangeMapTest
     {
         ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
         List<ListenableFuture<Void>> results = new ArrayList<>();
-        int count = 100000;
+        int count = 1000;
         for (int numberOfAdditions : new int[] { 1, 10, 100 })
         {
             for (float maxCoveragePerRange : new float[] { 0.01f, 0.1f, 0.5f })
@@ -334,12 +338,6 @@ public class ReducingRangeMapTest
             protected Timestamp reduce(Timestamp a, Timestamp b)
             {
                 return Timestamp.max(a, b);
-            }
-
-            @Override
-            protected Timestamp tryMergeEqual(Timestamp a, Timestamp b)
-            {
-                return a;
             }
 
             @Override

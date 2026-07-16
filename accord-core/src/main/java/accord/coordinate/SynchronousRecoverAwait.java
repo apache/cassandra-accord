@@ -97,7 +97,7 @@ public class SynchronousRecoverAwait extends ReadCoordinator<InferredFastPath, R
 
             case Reject:
                 outcome = Reject;
-                onDone(null, null);
+                invokeOnDone(null, null);
                 return Action.Aborted;
 
             case Accept:
@@ -105,7 +105,7 @@ public class SynchronousRecoverAwait extends ReadCoordinator<InferredFastPath, R
                 if (waitingOn.isEmpty())
                 {
                     outcome = Accept;
-                    onDone(null, null);
+                    invokeOnDone(null, null);
                     return Action.Aborted;
                 }
                 return Action.Approve;

@@ -70,6 +70,7 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
     ReducingIntervalMap(K[] starts, V[] values)
     {
         Invariants.requireArgument(starts.length == values.length + 1 || (starts.length + values.length) == 0);
+        Invariants.require(values.length != 1 || values[0] != null);
         this.starts = starts;
         this.values = values;
     }

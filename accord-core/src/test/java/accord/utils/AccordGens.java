@@ -151,9 +151,10 @@ public class AccordGens
     public static Gen<TxnId> txnIds(Gen.LongGen epochs, Gen.LongGen hlcs, Gen.IntGen nodes, Gen<Txn.Kind> kinds, Gen<Domain> domains, Gen<Cardinality> cardinalities)
     {
         return rs -> {
-            Domain domain = domains.next(rs);
+            Txn.Kind kind = kinds.next(rs);
+            Domain domain = kind.isSyncPoint() ? Domain.Range : domains.next(rs);
             Cardinality cardinality = domain == Domain.Range ? Any : cardinalities.next(rs);
-            return new TxnId(epochs.nextLong(rs), hlcs.nextLong(rs), 0, kinds.next(rs), domain, cardinality, new Node.Id(nodes.nextInt(rs)));
+            return new TxnId(epochs.nextLong(rs), hlcs.nextLong(rs), 0, kind, domain, cardinality, new Node.Id(nodes.nextInt(rs)));
         };
     }
 

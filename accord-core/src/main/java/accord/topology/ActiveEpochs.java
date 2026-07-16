@@ -79,10 +79,13 @@ public final class ActiveEpochs implements Iterable<ActiveEpoch>
     ActiveEpochs withNewEpochs(ActiveEpoch[] epochs)
     {
         long firstNonEmptyEpoch = this.firstNonEmptyEpoch;
-        if (firstNonEmptyEpoch == -1 && epochs.length > 0 && !epochs[0].all().isEmpty())
+        if (firstNonEmptyEpoch == -1)
         {
-            Invariants.require(epochs.length == 1);
-            firstNonEmptyEpoch = epochs[0].epoch();
+            for (int i = epochs.length - 1; firstNonEmptyEpoch == -1 && i >= 0 ; --i)
+            {
+                if (!epochs[i].all().isEmpty())
+                    firstNonEmptyEpoch = epochs[i].epoch();
+            }
         }
         return new ActiveEpochs(manager, epochs, firstNonEmptyEpoch);
     }

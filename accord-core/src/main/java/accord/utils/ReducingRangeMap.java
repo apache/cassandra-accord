@@ -502,6 +502,11 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         }
     }
 
+    public Ranges ranges()
+    {
+        return ranges(Objects::nonNull);
+    }
+
     public Ranges ranges(Predicate<V> include)
     {
         Range[] ranges = new Range[values.length];

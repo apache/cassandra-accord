@@ -87,6 +87,7 @@ import static accord.primitives.Timestamp.Flag.SHARD_BOUND;
 import static accord.utils.ArrayBuffers.cachedAny;
 import static accord.utils.ArrayBuffers.cachedInts;
 import static accord.utils.Functions.alwaysFalse;
+import static accord.utils.Functions.alwaysTrue;
 import static accord.utils.Invariants.illegalState;
 import static accord.utils.Invariants.require;
 import static accord.utils.Invariants.requireStrictlyOrdered;
@@ -874,7 +875,7 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Bounds>
     {
         staleRanges = lostRanges = Ranges.EMPTY;
         maxStale = maxShardAppliedBefore = maxGcBefore = TxnId.NONE;
-        minShardAndLocallyAppliedBefore = minGcBefore = TxnId.MAX;
+        minShardAndLocallyAppliedBefore = minGcBefore = TxnId.NONE;
         minGcHlcBefore = 0L;
         maxStartEpoch = 0;
         minEndEpoch = Long.MAX_VALUE;
@@ -920,6 +921,8 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Bounds>
             if (bounds.endEpoch < minEndEpoch)
                 minEndEpoch = bounds.endEpoch;
         }
+
+        Invariants.require(minGcHlcBefore < Long.MAX_VALUE);
         this.maxStale = maxUnready;
         this.maxShardAppliedBefore = maxShardAppliedBefore;
         this.maxGcBefore = maxGcBefore;
@@ -1129,8 +1132,14 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Bounds>
 
     public boolean isAtLeast(RedundantBefore atLeast)
     {
+        if (!ranges().containsAll(atLeast.ranges()))
+            return false;
+
         return foldl((b, v, al, e) -> {
             return al.foldl(Ranges.of(b.range), (lb, v2, ub) -> {
+                if (!v2 || ub.endEpoch > lb.endEpoch || ub.startEpoch != lb.startEpoch)
+                    return false;
+
                 int j = 0;
                 for (int i = 0 ; i < lb.bounds.length ; ++i)
                 {
@@ -1142,9 +1151,9 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Bounds>
                         || (lb.status(i*2+1) & ~ub.status(j*2+1)) != 0)
                         return false;
                 }
-                return v2;
+                return true;
             }, v, b);
-        }, true, atLeast, null, Functions.alwaysFalse());
+        }, true, atLeast, null, i -> !i);
     }
 
     /**

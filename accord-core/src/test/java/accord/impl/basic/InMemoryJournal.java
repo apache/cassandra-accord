@@ -217,9 +217,6 @@ public class InMemoryJournal implements Journal
 
     private Builder reconstruct(Diffs files, Load load)
     {
-        if (files == null)
-            return null;
-
         Builder builder = null;
         List<Diff> saved = files.sorted(false);
         for (int i = saved.size() - 1; i >= 0; i--)
@@ -500,7 +497,19 @@ public class InMemoryJournal implements Journal
             for (Map.Entry<TxnId, Diffs> e2 : localJournal.entrySet())
             {
                 Diffs diffs = e2.getValue();
-                if (diffs.isEmpty()) continue;
+                if (diffs.isEmpty())
+                {
+                    if (diffs.flushed instanceof FinalList)
+                    {
+                        Builder builder = new Builder(e2.getKey(), ALL);
+                        Cleanup cleanup;
+                        try { cleanup = builder.shouldCleanup(FULL, store.unsafeGetRedundantBefore(), store.durableBefore()); }
+                        catch (LogUnavailableException ignore) { continue; }
+
+                        Invariants.require(cleanup.compareTo(((FinalList) diffs.flushed).cleanup()) >= 0);
+                    }
+                    continue;
+                }
 
                 Diffs subset = diffs;
                 {
@@ -562,7 +571,7 @@ public class InMemoryJournal implements Journal
                 ++counter;
 
                 Cleanup cleanup;
-                try {cleanup = builder.shouldCleanup(input, store.unsafeGetRedundantBefore(), store.durableBefore()); }
+                try { cleanup = builder.shouldCleanup(input, store.unsafeGetRedundantBefore(), store.durableBefore()); }
                 catch (LogUnavailableException ignore) {cleanup = ERASE; }
 
                 cleanup = builder.maybeCleanup(true, cleanup);
@@ -682,7 +691,7 @@ public class InMemoryJournal implements Journal
 
     private static abstract class FinalList extends AbstractList<Diff>
     {
-
+        abstract Cleanup cleanup();
     }
 
     private static class ErasedList extends FinalList
@@ -728,10 +737,18 @@ public class InMemoryJournal implements Journal
             }
             return super.set(index, diff);
         }
+
+        @Override
+        Cleanup cleanup()
+        {
+            return ERASE;
+        }
     }
 
     private static class PurgedList extends FinalList
     {
+        PurgedList() {}
+
         @Override
         public Diff get(int index)
         {
@@ -751,6 +768,12 @@ public class InMemoryJournal implements Journal
             if (saveStatus == Erased)
                 return false;
             throw illegalState();
+        }
+
+        @Override
+        Cleanup cleanup()
+        {
+            return EXPUNGE;
         }
     }
 

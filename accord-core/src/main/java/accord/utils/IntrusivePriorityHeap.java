@@ -33,6 +33,7 @@ import java.util.stream.Stream;
 public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node> implements Comparator<N>
 {
     private static final int NORMAL_MIN_SIZE = 8;
+    private static final int MAX_EMPTY_SIZE = 1024;
     private static final Node[] EMPTY = new Node[0];
     private static final Node[] TINY_EMPTY = new Node[0];
 
@@ -146,7 +147,11 @@ public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node
                 tail.setHeapIndex(i);
             }
         }
-        else size = heapifiedSize = 0;
+        else
+        {
+            size = heapifiedSize = 0;
+            maybeShrink();
+        }
 
         heap[size] = null;
         node.setHeapIndex(-1);
@@ -187,13 +192,23 @@ public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node
         --heapifiedSize;
         if (size == 0)
         {
-            heap[0] = null;
+            if (!maybeShrink())
+                heap[0] = null;
             return;
         }
 
         N siftDown = (N) heap[size];
         heap[size] = null;
         siftDown(siftDown, 0);
+    }
+
+    private boolean maybeShrink()
+    {
+        if (heap.length <= MAX_EMPTY_SIZE)
+            return false;
+
+        heap = new Node[MAX_EMPTY_SIZE];
+        return true;
     }
 
     /**
@@ -303,6 +318,7 @@ public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node
     {
         Arrays.fill(heap, 0, size, null);
         heapifiedSize = size = 0;
+        maybeShrink();
     }
 
     protected <P> void drain(P param, BiConsumer<P, N> consumer)
@@ -315,6 +331,7 @@ public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node
         }
         Arrays.fill(heap, 0, size, null);
         heapifiedSize = size = 0;
+        maybeShrink();
     }
 
     /**
@@ -343,6 +360,8 @@ public abstract class IntrusivePriorityHeap<N extends IntrusivePriorityHeap.Node
         {
             Arrays.fill(heap, size - removedCount, size, null);
             size -= removedCount;
+            if (size == 0)
+                maybeShrink();
         }
     }
 

@@ -72,33 +72,14 @@ public class BTreeReducingRangeMap<E extends Entry<E>> implements Iterable<E>
         return BTree.find(tree, (RoutingKey k, Entry<?> e) -> Entry.compare(k, e), key);
     }
 
-    public E foldl(BiFunction<E, E, E> reduce)
-    {
-        // TODO (expected): use BTree fold methods
-        require(!isEmpty());
-        Iterator<E> iter = iterator();
-        E result = iter.next();
-        while (iter.hasNext())
-            result = reduce.apply(result, iter.next());
-        return result;
-    }
-
     public <V2> V2 foldl(BiFunction<E, V2, V2> reduce, V2 accumulator)
     {
-        // TODO (expected): use BTree fold methods
-        require(!isEmpty());
-        for (E e : this)
-            accumulator = reduce.apply(e, accumulator);
-        return accumulator;
+        return BTree.foldl(tree, reduce, accumulator);
     }
 
-    public <V2, P1> V2 foldl(TriFunction<E, V2, P1, V2> reduce, V2 accumulator, P1 p1)
+    public <V2, P1> V2 foldl(P1 p1, TriFunction<P1, E, V2, V2> reduce, V2 accumulator)
     {
-        // TODO (expected): use BTree fold methods
-        require(!isEmpty());
-        for (E e : this)
-            accumulator = reduce.apply(e, accumulator, p1);
-        return accumulator;
+        return BTree.foldl(tree, p1, reduce, accumulator);
     }
 
     @Override

@@ -229,6 +229,8 @@ public class CommandBuilder
             case TruncatedApplyWithOutcome:
             case TruncatedApply:
             case TruncatedUnapplied:
+                if (txnId.awaitsOnlyDeps())
+                    return Command.Truncated.truncated(txnId, saveStatus, durability, participants, executeAt, partialDeps, writes, result, null);
                 return Command.Truncated.truncated(txnId, saveStatus, durability, participants, executeAt, partialDeps, writes, result);
             case Erased:
                 return Command.Truncated.erased(txnId);

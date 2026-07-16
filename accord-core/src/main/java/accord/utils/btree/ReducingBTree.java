@@ -573,7 +573,14 @@ public class ReducingBTree
                     {
                         ri = ranges.findNext(ri, to, ev.start(), ReducingBTree::compareWithEnd, FAST);
                         if (ri < 0) ri = childTo = -1 - ri;
-                        else childTo = ri + 1;
+                        else
+                        {
+                            childTo = ri + 1;
+
+                            // we intersect another range; refresh rv to ensure we advance correctly
+                            rv = ranges.get(ri);
+                            ces = rv.end().compareTo(ev.start());
+                        }
                     }
                     if (childTo > childFrom)
                     {
@@ -740,7 +747,13 @@ public class ReducingBTree
                     {
                         ri = ranges.findNext(ri, to, ev.start(), ReducingBTree::compareWithEnd, FAST);
                         if (ri < 0) ri = childTo = -1 - ri;
-                        else childTo = ri + 1;
+                        else
+                        {
+                            childTo = ri + 1;
+                            // we intersect another range but same tree child range; refresh rv to ensure we advance correctly
+                            rv = ranges.get(ri);
+                            ces = rv.end().compareTo(ev.start());
+                        }
                     }
                     if (childTo > childFrom)
                     {

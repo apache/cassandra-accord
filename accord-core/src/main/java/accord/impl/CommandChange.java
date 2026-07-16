@@ -357,11 +357,6 @@ public class CommandChange
 
         public Cleanup shouldCleanup(Input input, RedundantBefore redundantBefore, DurableBefore durableBefore)
         {
-            // Early return: No cleanup needed when no updates have been made to this command
-            if (!hasUpdate)
-                return NO;
-
-            // Honor previously set cleanup requirements - cleanup levels are ordered by aggressiveness
             if (cleanup != null)
             {
                 switch (cleanup)
@@ -381,16 +376,22 @@ public class CommandChange
             Durability durability = this.durability;
             if (durability == null) durability = NotDurable;
             StoreParticipants participants = this.participants;
+
             // TODO (expected): we need to filter participants to correctly compute doesStillExecute in Cleanup.shouldCleanup;
             //  would be better to break this dependency, or otherwise encode it better.
             //  In particular it would be nice to avoid doing this twice for each command on load, as we also do this in SafeCommandStore.
             //  Perhaps we can special-case loading, and simply update the participants here so we can avoid doing it again on access
+            SaveStatus saveStatus = this.saveStatus;
             if (input == Input.FULL)
             {
                 // During full compaction, commands without save status can be completely expunged
                 if (saveStatus == null)
-                    return EXPUNGE;
-                
+                {
+                    if (hasUpdate)
+                        return EXPUNGE;
+                    saveStatus = SaveStatus.NotDefined;
+                }
+
                 if (participants != null)
                     participants = participants.filter(LOAD, redundantBefore, txnId, saveStatus.known.isExecuteAtKnown() ? executeAt : null);
             }
@@ -401,6 +402,7 @@ public class CommandChange
             return cleanup;
         }
 
+        @SuppressWarnings("UnusedReturnValue") // used by implementation
         public Cleanup maybeCleanup(boolean clearFields, Input input, RedundantBefore redundantBefore, DurableBefore durableBefore)
         {
             Cleanup cleanup = shouldCleanup(input, redundantBefore, durableBefore);
@@ -509,6 +511,7 @@ public class CommandChange
 
         // returns true if we made a material update to the Builder;
         // that is, if we cleared a non-null field or if we are already mask-only
+        @SuppressWarnings("UnusedReturnValue") // return value is used by implementation
         public boolean clearSuperseded(boolean clearFields, Builder superseding)
         {
             int unset = flags & setFieldsMask(superseding.flags & ~setChanged(CLEANUP));
@@ -597,9 +600,7 @@ public class CommandChange
         // TODO (expected): we shouldn't need to filter participants here, we will do it anyway before using in SafeCommandStore
         public Command construct(RedundantBefore redundantBefore)
         {
-            if (!hasUpdate)
-                return null;
-
+            // we cannot short-circuit !hasUpdate, as we might have been expunged and should return Erased
             Invariants.require(txnId != null);
             if (cleanup != null)
             {
@@ -610,7 +611,7 @@ public class CommandChange
                 {
                     default: throw new UnhandledEnum(cleanup);
                     case NO: break;
-                    case EXPUNGE: return null;
+                    case EXPUNGE:
                     case ERASE: return Command.Truncated.erased(txnId);
                     case INVALIDATE: return Command.Truncated.invalidated(txnId, participants);
                     case VESTIGIAL: return Command.Truncated.vestigial(txnId, participants);
@@ -624,6 +625,9 @@ public class CommandChange
                         break;
                 }
             }
+
+            if (!hasUpdate)
+                return null;
 
             // TODO (expected): bitset of expected known fields for cheap and comprehensive expunge check
             if (executeAt == null && saveStatus != null && saveStatus.known.isExecuteAtKnown())
@@ -680,7 +684,6 @@ public class CommandChange
                 case Vestigial:
                     return vestigial(txnId, participants);
                 case Erased:
-                    // TODO (expected): why are we saving Durability here for erased commands?
                     return erased(txnId);
                 case Invalidated:
                     return invalidated(txnId, participants);

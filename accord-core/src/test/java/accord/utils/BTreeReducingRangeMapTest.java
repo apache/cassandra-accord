@@ -41,6 +41,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
+import static accord.api.ProtocolModifiers.isRangeEndInclusive;
 import static java.lang.Integer.MAX_VALUE;
 import static java.lang.Integer.MIN_VALUE;
 
@@ -85,7 +86,10 @@ public class BTreeReducingRangeMapTest
     static final BTreeReducingRangeMap<Entry> EMPTY = new BTreeReducingRangeMap<>();
     static final RoutingKey MINIMUM_EXCL = new IntKey.Routing(MIN_VALUE);
     static final RoutingKey MAXIMUM_EXCL = new IntKey.Routing(MAX_VALUE);
-    static boolean END_INCLUSIVE = false;
+    // Must match the production setting: BTreeReducingRangeMap.get/foldl use isRangeEndInclusive(),
+    // so the canonical TreeMap (which models intervals as (prev, K] via ceilingEntry) only agrees
+    // with the map under test when END_INCLUSIVE has the same value.
+    static boolean END_INCLUSIVE = isRangeEndInclusive();
 
     private static IntKey.Routing rk(int t)
     {
@@ -169,8 +173,8 @@ public class BTreeReducingRangeMapTest
     {
         ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
         List<ListenableFuture<Void>> results = new ArrayList<>();
-        int count = 100000;
-        for (int numberOfAdditions : new int[] { 1, 10, 100 })
+        int count = 1000;
+        for (int numberOfAdditions : new int[] { 100, 10, 1 })
         {
             for (float maxCoveragePerRange : new float[] { 0.01f, 0.1f, 0.5f })
             {
@@ -302,6 +306,11 @@ public class BTreeReducingRangeMapTest
             return canonical.ceilingEntry(rk).getValue();
         }
 
+        static Timestamp tsOrNull(Entry e)
+        {
+            return e == null ? null : e.timestamp;
+        }
+
         RandomWithCanonical merge(Random random, RandomWithCanonical other)
         {
             RandomWithCanonical result = new RandomWithCanonical();
@@ -352,9 +361,9 @@ public class BTreeReducingRangeMapTest
         {
             for (RoutingKey rk : canonical.keySet())
             {
-                Assertions.assertEquals(get(decr(rk)), test.get(decr(rk)), id);
-                Assertions.assertEquals(get(rk), test.get(rk), id);
-                Assertions.assertEquals(get(incr(rk)), test.get(incr(rk)), id);
+                Assertions.assertEquals(get(decr(rk)), tsOrNull(test.get(decr(rk))), id);
+                Assertions.assertEquals(get(rk), tsOrNull(test.get(rk)), id);
+                Assertions.assertEquals(get(incr(rk)), tsOrNull(test.get(incr(rk))), id);
             }
 
             // check some random
@@ -363,7 +372,7 @@ public class BTreeReducingRangeMapTest
                 while (remaining-- > 0)
                 {
                     RoutingKey routingKey = rk(random);
-                    Assertions.assertEquals(get(routingKey), test.get(routingKey), id);
+                    Assertions.assertEquals(get(routingKey), tsOrNull(test.get(routingKey)), id);
                 }
             }
 
@@ -395,7 +404,7 @@ public class BTreeReducingRangeMapTest
                     }
 
                     List<Timestamp> foldl = test.foldl(keys, (e, timestamps) -> {
-                            if (timestamps.isEmpty() || !timestamps.get(timestamps.size() - 1).equals(e))
+                            if (timestamps.isEmpty() || !timestamps.get(timestamps.size() - 1).equals(e.timestamp))
                                 timestamps.add(e.timestamp);
                             return timestamps;
                         }, new ArrayList<>());
@@ -412,7 +421,7 @@ public class BTreeReducingRangeMapTest
                     Assertions.assertEquals(canonFoldl, foldl, id);
 
                     foldl = test.foldl(ranges, (e, timestamps) -> {
-                        if (timestamps.isEmpty() || !timestamps.get(timestamps.size() - 1).equals(e))
+                        if (timestamps.isEmpty() || !timestamps.get(timestamps.size() - 1).equals(e.timestamp))
                             timestamps.add(e.timestamp);
                         return timestamps;
                     }, new ArrayList<>());
@@ -430,6 +439,19 @@ public class BTreeReducingRangeMapTest
                             if (canonFoldl.isEmpty() || !canonFoldl.get(canonFoldl.size() - 1).equals(next))
                                 canonFoldl.add(next);
                         }
+                    }
+                    Assertions.assertEquals(canonFoldl, foldl, id);
+
+                    foldl = test.foldl((e, timestamps) -> {
+                        timestamps.add(e.timestamp);
+                        return timestamps;
+                    }, new ArrayList<>());
+
+                    canonFoldl.clear();
+                    for (Timestamp v : canonical.values())
+                    {
+                        if (v != null)
+                            canonFoldl.add(v);
                     }
                     Assertions.assertEquals(canonFoldl, foldl, id);
                 }

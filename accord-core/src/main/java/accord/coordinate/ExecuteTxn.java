@@ -86,9 +86,7 @@ import static accord.coordinate.CoordinationAdapter.Factory.Kind.Standard;
 import static accord.coordinate.ExecuteFlag.READY_TO_EXECUTE;
 import static accord.coordinate.ExecutePath.EPHEMERAL;
 import static accord.coordinate.ExecutePath.FAST;
-import static accord.coordinate.ExecutePath.MEDIUM;
 import static accord.coordinate.ExecutePath.RECOVER;
-import static accord.coordinate.ExecutePath.SLOW;
 import static accord.coordinate.ReadCoordinator.Action.Approve;
 import static accord.coordinate.ReadCoordinator.Action.ApprovePartial;
 import static accord.local.CommandSummaries.SummaryStatus.STABLE;
@@ -124,19 +122,19 @@ public class ExecuteTxn extends ReadCoordinator<Result, ReadReply>
         @Override
         public final void onSuccess(Node.Id from, ReadReply reply)
         {
-            CallbackExclusive.onSuccess(executor, this, from, reply);
+            CallbackExclusive.onSuccess(executor, unsafeToReplyImmediately, this, from, reply);
         }
 
         @Override
         public final void onSlow(Node.Id from)
         {
-            CallbackExclusive.onSlow(executor, this, from);
+            CallbackExclusive.onSlow(executor, unsafeToReplyImmediately, this, from);
         }
 
         @Override
         public final void onFailure(Node.Id from, Throwable failure)
         {
-            CallbackExclusive.onFailure(executor, this, from, failure);
+            CallbackExclusive.onFailure(executor, unsafeToReplyImmediately, this, from, failure);
         }
 
         @Override
@@ -507,18 +505,18 @@ public class ExecuteTxn extends ReadCoordinator<Result, ReadReply>
     }
 
     @Override
-    public void exclusiveOnSlowResponse(Id from)
+    public void onSlowExclusive(Id from)
     {
         // send stable messages to everyone not yet contacted, and then inform decided, to avoid unnecessary recoveries
         stable.maybeInformStable();
-        super.exclusiveOnSlowResponse(from);
+        super.onSlowExclusive(from);
     }
 
     @Override
-    public void exclusiveOnFailure(Id from, Throwable failure)
+    public void onFailureExclusive(Id from, Throwable failure)
     {
         if (isPrivilegedVoteCommitting && from.id == node.id().id && !isDone()) finishWithFailure(failure);
-        else super.exclusiveOnFailure(from, failure);
+        else super.onFailureExclusive(from, failure);
     }
 
     protected CoordinationAdapter<Result> adapter()

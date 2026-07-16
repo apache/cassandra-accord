@@ -399,7 +399,7 @@ public class RemoteListenersTest
                   ignore -> new ProgressLog.NoOpProgressLog(),
                   ignore -> new DefaultLocalListeners(null, new DefaultRemoteListeners((a, b, c, d, e)->{}),
                                                       DefaultLocalListeners.DefaultNotifySink.INSTANCE),
-                  new EpochUpdateHolder());
+                  CommandStores.RangesForEpoch.EMPTY);
             this.storeId = id;
         }
 

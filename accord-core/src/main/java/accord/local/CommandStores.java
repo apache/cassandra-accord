@@ -48,7 +48,6 @@ import accord.api.Journal;
 import accord.api.LocalListeners;
 import accord.api.ProgressLog;
 import accord.api.RoutingKey;
-import accord.local.CommandStore.EpochUpdateHolder;
 import accord.primitives.AbstractRanges;
 import accord.primitives.AbstractUnseekableKeys;
 import accord.primitives.EpochSupplier;
@@ -127,7 +126,7 @@ public abstract class CommandStores implements AsyncExecutorFactory
          */
         Ranges ranges(ShardHolder shard);
 
-        default @Nullable long minEpoch() { return -1L; };
+        default long minEpoch() { return -1L; };
     }
 
     public interface UnrestrictedStoreSelector extends StoreSelector
@@ -354,7 +353,7 @@ public abstract class CommandStores implements AsyncExecutorFactory
             this.journal = journal;
         }
 
-        CommandStore create(int id, EpochUpdateHolder rangesForEpoch)
+        CommandStore create(int id, RangesForEpoch rangesForEpoch)
         {
             return shardFactory.create(id, node, agent, this.store, progressLogFactory, listenersFactory, rangesForEpoch, journal);
         }
@@ -721,6 +720,20 @@ public abstract class CommandStores implements AsyncExecutorFactory
             }
             return removed;
         }
+
+        public boolean isPrefixOf(RangesForEpoch that)
+        {
+            if (this.size() > that.size())
+                return false;
+
+            for (int i = 0 ; i < size() ; ++i)
+            {
+                if (this.epochs[i] != that.epochs[i] || !this.ranges[i].equals(that.ranges[i]))
+                    return false;
+            }
+
+            return true;
+        }
     }
 
     protected void loadSnapshot(Snapshot toLoad)
@@ -927,9 +940,7 @@ public abstract class CommandStores implements AsyncExecutorFactory
             {
                 // TODO (required): This is updating the a non-volatile field in the previous Snapshot, why modify it at all, even with volatile the guaranteed visibility is weak even with mutual exclusion
                 shard.ranges = shard.ranges().withRanges(newTopology.epoch(), current.without(subtracted));
-                shard.store.epochUpdateHolder.remove(epoch, shard.ranges, removeRanges);
-
-                bootstrapUpdates.add(shard.store.unbootstrap(epoch, removeRanges));
+                bootstrapUpdates.add(shard.store.unbootstrap(epoch, shard.ranges, removeRanges));
             }
 
             Ranges regainedRanges = shard.ranges().all().slice(added, Minimal);
@@ -953,11 +964,12 @@ public abstract class CommandStores implements AsyncExecutorFactory
             logger.info("Epoch {} adding {} to local command stores", epoch, added);
             for (Ranges addRanges : shardDistributor.split(added))
             {
-                EpochUpdateHolder updateHolder = new EpochUpdateHolder();
                 RangesForEpoch rangesForEpoch = new RangesForEpoch(epoch, addRanges);
-                updateHolder.add(epoch, rangesForEpoch, addRanges);
-                ShardHolder shard = new ShardHolder(supplier.create(nextId++, updateHolder), previouslyOwned.regains(addRanges));
+                ShardHolder shard = new ShardHolder(supplier.create(nextId++, rangesForEpoch), previouslyOwned.regains(addRanges));
                 shard.ranges = rangesForEpoch;
+                bootstrapUpdates.add(() -> EpochReady.all(epoch, shard.store.execute((PreLoadContext.Empty)() -> "Saving RangesForEpoch to journal for " + shard.store, safeStore -> {
+                    safeStore.setRangesForEpoch(rangesForEpoch); // to persist it
+                })));
 
                 Map<BootstrapRangeAction, Ranges> partitioned = addRanges.partitioningBy(range -> shouldBootstrap(node, prev.global, newLocalTopology, range), BootstrapRangeAction.class);
                 for (Map.Entry<BootstrapRangeAction, Ranges> entry : partitioned.entrySet())
@@ -1176,11 +1188,7 @@ public abstract class CommandStores implements AsyncExecutorFactory
         {
             RangesForEpoch rfe = e.getValue();
             Invariants.require(rfe != null);
-            EpochUpdateHolder holder = new EpochUpdateHolder();
-            ShardHolder shard = new ShardHolder(supplier.create(e.getKey(), holder), rfe, update.previouslyOwned.regains(rfe.currentRanges()));
-            // TODO (required): if the add is necessary (highly unlikely) it needs to be done once journal is writeable so we NEED to move this
-            if (!shard.ranges.equals(shard.store.rangesForEpoch))
-                holder.add(1, e.getValue(), rfe.all());
+            ShardHolder shard = new ShardHolder(supplier.create(e.getKey(), rfe), rfe, update.previouslyOwned.regains(rfe.currentRanges()));
             maxId = Math.max(maxId, e.getKey());
             shards[i++] = shard;
         }
@@ -1202,35 +1210,7 @@ public abstract class CommandStores implements AsyncExecutorFactory
             RangesForEpoch rfe = e.getValue();
             Invariants.require(rfe != null);
             ShardHolder shard = new ShardHolder(current.byId(storeId), rfe, update.previouslyOwned.regains(rfe.all()));
-            EpochUpdateHolder holder = shard.store.epochUpdateHolder;
-            rfe.forEach(new BiConsumer<>()
-            {
-                RangesForEpoch accumulator = null;
-                Ranges prev = null;
-                public void accept(Long epoch, Ranges ranges)
-                {
-                    if (accumulator == null)
-                        accumulator = new RangesForEpoch(epoch, ranges);
-                    else
-                        accumulator = accumulator.withRanges(epoch, ranges);
-
-                    Ranges additions = ranges;
-                    Ranges removals = Ranges.EMPTY;
-                    if (prev != null)
-                    {
-                        additions = ranges.without(prev);
-                        removals = prev.without(ranges);
-                    }
-
-                    if (!additions.isEmpty())
-                        holder.add(epoch, accumulator, additions);
-                    if (!removals.isEmpty())
-                        holder.remove(epoch, accumulator, removals);
-                    shard.store.unsafeUpdateRangesForEpoch();
-                    prev = ranges;
-                }
-            });
-
+            shard.store.unsafeSetRangesForEpoch(rfe);
             shards[storeId] = shard;
             maxId = Math.max(maxId, storeId);
         }

@@ -33,6 +33,7 @@ import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.SequentialAsyncExecutor;
 import accord.messages.Callback;
+import accord.messages.Callback.CallbackExclusive;
 import accord.primitives.Participants;
 import accord.primitives.Route;
 import accord.primitives.WithQuorum;
@@ -53,7 +54,7 @@ import static accord.utils.Invariants.debug;
 import static accord.utils.Invariants.illegalState;
 
 // TODO (expected): configure the number of initial requests we send
-public abstract class ReadCoordinator<Result, Reply extends accord.messages.Reply> extends ReadTracker implements Callback<Reply>, Coordination
+public abstract class ReadCoordinator<Result, Reply extends accord.messages.Reply> extends ReadTracker implements Callback<Reply>, CallbackExclusive<Reply>, Coordination
 {
     public enum Action
     {
@@ -119,6 +120,7 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
     private BiConsumer<? super Result, Throwable> callback;
     private boolean isDone;
     private Throwable failure;
+    boolean unsafeToReplyImmediately;
 
     protected ReadCoordinator(Node node, SequentialAsyncExecutor executor, Topologies topologies, TxnId txnId, Participants<?> participants, BiConsumer<? super Result, Throwable> callback)
     {
@@ -142,24 +144,19 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
     @Override
     public final void onSuccess(Node.Id from, Reply reply)
     {
-        executor.executeMaybeImmediately(() -> {
-            try { onSuccessExclusive(from, reply); }
-            catch (Throwable t) { exclusiveOnCallbackFailure(from, t); }
-        });
+        CallbackExclusive.onSuccess(executor, unsafeToReplyImmediately, this, from, reply);
     }
 
     @Override
     public final void onSlow(Node.Id from)
     {
-        try { exclusiveOnSlowResponse(from); }
-        catch (Throwable t) { exclusiveOnCallbackFailure(from, t); }
+        CallbackExclusive.onSlow(executor, unsafeToReplyImmediately, this, from);
     }
 
     @Override
     public final void onFailure(Node.Id from, Throwable failure)
     {
-        try { exclusiveOnFailure(from, failure); }
-        catch (Throwable t) { exclusiveOnCallbackFailure(from, t); }
+        CallbackExclusive.onFailure(executor, unsafeToReplyImmediately, this, from, failure);
     }
 
     @Override
@@ -169,7 +166,8 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
         return true;
     }
 
-    protected void onSuccessExclusive(Id from, Reply reply)
+    @Override
+    public void onSuccessExclusive(Id from, Reply reply)
     {
         if (isDone)
             return;
@@ -184,7 +182,7 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
         {
             default: throw new UnhandledEnum(action);
             case Aborted:
-                setDone();
+                trySetDone();
 
             case None:
                 break;
@@ -212,7 +210,8 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
         }
     }
 
-    protected void exclusiveOnSlowResponse(Id from)
+    @Override
+    public void onSlowExclusive(Id from)
     {
         if (isDone)
             return;
@@ -225,11 +224,12 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
         }
         catch (Throwable t)
         {
-            exclusiveOnCallbackFailure(from, t);
+            onCallbackFailureExclusive(from, t);
         }
     }
 
-    protected void exclusiveOnFailure(Id from, Throwable failure)
+    @Override
+    public void onFailureExclusive(Id from, Throwable failure)
     {
         if (isDone)
             return;
@@ -250,11 +250,12 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
         }
         catch (Throwable t)
         {
-            exclusiveOnCallbackFailure(from, t);
+            onCallbackFailureExclusive(from, t);
         }
     }
 
-    protected void exclusiveOnCallbackFailure(Id from, Throwable failure)
+    @Override
+    public void onCallbackFailureExclusive(Id from, Throwable failure)
     {
         try
         {
@@ -319,12 +320,12 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
         finishOnFailure();
     }
 
-    boolean isDone()
+    final boolean isDone()
     {
         return isDone;
     }
 
-    void setDone()
+    final void setDone()
     {
         Invariants.require(!isDone);
         isDone = true;
@@ -333,7 +334,7 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
             Coordination.traceStop(tracing, this);
     }
 
-    boolean trySetDone()
+    final boolean trySetDone()
     {
         if (isDone)
             return false;
@@ -341,7 +342,7 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
         return true;
     }
 
-    private void invokeOnDone(Success success, Throwable failure)
+    final void invokeOnDone(Success success, Throwable failure)
     {
         setDone();
         try { onDone(success, failure); }
@@ -374,7 +375,9 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
 
     protected void start(List<Id> to)
     {
+        unsafeToReplyImmediately = true;
         to.forEach(this::contact);
+        unsafeToReplyImmediately = false;
     }
 
     public final void start()
@@ -407,7 +410,9 @@ public abstract class ReadCoordinator<Result, Reply extends accord.messages.Repl
         RequestStatus status = trySendMore(List::add, contact);
         if (tracing != null)
             tracing.trace(null, "contacting %s", contact);
+        unsafeToReplyImmediately = true;
         contact.forEach(this::contact);
+        unsafeToReplyImmediately = false;
         return status;
     }
 

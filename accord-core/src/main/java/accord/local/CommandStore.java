@@ -29,7 +29,6 @@ import java.util.NavigableMap;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -104,43 +103,6 @@ public abstract class CommandStore implements AbstractAsyncExecutor, SequentialA
 {
     private static final Logger logger = LoggerFactory.getLogger(CommandStore.class);
 
-    public static class EpochUpdate
-    {
-        public final RangesForEpoch newRangesForEpoch;
-        public final RedundantBefore addRedundantBefore;
-
-        EpochUpdate(RangesForEpoch newRangesForEpoch, RedundantBefore addRedundantBefore)
-        {
-            this.newRangesForEpoch = newRangesForEpoch;
-            this.addRedundantBefore = addRedundantBefore;
-        }
-    }
-
-    // TODO (required): we only REMOVE ranges now, so it should be possible to simplify this
-    public static class EpochUpdateHolder extends AtomicReference<EpochUpdate>
-    {
-        // TODO (desired): can better encapsulate by accepting only the newRangesForEpoch and deriving the add/remove ranges
-        public void add(long epoch, RangesForEpoch newRangesForEpoch, Ranges addRanges)
-        {
-            RedundantBefore addRedundantBefore = RedundantBefore.create(addRanges, epoch, Long.MAX_VALUE, TxnId.minForEpoch(epoch), UNREADY_ONLY);
-            update(newRangesForEpoch, addRedundantBefore);
-        }
-
-        public void remove(long epoch, RangesForEpoch newRangesForEpoch, Ranges removeRanges)
-        {
-            RedundantBefore addRedundantBefore = RedundantBefore.create(removeRanges, Long.MIN_VALUE, epoch, TxnId.NONE, SomeStatus.NONE);
-            update(newRangesForEpoch, addRedundantBefore);
-        }
-
-        private void update(RangesForEpoch newRangesForEpoch, RedundantBefore addRedundantBefore)
-        {
-            EpochUpdate baseUpdate = new EpochUpdate(newRangesForEpoch, addRedundantBefore);
-            EpochUpdate cur = get();
-            if (cur == null || !compareAndSet(cur, new EpochUpdate(newRangesForEpoch, RedundantBefore.merge(cur.addRedundantBefore, addRedundantBefore))))
-                set(baseUpdate);
-        }
-    }
-
     public interface Factory
     {
         CommandStore create(int id,
@@ -149,7 +111,7 @@ public abstract class CommandStore implements AbstractAsyncExecutor, SequentialA
                             DataStore store,
                             ProgressLog.Factory progressLogFactory,
                             LocalListeners.Factory listenersFactory,
-                            EpochUpdateHolder rangesForEpoch,
+                            RangesForEpoch rangesForEpoch,
                             Journal journal);
     }
 
@@ -159,7 +121,6 @@ public abstract class CommandStore implements AbstractAsyncExecutor, SequentialA
     protected final DataStore dataStore;
     protected final ProgressLog progressLog;
     protected final LocalListeners listeners;
-    protected final EpochUpdateHolder epochUpdateHolder;
 
     // Used in markShardStale to make sure the staleness includes in progress bootstraps
     // TODO (desired): migrate to BTree
@@ -214,7 +175,7 @@ public abstract class CommandStore implements AbstractAsyncExecutor, SequentialA
                            DataStore dataStore,
                            ProgressLog.Factory progressLogFactory,
                            LocalListeners.Factory listenersFactory,
-                           EpochUpdateHolder epochUpdateHolder)
+                           RangesForEpoch rangesForEpoch)
     {
         this.id = id;
         this.node = node;
@@ -222,7 +183,7 @@ public abstract class CommandStore implements AbstractAsyncExecutor, SequentialA
         this.dataStore = dataStore;
         this.progressLog = progressLogFactory.create(this);
         this.listeners = listenersFactory.create(this);
-        this.epochUpdateHolder = epochUpdateHolder;
+        loadRangesForEpoch(rangesForEpoch);
     }
 
     public final int id()
@@ -255,34 +216,6 @@ public abstract class CommandStore implements AbstractAsyncExecutor, SequentialA
         waitingOnVisibility.clear();
     }
 
-    public void updateRangesForEpoch(SafeCommandStore safeStore)
-    {
-        EpochUpdate update = epochUpdateHolder.get();
-        if (update == null)
-            return;
-
-        update = epochUpdateHolder.getAndSet(null);
-        if (update.addRedundantBefore.size() > 0)
-            safeStore.upsertRedundantBefore(update.addRedundantBefore);
-        if (update.newRangesForEpoch != null)
-            safeStore.setRangesForEpoch(update.newRangesForEpoch);
-
-        safeStore.persistFieldUpdates();
-    }
-
-    @VisibleForTesting
-    public void unsafeUpdateRangesForEpoch()
-    {
-        EpochUpdate update = epochUpdateHolder.getAndSet(null);
-        if (update == null)
-            return;
-
-        if (update.addRedundantBefore.size() > 0)
-            unsafeUpsertRedundantBefore(update.addRedundantBefore);
-        if (update.newRangesForEpoch != null)
-            unsafeSetRangesForEpoch(update.newRangesForEpoch);
-    }
-
     public RangesForEpoch unsafeGetRangesForEpoch()
     {
         return rangesForEpoch;
@@ -304,15 +237,15 @@ public abstract class CommandStore implements AbstractAsyncExecutor, SequentialA
         rangesForEpoch = nonNull(newRangesForEpoch);
     }
 
-    protected final void unsafeClearRangesForEpoch()
-    {
-        rangesForEpoch = null;
-    }
-
     protected void loadRangesForEpoch(RangesForEpoch newRangesForEpoch)
     {
-        Invariants.require(this.rangesForEpoch == null);
+        Invariants.require(this.rangesForEpoch == null || rangesForEpoch.isPrefixOf(newRangesForEpoch));
         unsafeSetRangesForEpoch(newRangesForEpoch);
+        if (redundantBefore.isEmpty() && newRangesForEpoch.size() > 0)
+        {
+            long minEpoch = rangesForEpoch.epochAtIndex(0);
+            loadRedundantBefore(RedundantBefore.create(rangesForEpoch.all(), minEpoch, Long.MAX_VALUE, TxnId.minForEpoch(minEpoch), UNREADY_ONLY));
+        }
     }
 
     protected final void unsafeClearPermanentlyUnsafeToRead()
@@ -390,8 +323,8 @@ public abstract class CommandStore implements AbstractAsyncExecutor, SequentialA
 
     protected void loadRedundantBefore(RedundantBefore newRedundantBefore)
     {
-        Invariants.require(redundantBefore == null || redundantBefore.equals(RedundantBefore.EMPTY));
-        Invariants.require(newRedundantBefore != null);
+        Invariants.require(redundantBefore == null || redundantBefore.foldl((b, v) -> v && b.bounds.length == 1 && b.status(0) == 0 && b.status(1) == UNREADY_ONLY.encoded, true));
+        Invariants.require(newRedundantBefore != null && (redundantBefore == null || newRedundantBefore.isAtLeast(redundantBefore)));
         unsafeSetRedundantBefore(newRedundantBefore);
     }
 
@@ -850,16 +783,20 @@ public abstract class CommandStore implements AbstractAsyncExecutor, SequentialA
             });
     }
 
-    Supplier<EpochReady> unbootstrap(long epoch, Ranges removedRanges)
+    Supplier<EpochReady> unbootstrap(long epoch, RangesForEpoch newRangesForEpoch, Ranges removeRanges)
     {
         return () -> {
             AsyncResult<Void> done = submit((Empty) () -> "Unbootstrap", safeStore -> {
                 for (Bootstrap prev : bootstraps)
                 {
-                    Ranges abort = prev.allValid.slice(removedRanges, Minimal);
+                    Ranges abort = prev.allValid.slice(removeRanges, Minimal);
                     if (!abort.isEmpty())
                         prev.invalidate(abort);
                 }
+                Invariants.require(rangesForEpoch.isPrefixOf(newRangesForEpoch));
+                RedundantBefore addRedundantBefore = RedundantBefore.create(removeRanges, Long.MIN_VALUE, epoch, TxnId.NONE, SomeStatus.NONE);
+                safeStore.setRangesForEpoch(newRangesForEpoch);
+                safeStore.upsertRedundantBefore(addRedundantBefore);
                 return null;
             });
 

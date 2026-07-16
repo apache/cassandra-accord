@@ -40,6 +40,7 @@ import com.google.common.collect.Ordering;
 import accord.utils.AsymmetricComparator;
 import accord.utils.Invariants;
 import accord.utils.SortedArrays;
+import accord.utils.TriFunction;
 import accord.utils.btree.IntervalBTree.IntervalMaxIndex;
 import accord.utils.btree.UpdateFunction.NoOp;
 
@@ -1846,6 +1847,33 @@ public class BTree
             if (i < childOffset)
                 applyValue((V) btree[i], function, argument);
         }
+    }
+
+    public static <I, O> O foldl(Object[] btree, BiFunction<I, O, O> function, O accumulator)
+    {
+        return BTree.<I, BiFunction<I, O, O>, O>foldl(btree, function, BiFunction::apply, accumulator);
+    }
+
+    public static <I, P, O> O foldl(Object[] btree, P param, TriFunction<P, I, O, O> function, O accumulator)
+    {
+        if (isLeaf(btree))
+            return foldlLeaf(btree, function, param, accumulator);
+
+        int keys = getBranchKeyEnd(btree);
+        for (int i = 0; i < keys; i++)
+        {
+            accumulator = foldl((Object[]) btree[keys + i], param, function, accumulator);
+            accumulator = function.apply(param, (I) btree[i], accumulator);
+        }
+        return foldl((Object[]) btree[2 * keys], param, function, accumulator);
+    }
+
+    private static <I, P, O> O foldlLeaf(Object[] btree, TriFunction<P, I, O, O> function, P param, O accumulator)
+    {
+        int limit = sizeOfLeaf(btree);
+        for (int i = 0; i < limit; i++)
+            accumulator = function.apply(param, (I) btree[i], accumulator);
+        return accumulator;
     }
 
     /**

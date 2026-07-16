@@ -39,17 +39,29 @@ public interface Callback<R>
 
     interface CallbackExclusive<R>
     {
-        static <R> void onSuccess(AsyncExecutor executor, CallbackExclusive<R> callback, Node.Id from, R success)
+        private static void replyMaybeImmediately(AsyncExecutor executor, boolean doNotReplyImmediately, Runnable run)
         {
-            executor.executeMaybeImmediately(() -> {
-                try { callback.onSuccessExclusive(from, success); }
-                catch (Throwable t) { callback.onCallbackFailureExclusive(from, t); }
-            });
+            if (doNotReplyImmediately || !executor.tryExecuteImmediately(run))
+                executor.execute(run);
         }
 
-        static <R> void onFailure(AsyncExecutor executor, CallbackExclusive<R> callback, Node.Id from, Throwable failure)
+        static <R> Runnable runOnSuccess(CallbackExclusive<R> callback, Node.Id from, R success)
         {
-            executor.executeMaybeImmediately(() -> {
+            return () -> {
+                try { callback.onSuccessExclusive(from, success); }
+                catch (Throwable t) { callback.onCallbackFailureExclusive(from, t); }
+            };
+        }
+
+        static <R> void onSuccess(AsyncExecutor executor, boolean doNotReplyImmediately, CallbackExclusive<R> callback, Node.Id from, R success)
+        {
+            replyMaybeImmediately(executor, doNotReplyImmediately, runOnSuccess(callback, from, success));
+        }
+
+
+        static <R> Runnable runOnFailure(CallbackExclusive<R> callback, Node.Id from, Throwable failure)
+        {
+            return () -> {
                 try { callback.onFailureExclusive(from, failure); }
                 catch (Throwable t)
                 {
@@ -60,15 +72,25 @@ public interface Callback<R>
                     }
                     callback.onCallbackFailureExclusive(from, t);
                 }
-            });
+            };
         }
 
-        static <R> void onSlow(AsyncExecutor executor, CallbackExclusive<R> callback, Node.Id from)
+        static <R> void onFailure(AsyncExecutor executor, boolean doNotReplyImmediately, CallbackExclusive<R> callback, Node.Id from, Throwable failure)
         {
-            executor.executeMaybeImmediately(() -> {
+            replyMaybeImmediately(executor, doNotReplyImmediately, runOnFailure(callback, from, failure));
+        }
+
+        static <R> Runnable runOnSlow(CallbackExclusive<R> callback, Node.Id from)
+        {
+            return () -> {
                 try { callback.onSlowExclusive(from); }
                 catch (Throwable t) { callback.onCallbackFailureExclusive(from, t); }
-            });
+            };
+        }
+
+        static <R> void onSlow(AsyncExecutor executor, boolean unsafeToReplyImmediately, CallbackExclusive<R> callback, Node.Id from)
+        {
+            replyMaybeImmediately(executor, unsafeToReplyImmediately, runOnSlow(callback, from));
         }
 
         void onSuccessExclusive(Node.Id from, R reply);
@@ -89,19 +111,19 @@ public interface Callback<R>
         @Override
         public final void onSuccess(Node.Id from, R reply)
         {
-            CallbackExclusive.onSuccess(executor, this, from, reply);
+            CallbackExclusive.onSuccess(executor, true, this, from, reply);
         }
 
         @Override
         public final void onSlow(Node.Id from)
         {
-            CallbackExclusive.onSlow(executor, this, from);
+            CallbackExclusive.onSlow(executor, true, this, from);
         }
 
         @Override
         public final void onFailure(Node.Id from, Throwable failure)
         {
-            CallbackExclusive.onFailure(executor, this, from, failure);
+            CallbackExclusive.onFailure(executor, true, this, from, failure);
         }
     }
 }

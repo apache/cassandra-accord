@@ -59,6 +59,7 @@ import accord.local.CommandBuilder;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.CommandStores;
+import accord.local.CommandStores.RangesForEpoch;
 import accord.local.Node;
 import accord.local.NodeCommandStoreService;
 import accord.local.PreLoadContext;
@@ -898,7 +899,7 @@ public class CommandsForKeyTest
         }
 
         @Override
-        public CommandStores.RangesForEpoch ranges()
+        public RangesForEpoch ranges()
         {
             throw new UnsupportedOperationException();
         }
@@ -980,7 +981,7 @@ public class CommandsForKeyTest
                   null,
                   ignore -> new ProgressLog.NoOpProgressLog(),
                   ignore -> new DefaultLocalListeners(null, new DefaultRemoteListeners((a, b, c, d, e)->{}), DefaultNotifySink.INSTANCE),
-                  new EpochUpdateHolder());
+                  RangesForEpoch.EMPTY);
             this.pruneInterval = pruneInterval;
             this.pruneHlcDelta = pruneHlcDelta;
             this.maxConflictsHlcDelta = maxConflictsHlcDelta;

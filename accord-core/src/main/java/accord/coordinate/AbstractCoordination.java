@@ -65,6 +65,7 @@ public abstract class AbstractCoordination<P extends Participants<?>, Result, Re
     private BiConsumer<? super Result, Throwable> callback;
     private Object[] replyState;
     private int replyCount;
+    private boolean unsafeToReplyImmediately;
 
     protected AbstractCoordination(Node node, SequentialAsyncExecutor executor, TxnId txnId, P scope, SortedArrayList<Node.Id> nodes, BiConsumer<? super Result, Throwable> callback)
     {
@@ -197,6 +198,7 @@ public abstract class AbstractCoordination<P extends Participants<?>, Result, Re
     void contact(Function<Node.Id, Request> request, @Nullable Predicate<Node.Id> include)
     {
         executor.executeMaybeImmediately(() -> {
+            unsafeToReplyImmediately = true;
             AbstractTracker<?> tracker = tracker();
             Topologies topologies = tracker.topologies();
             if (tracing != null)
@@ -227,6 +229,7 @@ public abstract class AbstractCoordination<P extends Participants<?>, Result, Re
                     }
                 }
             }
+            unsafeToReplyImmediately = false;
         });
     }
 
@@ -242,19 +245,19 @@ public abstract class AbstractCoordination<P extends Participants<?>, Result, Re
     @Override
     public final void onSuccess(Node.Id from, Reply reply)
     {
-        CallbackExclusive.onSuccess(executor, this, from, reply);
+        CallbackExclusive.onSuccess(executor, unsafeToReplyImmediately, this, from, reply);
     }
 
     @Override
     public final void onSlow(Node.Id from)
     {
-        CallbackExclusive.onSlow(executor, this, from);
+        CallbackExclusive.onSlow(executor, unsafeToReplyImmediately, this, from);
     }
 
     @Override
     public final void onFailure(Node.Id from, Throwable failure)
     {
-        CallbackExclusive.onFailure(executor, this, from, failure);
+        CallbackExclusive.onFailure(executor, unsafeToReplyImmediately, this, from, failure);
     }
 
     @Override

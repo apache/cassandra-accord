@@ -42,6 +42,7 @@ import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.primitives.SaveStatus;
 import accord.primitives.TxnId;
+import accord.utils.ArrayBuffers.BufferList;
 import accord.utils.AsymmetricComparator;
 import accord.utils.Invariants;
 import accord.utils.btree.BTree;
@@ -292,7 +293,6 @@ public class DefaultLocalListeners implements LocalListeners
         static final RegisteredComplexListener[] NO_LISTENERS = new RegisteredComplexListener[0];
         RegisteredComplexListener[] listeners = NO_LISTENERS;
         int count, length;
-        boolean notifying;
 
         /**
          * Append to the end of the list; if we aren't reentering from notify then if the next position
@@ -307,10 +307,11 @@ public class DefaultLocalListeners implements LocalListeners
             Invariants.require(listeners[index] == remove);
             listeners[index] = null;
             remove.index = -1;
-            // we don't decrement length even if count==length so as to simplify reentry
-            --count;
-            if (Invariants.isParanoid() && !notifying) checkIntegrity();
-            return count > 0 || notifying ? this : null;
+            if (--count == 0)
+                return null;
+
+            if (Invariants.isParanoid()) checkIntegrity();
+            return this;
         }
 
         /**
@@ -323,10 +324,10 @@ public class DefaultLocalListeners implements LocalListeners
             if (listeners.length == length)
             {
                 RegisteredComplexListener[] oldListeners = listeners;
-                if (length >= count / 2 || notifying)
+                if (length >= count / 2)
                     listeners = new RegisteredComplexListener[Math.max(2, length * 2)];
 
-                if (count == length || notifying)
+                if (count == length)
                 {
                     // copy to same positions
                     System.arraycopy(oldListeners, 0, listeners, 0, length);
@@ -353,7 +354,7 @@ public class DefaultLocalListeners implements LocalListeners
             add.index = length;
             length++;
             count++;
-            if (Invariants.isParanoid() && !notifying) checkIntegrity();
+            if (Invariants.isParanoid()) checkIntegrity();
         }
 
         /**
@@ -362,61 +363,15 @@ public class DefaultLocalListeners implements LocalListeners
          * listeners that were present when we started. We compact the listener collection as we go, though given
          * reentry there is no guarantee the list at exit is compacted.
          */
-        RegisteredComplexListeners notify(SafeCommandStore safeStore, SafeCommand safeCommand, NotifySink notifySink)
+        void collect(List<RegisteredComplexListener> notify)
         {
-            int count = 0;
-            int length = this.length;
-
-            notifying = true;
             for (int i = 0 ; i < length ; ++i)
             {
                 RegisteredComplexListener next = listeners[i];
                 if (next == null) continue;
                 Invariants.require(next.index == i);
-                if (!notifySink.notify(safeStore, safeCommand, listeners[i].listener))
-                {
-                    if (next.index >= 0)
-                        --this.count;
-                    next.index = -1;
-                }
-                else if (next.index >= 0) // can be cancelled by notify, without notify return false
-                {
-                    Invariants.requireArgument(next.index == i);
-                    if (i != count)
-                    {
-                        listeners[count] = next;
-                        next.index = count;
-                    }
-                    ++count;
-                }
-                else Invariants.require(listeners[i] == null);
+                notify.add(listeners[i]);
             }
-            notifying = false;
-
-            if (length != this.length)
-            {
-                // we have had some concurrent insertions (concurrent removals do not alter length)
-                // we also have some empty slots, so compact the new entries
-                for (int i = length ; i < this.length ; ++i)
-                {
-                    RegisteredComplexListener next = listeners[i];
-                    if (next == null)
-                        continue;
-
-                    Invariants.require(next.index == i);
-                    listeners[count] = next;
-                    next.index = count;
-                    count++;
-                }
-                Invariants.require(this.count <= count); // we could have already removed some items from the compacted section
-                length = this.length;
-            }
-
-            Arrays.fill(listeners, count, length, null);
-            this.length = count;
-
-            if (Invariants.isParanoid()) checkIntegrity();
-            return count == 0 ? null : this;
         }
 
         private void checkIntegrity()
@@ -520,13 +475,59 @@ public class DefaultLocalListeners implements LocalListeners
         this.txnListeners = txnListeners;
     }
 
-    private void notifyComplexListeners(SafeCommandStore safeStore, SafeCommand safeCommand)
+    static class NotifyComplex extends BufferList<RegisteredComplexListener> implements BiFunction<TxnId, RegisteredComplexListeners, RegisteredComplexListeners>
     {
-        complexListeners.compute(safeCommand.txnId(), (id, cur) -> {
+        boolean remove;
+        @Override
+        public RegisteredComplexListeners apply(TxnId txnId, RegisteredComplexListeners cur)
+        {
             if (cur == null)
                 return null;
-            return cur.notify(safeStore, safeCommand, notifySink);
-        });
+
+            if (remove)
+            {
+                for (RegisteredComplexListener listener : this)
+                {
+                    if (listener != null && null == cur.remove(listener))
+                        return null; // can only return early if remaining listeners already removed
+                }
+            }
+            else
+            {
+                cur.collect(this);
+            }
+
+            return cur;
+        }
+    }
+
+    private void notifyComplexListeners(SafeCommandStore safeStore, SafeCommand safeCommand)
+    {
+        try (NotifyComplex notify = new NotifyComplex())
+        {
+            complexListeners.compute(safeCommand.txnId(), notify);
+
+            int size = notify.size(), count = size;
+            for (int i = 0 ; i < size ; ++i)
+            {
+                RegisteredComplexListener registered = notify.get(i);
+                if (registered.index < 0) continue;
+                boolean noChange = notifySink.notify(safeStore, safeCommand, registered.listener)
+                                   || registered.index < 0; // check we haven't removed ourselves during notify, to avoid wasted work
+
+                if (noChange)
+                {
+                    notify.set(i, null);
+                    --count;
+                }
+            }
+
+            if (count > 0)
+            {
+                notify.remove = true;
+                complexListeners.compute(safeCommand.txnId(), notify);
+            }
+        }
     }
 
     @Override
@@ -555,9 +556,9 @@ public class DefaultLocalListeners implements LocalListeners
         complexListeners.forEach((key, value) -> {
             // the listener registration needs to be invalidated so that a caller does not try to cancel it
             RegisteredComplexListeners listeners = complexListeners.remove(key);
-            for (int i = 0 ; i < listeners.length ; i++)
+            if (listeners != null)
             {
-                if (listeners.listeners[i] != null)
+                for (int i = 0 ; i < listeners.count ; i++)
                     listeners.listeners[i].index = -1;
             }
         });
@@ -716,13 +717,7 @@ public class DefaultLocalListeners implements LocalListeners
                                 maxBufferCount = bufferCount;
                             }
 
-                            int count = 0;
-                            for (int i = 0 ; i < cur.length ; ++i)
-                            {
-                                if (cur.listeners[i] != null)
-                                    buffer[count++] = cur.listeners[i];
-                            }
-                            Invariants.expect(count == bufferCount);
+                            System.arraycopy(cur.listeners, 0, buffer, 0, bufferCount);
                             return cur;
                         });
 

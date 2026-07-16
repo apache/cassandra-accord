@@ -107,6 +107,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
                                ranges, Arrays.toString(shards))
                       .restore();
             Invariants.require(previouslyOwned.regains(ranges.currentRanges()).equals(regainingRanges));
+            commandStore.loadRangesForEpoch(ranges);
             ShardHolder shard = new ShardHolder(commandStore, ranges, previouslyOwned.regains(ranges.currentRanges()));
             shards[i++] = shard;
         }
@@ -224,26 +225,21 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         private Task<?> active;
         private Thread activeThread;
 
-        public DelayedCommandStore(int id, NodeCommandStoreService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, EpochUpdateHolder epochUpdateHolder, SimulatedDelayedExecutorService executor, CacheLoading cacheLoading, Journal journal)
+        public DelayedCommandStore(int id, NodeCommandStoreService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, LocalListeners.Factory listenersFactory, RangesForEpoch rangesForEpoch, SimulatedDelayedExecutorService executor, CacheLoading cacheLoading, Journal journal)
         {
-            super(id, time, agent, store, progressLogFactory, listenersFactory, epochUpdateHolder, journal);
+            super(id, time, agent, store, progressLogFactory, listenersFactory, rangesForEpoch, journal);
             this.executor = executor;
             this.cacheLoading = cacheLoading;
             this.journal = journal;
             restore();
         }
 
-        protected void loadRedundantBefore(RedundantBefore redundantBefore)
+        protected void loadRedundantBefore(RedundantBefore newRedundantBefore)
         {
-            if (redundantBefore == null)
-            {
-                Invariants.require(unsafeGetRedundantBefore().size() == 0);
-            }
-            else
-            {
-                unsafeClearRedundantBefore();
-                super.loadRedundantBefore(redundantBefore);
-            }
+            if (newRedundantBefore == null || newRedundantBefore.isEmpty())
+                return;
+
+            super.loadRedundantBefore(newRedundantBefore);
         }
 
         protected void loadBootstrapBeganAt(NavigableMap<TxnId, Ranges> bootstrapBeganAt)
@@ -263,12 +259,10 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         @Override
         protected void loadRangesForEpoch(RangesForEpoch newRangesForEpoch)
         {
-            if (newRangesForEpoch == null) Invariants.require(super.rangesForEpoch == null);
-            else
-            {
-                unsafeClearRangesForEpoch();
-                super.loadRangesForEpoch(newRangesForEpoch);
-            }
+            if (newRangesForEpoch == null)
+                return;
+
+            super.loadRangesForEpoch(newRangesForEpoch);
         }
 
         @Override
