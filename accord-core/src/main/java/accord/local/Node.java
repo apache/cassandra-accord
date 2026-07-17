@@ -196,6 +196,7 @@ public class Node implements NodeCommandStoreService
 
     private final Coordinations coordinations = new Coordinations();
     private final AtomicLong nextCoordinationId = new AtomicLong();
+    private final AtomicLong nextCoordinatedTransferId = new AtomicLong();
 
     private final ExecuteTxnBacklog executeBacklogSink;
 
@@ -903,6 +904,15 @@ public class Node implements NodeCommandStoreService
         if (startedAtNanos >= nextId && nextCoordinationId.compareAndSet(nextId, startedAtNanos))
             return startedAtNanos;
         return nextCoordinationId.incrementAndGet();
+    }
+
+    public long nextCoordinatedTransferId()
+    {
+        long startedAtNanos = time.elapsed(NANOSECONDS);
+        long nextId = nextCoordinatedTransferId.get();
+        if (startedAtNanos >= nextId && nextCoordinatedTransferId.compareAndSet(nextId, startedAtNanos))
+            return startedAtNanos;
+        return nextCoordinatedTransferId.incrementAndGet();
     }
 
     public void register(Coordination coordination)
