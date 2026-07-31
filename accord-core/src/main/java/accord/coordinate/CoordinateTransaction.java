@@ -133,6 +133,12 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
             return;
         }
 
+        if (txn.read().isUsedForImport() && executeAt.epoch() != txn.read().getImportStreamingEpoch())
+        {
+            finishWithFailure(Rejected.rejected(node.agent(), txnId, scope.homeKey()));
+            return;
+        }
+
         if (executeAt.is(SOFT_REJECT))
         {
             // count soft rejects, and hard reject if too many
