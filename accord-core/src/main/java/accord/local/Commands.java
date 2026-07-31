@@ -589,7 +589,7 @@ public class Commands
         if (promised.compareTo(ballot) <= 0)
             promised = ballot;
 
-        boolean isUsedForImport = command.partialTxn() != null && command.partialTxn().read().isUsedForImport();
+        boolean isUsedForImport = partialTxn != null && partialTxn.read().isUsedForImport();
         if (newSaveStatus == SaveStatus.PreApplied && !waitingOn.isWaiting())
             newSaveStatus = Applying;
         if (newSaveStatus == Applying && (!txnId.is(Write) || writes == null || !writes.keys.intersects(participants.stillExecutes())) && !isUsedForImport)
