@@ -132,7 +132,7 @@ public class Apply extends RouteRequest<ApplyReply>
     @Override
     public Cancellable submit()
     {
-        if (flags.contains(READY_TO_EXECUTE) && fastWritesMayBypassSafeStore() && kind == Kind.Maximal && !txnId.isSyncPoint())
+        if (flags.contains(READY_TO_EXECUTE) && fastWritesMayBypassSafeStore() && kind == Kind.Maximal && !txnId.isSyncPoint() && !txn.read().isUsedForImport())
             return node.commandStores().mapReduceConsume(minEpoch, maxEpoch, this.overrideWithSynchronousApply(this::applyDirect));
 
         return node.commandStores().mapReduceConsume(minEpoch, maxEpoch, this);

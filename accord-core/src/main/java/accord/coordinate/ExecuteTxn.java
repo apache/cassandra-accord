@@ -474,7 +474,7 @@ public class ExecuteTxn extends ReadCoordinator<Result, ReadReply>
         {
             if (!isPrivilegedVoteCommitting)
             {
-                if (txnId.isSomeRead() && !recoverReads())
+                if (txnId.isSomeRead() && !recoverReads() && !txn.read().isUsedForImport())
                 {
                     adapter().persist(node, executor, allTopologies, route, ballot, flags, txnId, txn, executeAt, stableDeps, null, null, null);
                 }

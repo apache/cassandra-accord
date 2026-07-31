@@ -589,9 +589,10 @@ public class Commands
         if (promised.compareTo(ballot) <= 0)
             promised = ballot;
 
+        boolean isUsedForImport = command.partialTxn() != null && command.partialTxn().read().isUsedForImport();
         if (newSaveStatus == SaveStatus.PreApplied && !waitingOn.isWaiting())
             newSaveStatus = Applying;
-        if (newSaveStatus == Applying && (!txnId.is(Write) || writes == null || !writes.keys.intersects(participants.stillExecutes())))
+        if (newSaveStatus == Applying && (!txnId.is(Write) || writes == null || !writes.keys.intersects(participants.stillExecutes())) && !isUsedForImport)
             newSaveStatus = SaveStatus.Applied;
 
         switch (newSaveStatus)
@@ -776,7 +777,10 @@ public class Commands
         //noinspection DataFlowIssue
         safeStore = safeStore; // disable reuse
         Participants<?> executes = command.participants().stillExecutes(); // including any keys we aren't writing
-        if (executes.isEmpty())
+        if (command.partialTxn() != null && command.partialTxn().read().isUsedForImport())
+            return command.partialTxn().read(safeStore, command.executeAt(), executes)
+                    .then(head -> new PostApply<>(head, unsafeStore, txnId, executes, false));
+        else if (executes.isEmpty())
         {
             postApply(safeStore, txnId, false);
             return AsyncChains.success(null);
@@ -874,7 +878,8 @@ public class Commands
 
             case PreApplied:
                 Command.Executed executed = command.asExecuted();
-                if (txnId.is(Write) && executed.writes().keys.intersects(executed.participants().stillExecutes()))
+                boolean isUsedForImport = command.partialTxn() != null && command.partialTxn().read().isUsedForImport();
+                if (txnId.is(Write) && executed.writes().keys.intersects(executed.participants().stillExecutes()) || isUsedForImport)
                 {
                     safeCommand.applying(safeStore);
                     safeStore.notifyListeners(safeCommand, command);
