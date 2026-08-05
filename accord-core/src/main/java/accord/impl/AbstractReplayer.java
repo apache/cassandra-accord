@@ -139,7 +139,8 @@ public abstract class AbstractReplayer implements Journal.Replayer
             }
             else if (command.saveStatus().compareTo(Applying) >= 0 && command.saveStatus().compareTo(TruncatedApplyWithOutcome) <= 0)
             {
-                if (command.txnId().is(Write) && replay.includes(TO_DATA_STORE))
+                // TODO: Verify that command.partialTxn().read() is not null from all call sites
+                if (command.txnId().is(Write) && replay.includes(TO_DATA_STORE) || command.partialTxn().read().isUsedForImport())
                 {
                     Commands.applyChain(safeStore, command)
                             .begin(safeStore.agent());
