@@ -467,6 +467,21 @@ public class LocalListenersTest
     }
 
     @Test
+    public void testClearWithNullHoleFromCancelledComplexListener()
+    {
+        DefaultLocalListeners listeners = new DefaultLocalListeners(null, new NoOpRemoteListeners(), null);
+        TxnId txnId1 = new TxnId(1, 1, Txn.Kind.Write, Routable.Domain.Key, new Node.Id(1));
+
+        ComplexListener listener = (safeStore, safeCommand) -> false;
+        LocalListeners.Registered registeredA = listeners.register(txnId1, listener);
+        listeners.register(txnId1, listener);
+        registeredA.cancel();
+
+        // CASSANDRA-21551: when a listener was removed a null was inserted and clear didn't have null checks so this would fail
+        Assertions.assertDoesNotThrow(listeners::clear);
+    }
+
+    @Test
     public void testComplexListeners()
     {
         DefaultLocalListeners listeners = new DefaultLocalListeners(new RemoteListenersTest.TestCommandStore(1), new DefaultRemoteListeners((DefaultRemoteListeners.NotifySink) null), null);

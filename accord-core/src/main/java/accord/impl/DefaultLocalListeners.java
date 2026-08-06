@@ -558,8 +558,16 @@ public class DefaultLocalListeners implements LocalListeners
             RegisteredComplexListeners listeners = complexListeners.remove(key);
             if (listeners != null)
             {
-                for (int i = 0 ; i < listeners.count ; i++)
-                    listeners.listeners[i].index = -1;
+                if (Invariants.isParanoid()) listeners.checkIntegrity();
+                // listeners may contain null holes (removal nulls a slot in place); iterate the
+                // populated range [0, length) and skip nulls, as notify() does. Iterating by count
+                // and dereferencing every slot NPEs once any listener has been removed.
+                for (int i = 0 ; i < listeners.length ; i++)
+                {
+                    RegisteredComplexListener l = listeners.listeners[i];
+                    if (l != null)
+                        l.index = -1;
+                }
             }
         });
     }
