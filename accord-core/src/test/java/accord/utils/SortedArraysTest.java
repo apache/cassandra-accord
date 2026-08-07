@@ -218,23 +218,28 @@ class SortedArraysTest
                 if (rs.nextBoolean())
                     b.add(a[rs.nextInt(0, a.length)]);
                 else
-                    b.add(rs.nextInt(a[0] - 10, a[a.length - 1] + 10));
+                    b.add(rs.nextInt(a[0] - 100, a[a.length - 1] + 100));
                 mutations--;
             }
 
             b.sort(Integer::compareTo);
+
             int[] bInt = b.stream().mapToInt(i->i).toArray();
             int[] aInt = Arrays.stream(a).mapToInt(i->i).toArray();
 
-            Set<Integer> left = new HashSet<>(Arrays.asList(a));
-            Set<Integer> right = new HashSet<>(b);
-            Set<Integer> intersection = Sets.intersection(left, right);
+            int aStart = aInt.length == 0 ? 0 : rs.nextInt(0, aInt.length);
+            int bStart = b.isEmpty() ? 0 : rs.nextInt(0, b.size());
+
+            Set<Integer> aSet = new HashSet<>(Arrays.asList(Arrays.copyOfRange(a, aStart, a.length)));
+            Set<Integer> bSet = new HashSet<>(b.subList(bStart, b.size()));
+
+            Set<Integer> intersection = Sets.intersection(aSet, bSet);
 
             int[] expected = intersection.stream().mapToInt(i->i).toArray();
             Arrays.sort(expected);
 
-            Assertions.assertArrayEquals(expected, SortedArrays.linearIntersection(aInt, 0, a.length, bInt, 0, bInt.length, new ArrayBuffers.IntBufferCache(4, 1 << 14)));
-            Assertions.assertArrayEquals(expected, SortedArrays.linearIntersection(bInt, 0, bInt.length, aInt, 0, aInt.length, new ArrayBuffers.IntBufferCache(4, 1 << 14)));
+            Assertions.assertArrayEquals(expected, SortedArrays.linearIntersection(aInt, aStart, a.length, bInt, bStart, bInt.length, new ArrayBuffers.IntBufferCache(4, 1 << 14)));
+            Assertions.assertArrayEquals(expected, SortedArrays.linearIntersection(bInt, bStart, bInt.length, aInt, aStart, aInt.length, new ArrayBuffers.IntBufferCache(4, 1 << 14)));
         });
     }
 

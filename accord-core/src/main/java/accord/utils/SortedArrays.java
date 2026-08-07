@@ -515,9 +515,9 @@ public class SortedArrays
                 }
                 else
                 {
-                    resultSize = leftIdx++;
+                    resultSize = leftIdx - leftStart;
                     result = buffers.getInts(resultSize + Math.min(leftEnd - leftIdx, rightEnd - rightIdx));
-                    System.arraycopy(left, 0, result, 0, resultSize);
+                    System.arraycopy(left, leftStart, result, 0, resultSize);
                     break;
                 }
             }
