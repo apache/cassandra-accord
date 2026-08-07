@@ -257,8 +257,9 @@ class SortedArraysTest
             int rightEnd = left.length == 1 ? 1 : rs.nextInt(rightStart + 1, left.length + 1);
 
             var actual = SortedArrays.linearIntersection(left, leftStart, leftEnd,
-                    left, rightStart, rightEnd,
-                    ArrayBuffers.uncachedInts());
+                                                         left, rightStart, rightEnd,
+                                                         ArrayBuffers.uncachedInts());
+
             int expectedStart = Math.max(leftStart, rightStart);
             int expectedEnd = Math.max(expectedStart, Math.min(leftEnd, rightEnd));
             int[] expected = Arrays.copyOfRange(left, expectedStart, expectedEnd);
