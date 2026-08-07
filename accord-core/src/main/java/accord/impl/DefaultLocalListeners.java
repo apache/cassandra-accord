@@ -558,9 +558,8 @@ public class DefaultLocalListeners implements LocalListeners
             RegisteredComplexListeners listeners = complexListeners.remove(key);
             if (listeners != null)
             {
-                for (int i = 0 ; i < listeners.length ; i++)
-                    if (listeners.listeners[i] != null)
-                        listeners.listeners[i].index = -1;
+                for (int i = 0 ; i < listeners.count ; i++)
+                    listeners.listeners[i].index = -1;
             }
         });
     }
