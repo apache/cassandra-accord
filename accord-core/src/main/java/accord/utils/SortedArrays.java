@@ -480,6 +480,8 @@ public class SortedArrays
      */
     public static int[] linearIntersection(int[] left, int leftStart, int leftEnd, int[] right, int rightStart, int rightEnd, ArrayBuffers.IntBuffers buffers)
     {
+        Invariants.require(leftStart <= leftEnd && rightStart <= rightEnd);
+
         if (leftEnd - leftStart > rightEnd - rightStart)
         {
             int[] tmp = left;
