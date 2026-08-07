@@ -244,6 +244,30 @@ class SortedArraysTest
     }
 
     @Test
+    public void testIntLinearIntersectionAdHoc()
+    {
+        Gen<Integer[]> gen = sortedUniqueIntegerArray(0).filter(a -> a.length > 0);
+        qt().forAll(gen, Gens.random()).check((a, rs) -> {
+            int[] left = Arrays.stream(a).mapToInt(i -> i).toArray();
+
+            int leftStart = left.length == 1 ? 0 : rs.nextInt(0, left.length);
+            int leftEnd = left.length == 1 ? 1 : rs.nextInt(leftStart + 1, left.length + 1);
+
+            int rightStart = left.length == 1 ? 0 : rs.nextInt(0, left.length);
+            int rightEnd = left.length == 1 ? 1 : rs.nextInt(rightStart + 1, left.length + 1);
+
+            var actual = SortedArrays.linearIntersection(left, leftStart, leftEnd,
+                    left, rightStart, rightEnd,
+                    ArrayBuffers.uncachedInts());
+            int expectedStart = Math.max(leftStart, rightStart);
+            int expectedEnd = Math.max(expectedStart, Math.min(leftEnd, rightEnd));
+            int[] expected = Arrays.copyOfRange(left, expectedStart, expectedEnd);
+
+            Assertions.assertArrayEquals(expected, actual, String.format("(%d, %d], (%d, %d] -> %s", leftStart, leftEnd, rightStart, rightEnd, Arrays.toString(expected)));
+        });
+    }
+
+    @Test
     public void testLinearIntersectionWithSubset()
     {
         class P
