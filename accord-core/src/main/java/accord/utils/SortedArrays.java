@@ -526,8 +526,9 @@ public class SortedArrays
             {
                 if (!hasMatch)
                     return left.length == 0 ? left : NO_INTS;
-                else
-                    return Arrays.copyOfRange(left, leftStart, leftIdx);
+                if (leftStart == 0 && leftIdx == left.length)
+                    return left;
+                return Arrays.copyOfRange(left, leftStart, leftIdx);
             }
         }
 
