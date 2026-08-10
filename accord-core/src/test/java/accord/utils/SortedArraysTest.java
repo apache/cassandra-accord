@@ -208,7 +208,7 @@ class SortedArraysTest
     @Test
     public void testIntLinearIntersection()
     {
-        Gen<Integer[]> gen = sortedUniqueIntegerArray(0);
+        Gen<Integer[]> gen = sortedUniqueIntegerArray(10000000, 25);
         qt().forAll(gen, Gens.random()).check((a, rs) -> {
             int mutations = a.length == 0 ? 0 : rs.nextInt(1, a.length + 1);
 
