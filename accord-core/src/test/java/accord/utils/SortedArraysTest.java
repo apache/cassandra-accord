@@ -243,9 +243,9 @@ class SortedArraysTest
 
             // First two conditions cover the case where we are expected to return the exact copy
             // if the intersection is an exact match of the smaller array
-            if (bStart == 0 && bEnd == bInt.length && aSet.containsAll(bSet))
+            if (bStart == 0 && bEnd == bInt.length && bInt.length == bSet.size() && aSet.containsAll(bSet))
                 Assertions.assertSame(bInt, SortedArrays.linearIntersection(aInt, aStart, a.length, bInt, bStart, bInt.length, new ArrayBuffers.IntBufferCache(4, 1 << 14)));
-            else if (aStart == 0 && aEnd == aInt.length && bSet.containsAll(aSet))
+            else if (aStart == 0 && aEnd == aInt.length && aInt.length == aSet.size() && bSet.containsAll(aSet))
                 Assertions.assertSame(aInt, SortedArrays.linearIntersection(aInt, aStart, a.length, bInt, bStart, bInt.length, new ArrayBuffers.IntBufferCache(4, 1 << 14)));
             else
             {

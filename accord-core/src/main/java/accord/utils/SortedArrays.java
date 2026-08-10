@@ -518,8 +518,8 @@ public class SortedArrays
                 else
                 {
                     resultSize = leftIdx - leftStart;
-                    result = buffers.getInts(resultSize + Math.min(leftEnd - leftIdx, rightEnd - rightIdx));
                     leftIdx++;
+                    result = buffers.getInts(resultSize + Math.min(leftEnd - leftIdx, rightEnd - rightIdx));
                     System.arraycopy(left, leftStart, result, 0, resultSize);
                     break;
                 }
