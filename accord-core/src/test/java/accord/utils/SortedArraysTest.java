@@ -241,12 +241,13 @@ class SortedArraysTest
             int[] expected = intersection.stream().mapToInt(i->i).toArray();
             Arrays.sort(expected);
 
-            // First two conditions cover the case where we are expected to return the exact copy
+            // First condition covers the case where we are expected to return the exact copy
             // if the intersection is an exact match of the smaller array
             if (bStart == 0 && bEnd == bInt.length && bInt.length == bSet.size() && aSet.containsAll(bSet))
+            {
                 Assertions.assertSame(bInt, SortedArrays.linearIntersection(aInt, aStart, a.length, bInt, bStart, bInt.length, new ArrayBuffers.IntBufferCache(4, 1 << 14)));
-            else if (aStart == 0 && aEnd == aInt.length && aInt.length == aSet.size() && bSet.containsAll(aSet))
-                Assertions.assertSame(aInt, SortedArrays.linearIntersection(aInt, aStart, a.length, bInt, bStart, bInt.length, new ArrayBuffers.IntBufferCache(4, 1 << 14)));
+                Assertions.assertSame(bInt, SortedArrays.linearIntersection(bInt, bStart, bInt.length, aInt, aStart, a.length, new ArrayBuffers.IntBufferCache(4, 1 << 14)));
+            }
             else
             {
                 Assertions.assertArrayEquals(expected, SortedArrays.linearIntersection(aInt, aStart, aEnd, bInt, bStart, bEnd, new ArrayBuffers.IntBufferCache(4, 1 << 14)));
