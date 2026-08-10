@@ -288,6 +288,14 @@ class SortedArraysTest
     }
 
     @Test
+    public void testIntLinearIntersectionAdHoc3()
+    {
+        int[] a = new int[] {0, 2, 8};
+        int[] intersection = SortedArrays.linearIntersection(a, 0, 3, new int[] {0, 2, 8, 10, 12}, 0, 5, new ArrayBuffers.IntBufferCache(4, 1 << 14));
+        Assertions.assertSame(a, intersection);
+    }
+
+    @Test
     public void testLinearIntersectionWithSubset()
     {
         class P
