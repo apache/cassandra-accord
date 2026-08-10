@@ -230,8 +230,8 @@ class SortedArraysTest
             int aStart = aInt.length == 0 ? 0 : rs.nextInt(0, aInt.length);
             int bStart = b.isEmpty() ? 0 : rs.nextInt(0, b.size());
 
-            int aEnd = rs.nextInt(aStart, aInt.length+1);
-            int bEnd = rs.nextInt(bStart, bInt.length+1);
+            int aEnd = rs.nextInt(aStart, aInt.length + 1);
+            int bEnd = rs.nextInt(bStart, bInt.length + 1);
 
             Set<Integer> aSet = new HashSet<>(Arrays.asList(Arrays.copyOfRange(a, aStart, aEnd)));
             Set<Integer> bSet = new HashSet<>(b.subList(bStart, bEnd));
