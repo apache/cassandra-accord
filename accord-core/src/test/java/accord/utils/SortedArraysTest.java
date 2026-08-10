@@ -230,16 +230,28 @@ class SortedArraysTest
             int aStart = aInt.length == 0 ? 0 : rs.nextInt(0, aInt.length);
             int bStart = b.isEmpty() ? 0 : rs.nextInt(0, b.size());
 
-            Set<Integer> aSet = new HashSet<>(Arrays.asList(Arrays.copyOfRange(a, aStart, a.length)));
-            Set<Integer> bSet = new HashSet<>(b.subList(bStart, b.size()));
+            int aEnd = rs.nextInt(aStart, aInt.length+1);
+            int bEnd = rs.nextInt(bStart, bInt.length+1);
+
+            Set<Integer> aSet = new HashSet<>(Arrays.asList(Arrays.copyOfRange(a, aStart, aEnd)));
+            Set<Integer> bSet = new HashSet<>(b.subList(bStart, bEnd));
 
             Set<Integer> intersection = Sets.intersection(aSet, bSet);
 
             int[] expected = intersection.stream().mapToInt(i->i).toArray();
             Arrays.sort(expected);
 
-            Assertions.assertArrayEquals(expected, SortedArrays.linearIntersection(aInt, aStart, a.length, bInt, bStart, bInt.length, new ArrayBuffers.IntBufferCache(4, 1 << 14)));
-            Assertions.assertArrayEquals(expected, SortedArrays.linearIntersection(bInt, bStart, bInt.length, aInt, aStart, aInt.length, new ArrayBuffers.IntBufferCache(4, 1 << 14)));
+            // First two conditions cover the case where we are expected to return the exact copy
+            // if the intersection is an exact match of the smaller array
+            if (bStart == 0 && bEnd == bInt.length && aSet.containsAll(bSet))
+                Assertions.assertSame(bInt, SortedArrays.linearIntersection(aInt, aStart, a.length, bInt, bStart, bInt.length, new ArrayBuffers.IntBufferCache(4, 1 << 14)));
+            else if (aStart == 0 && aEnd == aInt.length && bSet.containsAll(aSet))
+                Assertions.assertSame(aInt, SortedArrays.linearIntersection(aInt, aStart, a.length, bInt, bStart, bInt.length, new ArrayBuffers.IntBufferCache(4, 1 << 14)));
+            else
+            {
+                Assertions.assertArrayEquals(expected, SortedArrays.linearIntersection(aInt, aStart, aEnd, bInt, bStart, bEnd, new ArrayBuffers.IntBufferCache(4, 1 << 14)));
+                Assertions.assertArrayEquals(expected, SortedArrays.linearIntersection(bInt, bStart, bEnd, aInt, aStart, aEnd, new ArrayBuffers.IntBufferCache(4, 1 << 14)));
+            }
         });
     }
 
@@ -266,6 +278,13 @@ class SortedArraysTest
 
             Assertions.assertArrayEquals(expected, actual, String.format("(%d, %d], (%d, %d] -> %s", leftStart, leftEnd, rightStart, rightEnd, Arrays.toString(expected)));
         });
+    }
+
+    @Test
+    public void testIntLinearIntersectionAdHoc2()
+    {
+        int[] intersection = SortedArrays.linearIntersection(new int[] {0, 2, 4, 6}, 0, 4, new int[] {6, 7}, 0, 2, new ArrayBuffers.IntBufferCache(4, 1 << 14));
+        Assertions.assertArrayEquals(new int[] {6}, intersection);
     }
 
     @Test
