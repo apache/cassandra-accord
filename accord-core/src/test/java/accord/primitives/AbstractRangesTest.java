@@ -47,7 +47,7 @@ class AbstractRangesTest
                 range("second", 20, 30),
                 range("third", 30, 40)
         );
-        assertThat(ranges.toString()).isEqualTo("[first:[[0,10),[10,20)], second:[[20,30)], third:[[30,40)]]");
+        assertThat(ranges.toString()).isEqualTo("[first:[(0,10],(10,20]], second:[(20,30]], third:[(30,40]]]");
     }
 
     @Test
