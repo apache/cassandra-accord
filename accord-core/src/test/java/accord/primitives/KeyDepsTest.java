@@ -113,11 +113,11 @@ public class KeyDepsTest
     }
 
     private static void testMerge(long seed, int uniqueTxnIdsRange, int epochRange, int hlcRange, int nodeRange,
-                                  int uniqueKeysRange, int emptyKeysRange, int keyRange, int totalCountRange, int mergeCountRange)
+                                 int uniqueKeysRange, int emptyKeysRange, int keyRange, int totalCountRange, int mergeCountRange)
     {
         RandomSource random = random(seed);
         Supplier<Deps> supplier = supplier(random, uniqueTxnIdsRange, epochRange, hlcRange, 0, nodeRange,
-                uniqueKeysRange, emptyKeysRange, keyRange, totalCountRange);
+                                           uniqueKeysRange, emptyKeysRange, keyRange, totalCountRange);
         int count = 1 + random.nextInt(mergeCountRange);
         List<Deps> deps = new ArrayList<>(count);
         while (count-- > 0)
@@ -136,7 +136,7 @@ public class KeyDepsTest
     {
         RandomSource random = random(seed);
         Supplier<Deps> supplier = supplier(random, uniqueTxnIdsRange, epochRange, hlcRange, 0, nodeRange,
-                uniqueKeysRange, emptyKeysRange, keyRange, totalCountRange);
+                                           uniqueKeysRange, emptyKeysRange, keyRange, totalCountRange);
         Deps cur = supplier.get();
         int count = 1 + random.nextInt(mergeCountRange);
         while (count-- > 0)
@@ -371,11 +371,11 @@ public class KeyDepsTest
             }
 
             List<TxnId> txnIds; {
-            TreeSet<TxnId> tmp = new TreeSet<>();
-            while (tmp.size() < uniqueTxnIds)
-                tmp.add(TxnId.fromValues(random.nextInt(epochRange), random.nextInt(hlcRange), flagsRange == 0 ? 0 : random.nextInt(flagsRange), new Id(random.nextInt(nodeRange))));
-            txnIds = new ArrayList<>(tmp);
-        }
+                TreeSet<TxnId> tmp = new TreeSet<>();
+                while (tmp.size() < uniqueTxnIds)
+                    tmp.add(TxnId.fromValues(random.nextInt(epochRange), random.nextInt(hlcRange), flagsRange == 0 ? 0 : random.nextInt(flagsRange), new Id(random.nextInt(nodeRange))));
+                txnIds = new ArrayList<>(tmp);
+            }
 
             TreeMap<RoutingKey, NavigableSet<TxnId>> canonical = new TreeMap<>();
             for (int i = 0 ; i < totalCount ; ++i)
@@ -435,11 +435,11 @@ public class KeyDepsTest
 
             TreeMap<TxnId, List<RoutingKey>> canonicalInverted = invertCanonical();
             Assertions.assertArrayEquals(toArray(canonicalInverted.keySet(), TxnId[]::new),
-                    IntStream.range(0, test.txnIdCount()).mapToObj(test::txnId).toArray(TxnId[]::new));
+                                         IntStream.range(0, test.txnIdCount()).mapToObj(test::txnId).toArray(TxnId[]::new));
             for (Map.Entry<TxnId, List<RoutingKey>> e : canonicalInverted.entrySet())
             {
                 Assertions.assertArrayEquals(toArray(e.getValue(), RoutingKey[]::new),
-                        test.participants(e.getKey()).stream().toArray(RoutingKey[]::new));
+                                             test.participants(e.getKey()).stream().toArray(RoutingKey[]::new));
             }
 
             StringBuilder builder = new StringBuilder();
@@ -462,7 +462,7 @@ public class KeyDepsTest
             for (Map.Entry<RoutingKey, NavigableSet<TxnId>> e : canonical.entrySet())
             {
                 e.getValue().forEach(txnId -> result.computeIfAbsent(txnId, ignore -> new ArrayList<>())
-                        .add(e.getKey()));
+                                                    .add(e.getKey()));
 
             }
             return result;
@@ -506,8 +506,8 @@ public class KeyDepsTest
         RandomSource random = random(seed);
         int totalCount = 1 + random.nextInt(totalCountRange - 1);
         testOneDeps(random,
-                KeyDepsTest.Deps.generate(random, uniqueTxnIds, epochRange, hlcRange, 0, nodeRange, uniqueKeys, emptyKeys, keyRange, totalCount),
-                keyRange);
+                    KeyDepsTest.Deps.generate(random, uniqueTxnIds, epochRange, hlcRange, 0, nodeRange, uniqueKeys, emptyKeys, keyRange, totalCount),
+                    keyRange);
     }
 
     private static Supplier<Deps> supplier(RandomSource random, int uniqueTxnIdsRange, int epochRange, int hlcRange, int flagRange, int nodeRange,
@@ -522,8 +522,8 @@ public class KeyDepsTest
             int emptyKeys = 1 + random.nextInt(emptyKeysRange - 1);
             int totalCount = random.nextInt(Math.min(totalCountRange, uniqueKeys * uniqueTxnIds));
             return KeyDepsTest.Deps.generate(random, uniqueTxnIds,
-                    epochRange, hlcRange, flagRange, nodeRange,
-                    uniqueKeys, emptyKeys, keyRange, totalCount);
+                                                  epochRange, hlcRange, flagRange, nodeRange,
+                                                  uniqueKeys, emptyKeys, keyRange, totalCount);
         };
     }
 
