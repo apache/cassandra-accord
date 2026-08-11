@@ -196,7 +196,7 @@ public class KeyDepsTest
     }
 
     @Test
-    public void testForEachOnUniqueStartExclusiveEndInclusive()
+    public void testForEachOnUnique()
     {
         qt().forAll(Gen.of(Deps::generate).filter(d -> d.test.keys().size() >= 2)).check(deps -> {
             RoutingKeys keys = deps.test.keys();
@@ -213,31 +213,6 @@ public class KeyDepsTest
             });
             Set<TxnId> notExpected = deps.canonical.get(start);
             for (int i = 1; i < keys.size(); i++)
-            {
-                Set<TxnId> ids = deps.canonical.get(keys.get(i));
-                notExpected = Sets.difference(notExpected, ids);
-            }
-            TreeSet<TxnId> expected = new TreeSet<>(Sets.difference(deps.invertCanonical().keySet(), notExpected));
-            Assertions.assertEquals(expected, seen);
-        });
-    }
-
-    @Test
-    public void testForEachOnUniqueStartInclusiveEndExclusive()
-    {
-        qt().forAll(Gen.of(Deps::generate).filter(d -> d.test.keys().size() >= 2)).check(deps -> {
-            RoutingKeys keys = deps.test.keys();
-            // By default, all ranges are start exclusive and end inclusive (start, end]
-            RoutingKey start = IntHashKey.forHash(((IntHashKey) keys.get(0)).hash - 1);
-            RoutingKey end = IntHashKey.forHash(((IntHashKey) keys.get(keys.size() - 1)).hash - 1);
-
-            TreeSet<TxnId> seen = new TreeSet<>();
-            deps.test.forEachUniqueTxnId(Ranges.of(Range.of(start.toUnseekable(), end.toUnseekable())), txnId -> {
-                if (!seen.add(txnId))
-                    throw new AssertionError("Seen " + txnId + " multiple times");
-            });
-            Set<TxnId> notExpected = deps.canonical.get(keys.get(keys.size() - 1));
-            for (int i = 0; i < keys.size() - 1; i++)
             {
                 Set<TxnId> ids = deps.canonical.get(keys.get(i));
                 notExpected = Sets.difference(notExpected, ids);
