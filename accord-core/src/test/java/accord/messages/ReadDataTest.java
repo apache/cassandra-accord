@@ -144,7 +144,7 @@ class ReadDataTest
 
             state.apply();
             state.readResult.setSuccess(Mockito.mock(Data.class));
-            Mockito.verify(state.sink).reply(Mockito.eq(state.node.id()), Mockito.eq(replyContext), Mockito.eq(ReadData.CommitOrReadNack.Redundant), Mockito.eq(null));
+            Mockito.verify(replyContext).reply(Mockito.eq(state.node.id()), Mockito.eq(state.sink), Mockito.eq(ReadData.CommitOrReadNack.Redundant), Mockito.isNull());
         });
     }
 
@@ -168,7 +168,7 @@ class ReadDataTest
             state.apply();
             state.readResult.setSuccess(Mockito.mock(Data.class));
 
-            Mockito.verify(state.sink).reply(Mockito.eq(state.node.id()), Mockito.eq(replyContext), Mockito.eq(ReadData.CommitOrReadNack.Redundant), Mockito.eq(null));
+            Mockito.verify(replyContext).reply(Mockito.eq(state.node.id()), Mockito.eq(state.sink), Mockito.eq(ReadData.CommitOrReadNack.Redundant), Mockito.isNull());
         });
     }
 
@@ -199,7 +199,7 @@ class ReadDataTest
 
             ReplyContext replyContext = state.process();
 
-            Mockito.verify(state.sink).reply(Mockito.eq(state.node.id()), Mockito.eq(replyContext), Mockito.eq(ReadData.CommitOrReadNack.Redundant), Mockito.eq(null));
+            Mockito.verify(replyContext).reply(Mockito.eq(state.node.id()), Mockito.eq(state.sink), Mockito.eq(ReadData.CommitOrReadNack.Redundant), Mockito.isNull());
         });
     }
 
@@ -215,7 +215,7 @@ class ReadDataTest
             })));
             ReplyContext replyContext = state.process();
 
-            Mockito.verify(state.sink).reply(Mockito.eq(state.node.id()), Mockito.eq(replyContext), Mockito.eq(ReadData.CommitOrReadNack.Redundant), Mockito.eq(null));
+            Mockito.verify(replyContext).reply(Mockito.eq(state.node.id()), Mockito.eq(state.sink), Mockito.eq(ReadData.CommitOrReadNack.Redundant), Mockito.isNull());
         });
     }
 
