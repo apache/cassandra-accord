@@ -430,6 +430,11 @@ public class TopologyRandomizer
 
     private boolean previousEpochForRegainedRangeRetired(Topology current, Ranges regainingRanges)
     {
+        // In cases where nodeLookup is null, we are not testing invariants that are
+        // related to this logic
+        if (this.nodeLookup == null)
+            return true;
+
         for (Id id : current.nodes())
         {
             Node node = this.nodeLookup.apply(id);

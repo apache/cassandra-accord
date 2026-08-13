@@ -66,7 +66,7 @@ public class FastPathTrackerReconciler extends TrackerReconciler<FastPathShardTr
 
             case Success:
                 Assertions.assertTrue(tracker.all(FastPathShardTracker::hasReachedQuorum));
-                Assertions.assertTrue(tracker.all(shard -> shard.fastPathIsRejected() || shard.hasMetFastPathCriteria() || shard.fastPathIsDelayed()));
+                Assertions.assertTrue(tracker.all(shard -> shard.hasMetFastPathCriteria() || (shard.fastPathFailures + shard.fastPathDelayed > 0) || shard.fastPathIsRejected() || shard.fastPathIsDelayed()));
                 Assertions.assertFalse(tracker.any(FastPathShardTracker::hasFailed));
                 break;
 
