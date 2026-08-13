@@ -251,8 +251,8 @@ public class TopologyChangeTest
                 .build())
         {
             cluster.nodes(1, 2, 3).forEach(node -> assertEpochRejection(node, keys, 1, false));
+            cluster.networkFilter.addFilter(Predicates.alwaysTrue(), to -> id(2).equals(to), TopologyChangeTest::isExclSyncPoint);
             cluster.networkFilter.addFilter(Predicates.alwaysTrue(), to -> id(3).equals(to), TopologyChangeTest::isExclSyncPoint);
-            cluster.networkFilter.addFilter(Predicates.alwaysTrue(), to -> id(4).equals(to), TopologyChangeTest::isExclSyncPoint);
 
             cluster.nodes(1, 2, 3, 4, 5).forEach(node -> node.topology().reportTopology(topology2));
             cluster.nodes(   4).forEach(node -> {
