@@ -132,7 +132,7 @@ public class TopologyChangeTest
             if (node.epoch() < epoch)
                 throw new AssertionError(String.format("node[%s] epoch %s is less than check epoch %s", node.id(), node.epoch(), epoch));
 
-            node.commandStores().forEach("Test", participants, 1, node.epoch(), safeStore -> {
+            getUninterruptibly(node.commandStores().forEach("Test", participants, 1, node.epoch(), safeStore -> {
                 boolean rejected = safeStore.commandStore().isRejectedIfNotPreAccepted(TxnId.minForEpoch(epoch), participants);
                 if (rejected != rejectionExpected)
                 {
@@ -143,7 +143,7 @@ public class TopologyChangeTest
                                                rejectionExpected? "was" : "was not");
                     throw new AssertionError(msg);
                 }
-            });
+            }));
         }
         catch (Throwable e)
         {
@@ -244,7 +244,6 @@ public class TopologyChangeTest
         Range range = range(100, 200);
         Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
         Topology topology2 = topology(2, shard(range, idList(2, 3, 4), idSet(2, 3)));
-        Topology topology3 = topology(3, shard(range, idList(3, 4, 5), idSet(3, 4)));
         try (MockCluster cluster = MockCluster.builder()
                 .nodes(5)
                 .topology(topology1)
@@ -255,7 +254,7 @@ public class TopologyChangeTest
             cluster.networkFilter.addFilter(Predicates.alwaysTrue(), to -> id(3).equals(to), TopologyChangeTest::isExclSyncPoint);
 
             cluster.nodes(1, 2, 3, 4, 5).forEach(node -> node.topology().reportTopology(topology2));
-            cluster.nodes(   4).forEach(node -> {
+            cluster.nodes(4).forEach(node -> {
                 getUncheckedTimeout(node.topology().await(2, null), 5, TimeUnit.SECONDS);
                 MockTopologyService topologyService = (MockTopologyService) node.topology().topologyService();
                 try
