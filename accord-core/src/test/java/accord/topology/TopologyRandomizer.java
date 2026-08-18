@@ -430,8 +430,8 @@ public class TopologyRandomizer
 
     private boolean previousEpochForRegainedRangeRetired(Topology current, Ranges regainingRanges)
     {
-        // In cases where nodeLookup is null, we are not testing invariants that are
-        // related to this logic
+        // When nodeLookup isn't defined we are unable to get node state, so
+        // assume that the calling test doesn't care about retired ranges
         if (this.nodeLookup == null)
             return true;
 
