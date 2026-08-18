@@ -45,7 +45,7 @@ import static accord.impl.IntKey.keys;
 import static accord.impl.IntKey.range;
 import static accord.primitives.Routable.Domain.Key;
 
-import static accord.primitives.Txn.Kind.*;
+import static accord.primitives.Txn.Kind.Write;
 import static accord.utils.async.AsyncChainUtils.getUninterruptibly;
 
 public class TopologyChangeTest
