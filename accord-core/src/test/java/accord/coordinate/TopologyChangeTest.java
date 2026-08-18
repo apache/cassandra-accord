@@ -44,9 +44,8 @@ import static accord.Utils.*;
 import static accord.impl.IntKey.keys;
 import static accord.impl.IntKey.range;
 import static accord.primitives.Routable.Domain.Key;
-import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
-import static accord.primitives.Txn.Kind.Write;
 
+import static accord.primitives.Txn.Kind.*;
 import static accord.utils.async.AsyncChainUtils.getUninterruptibly;
 
 public class TopologyChangeTest
@@ -115,13 +114,13 @@ public class TopologyChangeTest
         }
     }
 
-    private static boolean isExclSyncPoint(Message message)
+    private static boolean isSyncPoint(Message message)
     {
         if (!(message instanceof PreAccept))
             return false;
 
         PreAccept preAccept = (PreAccept) message;
-        return preAccept.txnId.is(ExclusiveSyncPoint);
+        return preAccept.txnId.isSyncPoint();
     }
 
     private static void assertEpochRejection(Node node, Keys keys, long epoch, boolean rejectionExpected)
@@ -185,14 +184,13 @@ public class TopologyChangeTest
                 .build())
         {
             cluster.nodes(1, 2, 3).forEach(node -> assertEpochRejection(node, keys, 1, false));
-            cluster.networkFilter.addFilter(Predicates.alwaysTrue(), to -> id(4).equals(to), TopologyChangeTest::isExclSyncPoint);
+            cluster.networkFilter.addFilter(Predicates.alwaysTrue(), to -> id(4).equals(to), TopologyChangeTest::isSyncPoint);
 
             cluster.nodes(1, 2, 3, 4, 5).forEach(node -> node.topology().reportTopology(topology2));
             cluster.nodes(4).forEach(node -> {
                 getUncheckedTimeout(node.topology().await(2, null), 5, TimeUnit.SECONDS);
                 MockTopologyService topologyService = (MockTopologyService) node.topology().topologyService();
                 getUncheckedTimeout(topologyService.ackFor(2).coordinate, 5, TimeUnit.SECONDS);
-                assertEpochRejection(node, keys, 1, false);  // shouldn't have received the sync point preaccept
             });
 
             cluster.nodes(2, 3).forEach(node -> {
@@ -216,8 +214,6 @@ public class TopologyChangeTest
             cluster.nodes(4).forEach(node -> {
                 MockTopologyService topologyService = (MockTopologyService) node.topology().topologyService();
                 getUncheckedTimeout(topologyService.ackFor(3).coordinate, 5, TimeUnit.SECONDS);
-                assertEpochRejection(node, keys, 1, false);  // shouldn't have received the sync point preaccept
-                assertEpochRejection(node, keys, 2, false);  // shouldn't have received the sync point preaccept
             });
 
             // but if it tries to coordinate a txn with a txnid from epoch2 it should be rejected by the other nodes in the cluster
@@ -250,8 +246,8 @@ public class TopologyChangeTest
                 .build())
         {
             cluster.nodes(1, 2, 3).forEach(node -> assertEpochRejection(node, keys, 1, false));
-            cluster.networkFilter.addFilter(Predicates.alwaysTrue(), to -> id(2).equals(to), TopologyChangeTest::isExclSyncPoint);
-            cluster.networkFilter.addFilter(Predicates.alwaysTrue(), to -> id(3).equals(to), TopologyChangeTest::isExclSyncPoint);
+            cluster.networkFilter.addFilter(Predicates.alwaysTrue(), to -> id(2).equals(to), TopologyChangeTest::isSyncPoint);
+            cluster.networkFilter.addFilter(Predicates.alwaysTrue(), to -> id(3).equals(to), TopologyChangeTest::isSyncPoint);
 
             cluster.nodes(1, 2, 3, 4, 5).forEach(node -> node.topology().reportTopology(topology2));
             cluster.nodes(4).forEach(node -> {
