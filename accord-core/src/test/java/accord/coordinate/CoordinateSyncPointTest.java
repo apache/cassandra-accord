@@ -70,7 +70,8 @@ class CoordinateSyncPointTest
                                    Utils.shard(IntKey.range(0, 10), ALL),
                                    Utils.shard(removed, new SortedArrayList<>(new Node.Id[] { N2 })));
 
-        Node n1 = Utils.createNode(N1, t1, happyPathMessaging(), new MockCluster.Clock(0), new TestAgent.RethrowAgent());
+        MockCluster.Clock time = new MockCluster.Clock(0);
+        Node n1 = Utils.createNode(N1, t1, happyPathMessaging(), time, new TestAgent.RethrowAgent(time));
         n1.topology().reportTopology(t2);
         for (Node.Id node : ALL)
             n1.topology().onReadyToCoordinate(node, t1.epoch());
@@ -86,7 +87,8 @@ class CoordinateSyncPointTest
         Topology t2 = new Topology(t1.epoch() + 1,
                                    Utils.shard(IntKey.range(0, 10), ALL));
 
-        Node n1 = Utils.createNode(N1, t1, happyPathMessaging(), new MockCluster.Clock(0), new TestAgent.RethrowAgent());
+        MockCluster.Clock time = new MockCluster.Clock(0);
+        Node n1 = Utils.createNode(N1, t1, happyPathMessaging(), time, new TestAgent.RethrowAgent(time));
         n1.topology().reportTopology(t2);
         for (Node.Id node : ALL)
             n1.topology().onReadyToCoordinate(node, t1.epoch());
@@ -94,9 +96,11 @@ class CoordinateSyncPointTest
         awaitApplied(n1, removed);
 
         n1.topology().onEpochRetired(Ranges.single(removed), t2.epoch());
+        time.increment();
         awaitApplied(n1, removed);
 
         n1.topology().onEpochClosed(Ranges.single(removed), t2.epoch());
+        time.increment();
         awaitApplied(n1, removed);
     }
 
