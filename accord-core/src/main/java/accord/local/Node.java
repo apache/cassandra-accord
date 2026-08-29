@@ -196,7 +196,7 @@ public class Node implements NodeCommandStoreService
 
     private final Coordinations coordinations = new Coordinations();
     private final AtomicLong nextCoordinationId = new AtomicLong();
-
+    
     private final ExecuteTxnBacklog executeBacklogSink;
 
     /**

@@ -53,5 +53,6 @@ public interface Read
     Read slice(Ranges ranges);
     Read intersecting(Participants<?> participants);
     Read merge(Read other);
-
+    default boolean isUsedForImport() { return false; }
+    default long getImportStreamingEpoch() { return -1L; }
 }

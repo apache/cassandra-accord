@@ -228,7 +228,20 @@ public class ExecuteTxn extends ReadCoordinator<Result, ReadReply>
     {
         node.agent().coordinatorEvents().onExecuting(txnId, ballot, stableDeps, path);
         Node.Id self = node.id();
-        if (permitCoordinatorLocalExecution() && tryIfUniversal(self))
+        // This differs from the typical read path, because ImportTxn's need to perform
+        // the import at all replicas, compared to read txn's which just require a single node
+        // with the data that is being requested.
+        if (txn.read().isUsedForImport())
+        {
+            for (int j = candidates.size() - 1; j >= 0; --j)
+            {
+                Id candidate = candidates.get(j);
+                recordInFlightRead(candidate);
+                sendStableRead(candidate, commitKind(candidate));
+            }
+            candidates.clear();
+        }
+        else if (permitCoordinatorLocalExecution() && tryIfUniversal(self))
         {
             isPrivilegedVoteCommitting = txnId.hasPrivilegedCoordinator() && path == FAST;
             ExecuteFlags executeFlags = flags.get(self);
@@ -461,7 +474,7 @@ public class ExecuteTxn extends ReadCoordinator<Result, ReadReply>
         {
             if (!isPrivilegedVoteCommitting)
             {
-                if (txnId.isSomeRead() && !recoverReads())
+                if (txnId.isSomeRead() && !recoverReads() && !txn.read().isUsedForImport())
                 {
                     adapter().persist(node, executor, allTopologies, route, ballot, flags, txnId, txn, executeAt, stableDeps, null, null, null);
                 }
