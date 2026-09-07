@@ -169,7 +169,7 @@ public class CoordinateSyncPoint<R> extends CoordinatePreAccept<R>
             if (tracker.hasMediumPathAccepted() && txnId.hasMediumPath())
                 adapter.propose(node, executor, topologies, scope, Accept.Kind.MEDIUM, Ballot.ZERO, txnId, txn, withFlags, deps, finishAndTakeCallback());
             else
-                adapter.propose(node, executor, topologies, scope, Accept.Kind.SLOW, Ballot.ZERO, txnId, txn, executeAt, deps, finishAndTakeCallback());
+                adapter.propose(node, executor, topologies, scope, Accept.Kind.SLOW, Ballot.ZERO, txnId, txn, txnId, deps, finishAndTakeCallback());
         }
     }
 

@@ -706,6 +706,7 @@ public class CommandsForKeyTest
             super(txnId);
             this.canon = canon;
             current = prev = command;
+            setSafe();
         }
     }
 
@@ -715,6 +716,7 @@ public class CommandsForKeyTest
         {
             super(cfk.key());
             current = cfk;
+            setSafe();
         }
 
         @Override

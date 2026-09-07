@@ -155,6 +155,11 @@ public class BurnTestBase
     public static final int HASH_RANGE_END = 1 << 16;
     private static final Range[] EMPTY_RANGES = new Range[0];
 
+    static
+    {
+        Configure.setPermitAsyncTasks(false);
+    }
+
     static List<Packet> generate(RandomSource random, MessageListener listener, Function<? super CommandStore, AsyncExecutor> executor, List<Id> clients, List<Id> nodes, int[] keys, int operations)
     {
         List<Packet> packets = new ArrayList<>();

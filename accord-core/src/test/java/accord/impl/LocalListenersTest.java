@@ -404,6 +404,7 @@ public class LocalListenersTest
         {
             super(txnId);
             current = new TestCommand(txnId, saveStatus, durability);
+            setSafe();
         }
     }
 

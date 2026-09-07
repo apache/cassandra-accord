@@ -155,6 +155,9 @@ public class ProtocolModifiers
         private static boolean permitLocalDelivery = true;
         public static synchronized void setPermitLocalDelivery(boolean newPermitLocalDelivery) { pre(); permitLocalDelivery = newPermitLocalDelivery; }
 
+        private static boolean permitAsyncTasks = true;
+        public static synchronized void setPermitAsyncTasks(boolean newPermitAsyncTasks) { pre(); permitAsyncTasks = newPermitAsyncTasks; }
+
         private static boolean permitAtomicIncrementalTasks = true;
         public static synchronized void setPermitAtomicIncrementalTasks(boolean newPermitAtomicIncrementalTasks) { pre(); permitAtomicIncrementalTasks = newPermitAtomicIncrementalTasks; }
 
@@ -347,10 +350,14 @@ public class ProtocolModifiers
     private static final boolean permitLocalDelivery = Configure.permitLocalDelivery;
     public static boolean permitLocalDelivery() { return permitLocalDelivery; }
 
+    private static final boolean permitAsyncTasks = Configure.permitAsyncTasks;
     private static final boolean permitAtomicIncrementalTasks = Configure.permitAtomicIncrementalTasks;
     public static boolean permitAtomicIncrementalTasks() { return permitAtomicIncrementalTasks; }
     public static LoadKeys loadKeysAsyncIfPermitted(TxnId txnId)
     {
+        if (!permitAsyncTasks)
+            return LoadKeys.SYNC;
+
         if (permitAtomicIncrementalTasks())
             return LoadKeys.ASYNC;
         return managesExecution(txnId) ? LoadKeys.SYNC : LoadKeys.ASYNC;

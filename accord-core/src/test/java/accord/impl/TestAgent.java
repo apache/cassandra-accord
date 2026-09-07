@@ -28,6 +28,7 @@ import accord.api.CoordinatorEventListener;
 import accord.api.OwnershipEventListener;
 import accord.api.ProgressLog;
 import accord.api.Result;
+import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockStore;
 import accord.local.Node;
 import accord.local.SafeCommandStore;
@@ -99,7 +100,7 @@ public class TestAgent implements Agent, OwnershipEventListener
     final TimeService clock;
     public TestAgent()
     {
-        this(null);
+        this(new MockCluster.Clock(0));
     }
 
     public TestAgent(TimeService clock)
