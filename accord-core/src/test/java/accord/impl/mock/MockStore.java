@@ -30,12 +30,15 @@ import accord.local.Node;
 import accord.local.ExecutionContext;
 import accord.local.RedundantBefore;
 import accord.local.SafeCommandStore;
+import accord.local.durability.DurabilityResults;
 import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Seekable;
 import accord.primitives.Seekables;
-import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
+import accord.utils.SortedArrays;
+import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResults;
@@ -151,7 +154,7 @@ public class MockStore implements DataStore
     }
 
     @Override
-    public FetchResult image(Node node, SafeCommandStore safeStore, Ranges ranges, SyncPoint syncPoint, FetchRanges callback)
+    public FetchResult image(Node node, SafeCommandStore safeStore, Ranges ranges, TxnId atLeast, SortedArrayList<Node.Id> readable, FetchRanges callback)
     {
         callback.starting(ranges).started(Timestamp.NONE);
         callback.fetched(ranges);
@@ -159,9 +162,9 @@ public class MockStore implements DataStore
     }
 
     @Override
-    public FetchResult sync(Node node, SafeCommandStore safeStore, Ranges ranges, SyncPoint syncPoint, FetchRanges callback)
+    public FetchResult sync(Node node, SafeCommandStore safeStore, Ranges ranges, TxnId atLeast, SortedArrayList<Node.Id> readable, FetchRanges callback)
     {
-        return image(node, safeStore, ranges, syncPoint, callback);
+        return image(node, safeStore, ranges, atLeast, readable, callback);
     }
 
     @Override

@@ -77,7 +77,7 @@ public interface ExecutionContext
          * In the latter case, if the execution partially succeeds, any failing keys are blocked from further work
          * to avoid witnessing a partial update.
          */
-        ATOMIC;
+        ATOMIC
     }
 
     @Nullable TxnId primaryTxnId();
@@ -158,6 +158,15 @@ public interface ExecutionContext
      */
     default boolean isIdempotent() { return false; }
 
+    default boolean retryPartial() { return true; }
+
+    /**
+     * A CommandStore that can still accept this work should do so, even if it is shutting down.
+     * This can be used as a kind of weak version of a continuation task, to ensure work that has
+     * started completes, but avoid counting it as actually part of the submitting task
+     */
+    default boolean isUnstoppable() { return false; }
+
     default ExecutionKind executionKind() { return ExecutionKind.OTHER; }
 
     default ExecutionSequence executionSequence() { return ExecutionSequence.BY_PRIORITY; }
@@ -229,6 +238,7 @@ public interface ExecutionContext
         @Override default ExecutionSequence executionSequence() { return wrapped().executionSequence(); }
         @Override default ExecutionKind executionKind() { return wrapped().executionKind(); }
         @Override default boolean isIdempotent() { return wrapped().isIdempotent(); }
+        @Override default boolean isUnstoppable() { return wrapped().isUnstoppable(); }
         @Override default LoadKeys loadKeys() { return wrapped().loadKeys(); }
         @Override default LoadKeysFor loadKeysFor() { return wrapped().loadKeysFor(); }
         @Override default Timestamp executeAt() { return wrapped().executeAt(); }

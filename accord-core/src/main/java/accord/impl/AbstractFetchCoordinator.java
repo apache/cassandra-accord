@@ -22,48 +22,43 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-
-import accord.local.Command;
-import accord.local.SafeCommandStore;
-import accord.api.ExclusiveAsyncExecutor;
-import accord.messages.Callback.ConcreteCallbackExclusive;
-import accord.messages.ReadData;
-import accord.primitives.SyncPoint;
-import accord.primitives.Participants;
-import accord.topology.TopologyException;
-import accord.utils.UnhandledEnum;
-import accord.utils.async.AsyncChain;
+import javax.annotation.Nullable;
 
 import accord.api.Data;
 import accord.api.DataStore;
-import accord.coordinate.CoordinateSyncPoint;
+import accord.api.ExclusiveAsyncExecutor;
 import accord.coordinate.FetchCoordinator;
+import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.Node;
+import accord.local.SafeCommandStore;
+import accord.local.StoreParticipants;
+import accord.messages.Callback.ConcreteCallbackExclusive;
 import accord.messages.MessageType;
+import accord.messages.ReadData;
 import accord.messages.ReadData.CommitOrReadNack;
 import accord.messages.ReadData.ReadOk;
 import accord.messages.ReadData.ReadReply;
-import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
+import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.topology.TopologyException;
 import accord.utils.Invariants;
+import accord.utils.SortedArrays.SortedArrayList;
+import accord.utils.UnhandledEnum;
+import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
-import javax.annotation.Nullable;
-
 import static accord.messages.MessageType.StandardMessage.FETCH_DATA_REQ;
 import static accord.messages.MessageType.StandardMessage.FETCH_DATA_RSP;
-import static accord.messages.ReadData.CommitOrReadNack.Redundant;
 import static accord.messages.ReadData.CommitOrReadNack.Waiting;
 import static accord.messages.ReadEphemeralTxnData.retryInLaterEpoch;
-import static accord.primitives.SaveStatus.Applied;
-import static accord.primitives.SaveStatus.TruncatedApply;
-import static accord.messages.ReadData.CommitOrReadNack.InsufficientAndWaiting;
 import static accord.primitives.Routables.Slice.Minimal;
+import static accord.primitives.SaveStatus.Applied;
+import static accord.primitives.SaveStatus.Erased;
 
 public abstract class AbstractFetchCoordinator extends FetchCoordinator
 {
@@ -116,9 +111,9 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
     final FetchResult result = new FetchResult(this);
     protected final List<AsyncResult<Void>> persisting = new ArrayList<>();
 
-    protected AbstractFetchCoordinator(Node node, ExclusiveAsyncExecutor executor, Ranges ranges, SyncPoint syncPoint, DataStore.FetchRanges fetchRanges, CommandStore commandStore) throws TopologyException
+    protected AbstractFetchCoordinator(Node node, ExclusiveAsyncExecutor executor, Ranges ranges, TxnId atLeast, SortedArrayList<Node.Id> readable, DataStore.FetchRanges fetchRanges, CommandStore commandStore) throws TopologyException
     {
-        super(node, executor, ranges, syncPoint, fetchRanges);
+        super(node, executor, ranges, atLeast, readable, fetchRanges);
         this.fetchRanges = fetchRanges;
         this.commandStore = commandStore;
     }
@@ -128,9 +123,8 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
         return commandStore;
     }
 
-    protected abstract PartialTxn rangeReadTxn(Ranges ranges);
     protected abstract void onReadOk(Node.Id from, CommandStore commandStore, Data data, Ranges ranges);
-    protected abstract FetchRequest newFetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn);
+    protected abstract FetchRequest newFetchRequest(long sourceEpoch, TxnId atLeast, Ranges ranges);
 
     @Override
     public void contact(Node.Id to, Ranges ranges)
@@ -139,29 +133,15 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
         inflight.put(key, starting(to, ranges));
         Ranges ownedRanges = ownedRangesForNode(to);
         Invariants.requireArgument(ownedRanges.containsAll(ranges), "Got a reply from %s for ranges %s, but owned ranges %s does not contain all the ranges", to, ranges, ownedRanges);
-        PartialDeps partialDeps = syncPoint.waitFor.intersecting(ranges);
-        node.send(to, newFetchRequest(syncPoint.syncId.epoch(), syncPoint.syncId, ranges, partialDeps, rangeReadTxn(ranges)), executor, new ConcreteCallbackExclusive<ReadReply>(executor)
+        node.send(to, newFetchRequest(atLeast.epoch(), atLeast, ranges), executor, new ConcreteCallbackExclusive<ReadReply>(executor)
         {
             @Override
             public void onSuccessExclusive(Node.Id from, ReadReply reply)
             {
                 if (!reply.isOk())
                 {
-                    if (reply == InsufficientAndWaiting)
-                    {
-                        CoordinateSyncPoint.sendApply(node, from, syncPoint, tracing);
-                    }
-                    else if (reply == Redundant)
-                    {
-                        fail(to, new RuntimeException(reply.toString()));
-                        inflight.remove(key).cancel();
-                        // too late, sync point has been erased
-                        // TODO (desired): stop fetch sync points from garbage collecting too quickly
-                    }
-                    else if (reply != Waiting)
-                    {
+                    if (reply != Waiting)
                         throw new UnhandledEnum(((CommitOrReadNack)reply).kind);
-                    }
                     return;
                 }
 
@@ -204,7 +184,7 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
         }, tracing);
     }
 
-    public FetchResult result()
+    public DataStore.FetchResult result()
     {
         return result;
     }
@@ -229,20 +209,12 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
 
     public static abstract class FetchRequest extends ReadData
     {
-        // Note for future: we cannot safely execute on an Erased sync point without more work.
-        // Specifically, if the range has partially lost ownership on the recipient, the SyncPoint
-        // will not represent a safe point to snapshot from, and we won't have enough information to
-        // report the range as unavailable.
-        private static final ExecuteOn EXECUTE_ON = new ExecuteOn(Applied, TruncatedApply);
-        public final PartialTxn read;
-        public final PartialDeps partialDeps;
+        private static final ExecuteOn EXECUTE_ON = new ExecuteOn(Applied, Erased);
         private transient Timestamp safeToReadAfter;
 
-        public FetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn)
+        public FetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialTxn partialTxn)
         {
-            super(syncId, ranges, null, syncId, sourceEpoch);
-            this.read = partialTxn;
-            this.partialDeps = partialDeps;
+            super(syncId, ranges, partialTxn, syncId, sourceEpoch);
         }
 
         @Override
@@ -254,13 +226,28 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
         @Override
         public ReadType kind()
         {
-            return ReadType.waitUntilApplied;
+            return ReadType.fetchRequest;
         }
 
         @Override
-        protected AsyncChain<Data> beginRead(SafeCommandStore safeStore, Timestamp executeAt, PartialTxn txn, Participants<?> executes)
+        protected CommitOrReadNack applyInternal(SafeCommandStore safeStore)
         {
-            return read.read(safeStore, executeAt, executes);
+            StoreParticipants participants = StoreParticipants.execute(safeStore, scope, txnId, minEpoch(), executeAtEpoch);
+            return forceApply(safeStore, partialTxn, participants.executes());
+        }
+
+        @Override
+        protected CommitOrReadNack forceApply(SafeCommandStore safeStore, PartialTxn partialTxn, Participants<?> executes)
+        {
+            readStarted(safeStore);
+            return super.forceApply(safeStore, partialTxn, executes);
+        }
+
+        @Override
+        protected AsyncChain<Data> beginRead(SafeCommandStore safeStore, Timestamp executeAt, PartialTxn txn, Participants<?> execute)
+        {
+            Invariants.require(partialTxn != null && partialTxn == txn, "This method is not expected to be invoked, but if it is invoked it should be invoked with the txn sent over the wire (not the sync point's system txn)");
+            throw new UnsupportedOperationException();
         }
 
         // must be invoked by implementations some time after the read has started OR must override safeToReadAt()

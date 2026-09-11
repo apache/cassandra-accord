@@ -27,17 +27,23 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.api.Timeouts;
+import accord.local.DurableBefore;
 import accord.local.Node;
+import accord.local.durability.DurabilityService.SyncRemote;
 import accord.primitives.AbstractRanges;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.Route;
-import accord.primitives.MinimalSyncPoint;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
+import accord.utils.Invariants;
+import accord.utils.SortedArrays.SortedArrayList;
+import accord.utils.UnhandledEnum;
 import accord.utils.async.AsyncResults;
 
+import static accord.local.durability.DurabilityService.SyncLocal.NoLocal;
+import static accord.local.durability.DurabilityService.SyncReadable.UnknownReadable;
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_ADJACENT;
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.primitives.Txn.Kind.VisibilitySyncPoint;
@@ -64,7 +70,7 @@ public class DurabilityRequest
         public long lastAttemptAt() { return lastAttemptAt; }
     }
 
-    final AsyncResults.SettableResult<Void> result = new AsyncResults.SettableResult<>();
+    final AsyncResults.SettableResult<DurabilityResults> result = new AsyncResults.SettableResult<>();
     final Object requestedBy;
     final Txn.Kind kind;
     final Timestamp min;
@@ -75,6 +81,7 @@ public class DurabilityRequest
 
     private Ranges agreed = Ranges.EMPTY;
     private Ranges achieved = Ranges.EMPTY;
+    private DurabilityResults success = DurabilityResults.EMPTY;
 
     private LinkedHashMap<TxnId, DurableEvents> events;
 
@@ -87,6 +94,7 @@ public class DurabilityRequest
         this.require = require;
         this.startedAt = startedAt;
         this.timeoutAt = timeoutAt;
+        Invariants.require(require.excluding == null);
     }
 
     public synchronized void reportAttempt(TxnId txnId, long now)
@@ -140,29 +148,70 @@ public class DurabilityRequest
             logger.info("Durability request timeout {}", this);
     }
 
+    void report(DurableBefore durableBefore)
+    {
+        boolean canUseDurableBefore = kind != Txn.Kind.VisibilitySyncPoint
+                                      && !min.equals(TxnId.NONE)
+                                      && require.including == null // can't construct participants from DurableBefore
+                                      && require.readable == UnknownReadable // can't construct readability from DurableBefore
+                                      && require.local == NoLocal;
+
+        if (canUseDurableBefore)
+        {
+            boolean useUniversal;
+            switch (require.remote)
+            {
+                default: throw new UnhandledEnum(require.remote);
+                case All:
+                case QuorumAndWaitedForAll:
+                case MinorityQuorumAndWaitedForAll:
+                    useUniversal = true;
+                    break;
+                case Quorum:
+                case MinorityQuorum:
+                case NoRemote:
+                    useUniversal = false;
+            }
+
+            durableBefore.foldl(ranges, (e, b, min, universal) -> {
+                TxnId bound = universal ? e.universal : e.quorum;
+                if (min.compareTo(bound) <= 0)
+                {
+                    DurabilityLevel level = new DurabilityLevel(NoLocal, universal ? SyncRemote.All : SyncRemote.Quorum, UnknownReadable, null);
+                    DurabilityResult result = new DurabilityResult(bound, Ranges.of(e.toPlainRange()), level, SortedArrayList.empty(), null, null);
+                    if (report(result, 0))
+                        reportSuccess();
+                }
+                return null;
+            }, null, min, useUniversal);
+        }
+    }
+
     void reportSuccess()
     {
-        result.trySuccess(null);
+        Invariants.require(success.ranges().containsAll(ranges));
+        Invariants.require(achieved.containsAll(ranges));
+        result.trySuccess(success);
         Timeouts.RegisteredTimeout cancel = timeout;
         if (cancel != null) cancel.cancel();
     }
 
     synchronized boolean report(DurabilityResult durability, long finishedAt)
     {
-        MinimalSyncPoint syncPoint = durability.syncPoint;
-        Route<Range> route = syncPoint.route;
-        if (kind == VisibilitySyncPoint && !syncPoint.syncId.is(VisibilitySyncPoint))
+        TxnId syncId = durability.syncId;
+        Ranges successRanges = durability.ranges;
+        if (kind == VisibilitySyncPoint && !syncId.is(VisibilitySyncPoint))
             return false;
 
-        Ranges intersecting = ranges.intersecting(route, Minimal);
+        Ranges intersecting = ranges.slice(successRanges, Minimal);
         if (intersecting.isEmpty())
             return false;
 
-        DurableEvents e = get(syncPoint.syncId);
-        if (min.compareTo(syncPoint.syncId) > 0)
+        DurableEvents e = get(syncId);
+        if (min.compareTo(syncId) > 0)
         {
-            if (e != null) logger.error("{}: too early to satisfy {}, but the request was submitted on its behalf.", syncPoint.syncId, this);
-            else if (logger.isDebugEnabled()) logger.debug("{}: too early to satisfy {}", syncPoint.syncId, this);
+            if (e != null) logger.error("{}: too early to satisfy {}, but the request was submitted on its behalf.", syncId, this);
+            else if (logger.isDebugEnabled()) logger.debug("{}: too early to satisfy {}", syncId, this);
             return false;
         }
 
@@ -172,24 +221,25 @@ public class DurabilityRequest
         Ranges expect = waitingOn.slice(intersecting, Minimal);
         Ranges satisfies = expect.slice(durability.satisfies(require), Minimal);
         Ranges success = satisfies.slice(waitingOn, Minimal);
-        Ranges failed = expect.without(success);
+        Ranges failed = expect.without(satisfies);
 
         if (!failed.isEmpty())
             logFailure(success, failed, e, durability);
 
         Ranges newAchieved = this.achieved.union(MERGE_ADJACENT, success);
         if (this.achieved != newAchieved && e == null)
-            e = ensure(syncPoint.syncId);
+            e = ensure(syncId);
 
-        if (e != null && e.durableAt == 0)
+        if (e != null && e.durableAt == 0 && finishedAt > 0)
             e.durableAt = finishedAt;
 
         if (newAchieved == this.achieved)
             return false;
 
         this.achieved = newAchieved;
-        if (e != null) logger.info("{}: Successfully achieved durability for {} requested by {}. Remaining: {}.", syncPoint.syncId, ranges, this, ranges.without(this.achieved));
-        else if (logger.isDebugEnabled()) logger.debug("{}: partially satisfies {}. Remaining: {}.", syncPoint.syncId, this, ranges.without(this.achieved));
+        this.success = this.success.merge(DurabilityResults.of(newAchieved, syncId, durability.readable));
+        if (e != null) logger.info("{}: Successfully achieved durability for {} requested by {}. Remaining: {}.", syncId, ranges, this, ranges.without(this.achieved));
+        else if (logger.isDebugEnabled()) logger.debug("{}: partially satisfies {}. Remaining: {}.", syncId, this, ranges.without(this.achieved));
         return this.achieved.containsAll(ranges);
     }
 
@@ -200,7 +250,7 @@ public class DurabilityRequest
             if (e != null || logger.isDebugEnabled())
             {
                 String successString = success.isEmpty() ? "achieved" : String.format("achieved %s/%s for %s but only", require.local, require.remote, success);
-                String message = String.format("%s: %s %s/%s for %s; insufficient to satisfy %s/%s requested by %s", durability.syncPoint.syncId, successString, durability.min.local, durability.min.remote, failed, require.local, require.remote, this);
+                String message = String.format("%s: %s %s/%s for %s; insufficient to satisfy %s/%s requested by %s", durability.syncId, successString, durability.min.local, durability.min.remote, failed, require.local, require.remote, this);
                 if (e != null) logger.info(message);
                 else logger.debug(message);
             }
@@ -211,7 +261,7 @@ public class DurabilityRequest
         {
             if (e != null || logger.isDebugEnabled())
             {
-                String message = String.format("%s: missing nodes %s for ranges %s requested by %s", durability.syncPoint.syncId, missingIds(require.including, durability.min.including), failed, this);
+                String message = String.format("%s: missing nodes %s for ranges %s requested by %s", durability.syncId, missingIds(require.including, durability.min.including), failed, this);
                 if (e != null) logger.info(message);
                 else logger.debug(message);
             }

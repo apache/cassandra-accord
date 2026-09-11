@@ -369,7 +369,8 @@ public class ShardDurability
             Txn.Kind kind = ExclusiveSyncPoint;
             if (activeRequest != null)
             {
-                kind = activeRequest.kind;
+                if (activeRequest.kind != null)
+                    kind = activeRequest.kind;
                 if (activeRequest.min != null)
                 {
                     minEpoch = activeRequest.min.epoch();
@@ -377,7 +378,7 @@ public class ShardDurability
                 }
             }
             minHlc = Math.max(minHlc, node.agent().minStaleHlc(node, activeRequest != null));
-            TxnId staleId = node.nextStaleTxnIdWithDefaultFlags(minEpoch, minHlc, ranges, kind, Domain.Range);
+            TxnId staleId = node.nextStaleReservedTxnIdWithDefaultFlags(minEpoch, minHlc, ranges, kind, Domain.Range);
             if (activeRequest != null) logger.info("Initiating RX requested by {} for {} with TxnId {}. Remaining: {}.", activeRequest.requestedBy, ranges, staleId, active);
             else logger.debug("Initiating RX for durability of {} with TxnId {}.", ranges, staleId);
 

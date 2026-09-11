@@ -23,7 +23,7 @@ import javax.annotation.Nullable;
 import accord.local.Commands;
 import accord.local.Commands.CommitOutcome;
 import accord.local.LoadKeys;
-import accord.local.LogUnavailableException;
+import accord.local.LogFaultException;
 import accord.local.Node;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
@@ -110,7 +110,7 @@ public class StableThenRead extends ReadData
     protected CommitOrReadNack refuseInternal(SafeCommandStore safeStore)
     {
         // cannot commit, so should not reply implying we have done so, even with an unavailable exception (as may incorrectly infer quorum stability)
-        throw new LogUnavailableException();
+        throw new LogFaultException();
     }
 
     @Override

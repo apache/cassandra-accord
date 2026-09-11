@@ -69,6 +69,8 @@ import static accord.local.RedundantStatus.Property.LOCALLY_DURABLE_TO_DATA_STOR
 import static accord.local.RedundantStatus.Property.LOCALLY_REDUNDANT;
 import static accord.local.RedundantStatus.Property.LOCALLY_SYNCED;
 import static accord.local.RedundantStatus.Property.LOCALLY_WITNESSED;
+import static accord.local.RedundantStatus.Property.LOG_INCOMPLETE;
+import static accord.local.RedundantStatus.Property.LOG_UNAVAILABLE;
 import static accord.local.RedundantStatus.Property.QUORUM_APPLIED;
 import static accord.local.RedundantStatus.Property.SHARD_APPLIED_HLC_BOUND;
 import static accord.local.RedundantStatus.Property.UNREADY;
@@ -260,6 +262,11 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Bounds>
         private static TxnId depBound(TxnId[] bounds, int[] statuses)
         {
             TxnId depBound = maxBound(bounds, statuses, shiftedMask(SHARD_APPLIED, SOME) | shiftedMask(LOCALLY_APPLIED, SOME));
+            if (maxBound(bounds, statuses, UNREADY).compareTo(depBound) > 0)
+            {
+                depBound = TxnId.max(depBound, maxBound(bounds, statuses, LOG_INCOMPLETE));
+                depBound = TxnId.max(depBound, maxBound(bounds, statuses, LOG_UNAVAILABLE));
+            }
             if (depBound.equals(TxnId.NONE))
                 return null;
             return depBound.addFlag(SHARD_BOUND);
@@ -670,6 +677,23 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Bounds>
             return notWitnessed;
         }
 
+        static Ranges withoutLogUnavailableOrIncomplete(Bounds entry, @Nonnull Ranges hasLog, TxnId txnId)
+        {
+            if (entry == null || entry.outOfBounds(txnId))
+                return hasLog;
+
+            TxnId unready = entry.maxBound(UNREADY);
+            if (unready.compareTo(txnId) < 0)
+                return hasLog;
+
+            TxnId logUnavailable = entry.maxBound(LOG_UNAVAILABLE);
+            TxnId logIncomplete = entry.maxBound(LOG_INCOMPLETE);
+            if (txnId.compareTo(TxnId.max(logUnavailable, logIncomplete)) < 0)
+                return hasLog.without(Ranges.of(entry.range));
+
+            return hasLog;
+        }
+
         static Ranges withoutRetired(Bounds bounds, @Nonnull Ranges notRetired)
         {
             return withoutRetired(bounds, notRetired, b -> b.maxBound(SHARD_APPLIED));
@@ -680,12 +704,20 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Bounds>
             return withoutRetired(bounds, notRetired, b -> b.maxBound(LOCALLY_APPLIED));
         }
 
-        static Ranges withoutQuorumAndLocallyRetired(Bounds bounds, @Nonnull Ranges notRetired)
+        static Unseekables<?> withoutLocallyRetired(Bounds bounds, @Nonnull Unseekables<?> notRetired)
         {
-            return withoutRetired(bounds, notRetired, b -> b.maxBoundBoth(QUORUM_APPLIED, LOCALLY_APPLIED));
+            return withoutRetiredUnseekables(bounds, notRetired, b -> b.maxBound(LOCALLY_APPLIED));
         }
 
         private static Ranges withoutRetired(Bounds bounds, @Nonnull Ranges notRetired, Function<Bounds, TxnId> getBound)
+        {
+            if (bounds == null || bounds.endEpoch > getBound.apply(bounds).epoch())
+                return notRetired;
+
+            return notRetired.without(Ranges.of(bounds.range));
+        }
+
+        private static Unseekables<?> withoutRetiredUnseekables(Bounds bounds, @Nonnull Unseekables<?> notRetired, Function<Bounds, TxnId> getBound)
         {
             if (bounds == null || bounds.endEpoch > getBound.apply(bounds).epoch())
                 return notRetired;
@@ -1048,12 +1080,17 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Bounds>
     }
 
     /**
-     * Subtract any ranges that are before a GC point
+     * Subtract any ranges that are already marked visible
      */
     @VisibleForImplementation
     public Ranges removeWitnessed(TxnId txnId, Ranges ranges)
     {
         return foldl(ranges, Bounds::withoutWitnessed, ranges, txnId);
+    }
+
+    public Ranges removeLogUnavailableOrIncomplete(TxnId txnId, Ranges ranges)
+    {
+        return foldl(ranges, Bounds::withoutLogUnavailableOrIncomplete, ranges, txnId);
     }
 
     public Ranges removeRetired(Ranges ranges)
@@ -1066,9 +1103,9 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Bounds>
         return removeRetired(ranges, Bounds::withoutLocallyRetired);
     }
 
-    public Ranges removeQuorumAndLocallyRetired(Ranges ranges)
+    public Unseekables<?> removeLocallyRetired(Unseekables<?> unseekables)
     {
-        return removeRetired(ranges, Bounds::withoutQuorumAndLocallyRetired);
+        return removeRetiredUnseekables(unseekables, Bounds::withoutLocallyRetired);
     }
 
     private Ranges removeRetired(Ranges ranges, BiFunction<Bounds, Ranges, Ranges> fold)
@@ -1077,6 +1114,14 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Bounds>
             return ranges;
 
         return foldl(ranges, fold, ranges, alwaysFalse());
+    }
+
+    private Unseekables<?> removeRetiredUnseekables(Unseekables<?> unseekables, BiFunction<Bounds, Unseekables<?>, Unseekables<?>> fold)
+    {
+        if (!lostRanges.intersects(unseekables))
+            return unseekables;
+
+        return foldl(unseekables, fold, unseekables, alwaysFalse());
     }
 
     public Ranges removeLostOrStale(Ranges ranges)

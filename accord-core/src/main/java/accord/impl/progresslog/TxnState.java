@@ -32,7 +32,7 @@ import accord.utils.UnhandledEnum;
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
-public final class TxnState extends WaitingState implements ExecutionContext
+public class TxnState extends WaitingState implements ExecutionContext
 {
     public static class SerializationSupport
     {
@@ -44,12 +44,12 @@ public final class TxnState extends WaitingState implements ExecutionContext
         }
     }
 
-    TxnState(TxnId txnId)
+    protected TxnState(TxnId txnId)
     {
         super(txnId);
     }
 
-    void updateScheduling(SafeCommandStore safeStore, DefaultProgressLog owner, TxnStateKind updated, @Nullable BlockedUntil blockedUntil, Progress newProgress)
+    final void updateScheduling(SafeCommandStore safeStore, DefaultProgressLog owner, TxnStateKind updated, @Nullable BlockedUntil blockedUntil, Progress newProgress)
     {
         long newDelay;
         switch (newProgress)
@@ -153,21 +153,21 @@ public final class TxnState extends WaitingState implements ExecutionContext
         }
     }
 
-    boolean maybeRemove(DefaultProgressLog instance)
+    final boolean maybeRemove(DefaultProgressLog instance)
     {
         if (!(isWaitingDone() && isHomeDoneOrUninitialised()))
             return false;
 
-        instance.remove(txnId);
+        instance.remove(this);
         return true;
     }
 
-    HomeState home()
+    final HomeState home()
     {
         return this;
     }
 
-    WaitingState waiting()
+    final WaitingState waiting()
     {
         return this;
     }
@@ -178,42 +178,42 @@ public final class TxnState extends WaitingState implements ExecutionContext
         return txnId + ": " + toStateString();
     }
 
-    public boolean isDone(TxnStateKind runKind)
+    public final boolean isDone(TxnStateKind runKind)
     {
         return runKind == TxnStateKind.Home ? isHomeDone() : isWaitingDone();
     }
 
     @Nullable
     @Override
-    public TxnId primaryTxnId()
+    public final TxnId primaryTxnId()
     {
         return txnId;
     }
 
     @Override
-    public String reason()
+    public final String reason()
     {
         return "Progress";
     }
 
-    public TxnState snapshot()
+    public final TxnState snapshot()
     {
         TxnState copy = new TxnState(txnId);
         copy.encodedState = (encodedState & (SNAPSHOT_HOME_MASK | SNAPSHOT_WAITING_MASK)) | RESTORED_BIT;
         return copy;
     }
 
-    public long encodedState()
+    public final long encodedState()
     {
         return encodedState;
     }
 
-    public boolean equals(Object that)
+    public final boolean equals(Object that)
     {
         return that instanceof TxnState && equals((TxnState) that);
     }
 
-    public boolean equals(TxnState that)
+    public final boolean equals(TxnState that)
     {
         return this.txnId.equals(that.txnId) && this.encodedState == that.encodedState;
     }

@@ -43,7 +43,7 @@ import static accord.impl.AbstractReplayer.Replay.TO_COMMAND_STORE;
 import static accord.impl.AbstractReplayer.Replay.TO_DATA_STORE;
 import static accord.local.RedundantStatus.Property.LOCALLY_DURABLE_TO_COMMAND_STORE;
 import static accord.local.RedundantStatus.Property.LOCALLY_DURABLE_TO_DATA_STORE;
-import static accord.local.RedundantStatus.Property.LOG_UNAVAILABLE;
+import static accord.local.RedundantStatus.Property.UNREADY;
 import static accord.primitives.SaveStatus.Applying;
 import static accord.primitives.SaveStatus.PreApplied;
 import static accord.primitives.SaveStatus.TruncatedApplyWithOutcome;
@@ -110,13 +110,13 @@ public abstract class AbstractReplayer implements Journal.Replayer
 
     private static TxnId replayBound(RedundantBefore.Bounds bounds)
     {
-        return TxnId.max(bounds.maxBound(LOG_UNAVAILABLE), bounds.maxBoundBoth(LOCALLY_DURABLE_TO_COMMAND_STORE, LOCALLY_DURABLE_TO_DATA_STORE));
+        return TxnId.max(bounds.maxBound(UNREADY), bounds.maxBoundBoth(LOCALLY_DURABLE_TO_COMMAND_STORE, LOCALLY_DURABLE_TO_DATA_STORE));
     }
 
     private static Replay replay(RedundantBefore.Bounds bounds, TxnId txnId)
     {
         RedundantStatus status = bounds.get(txnId, null);
-        if (status.any(LOG_UNAVAILABLE))
+        if (status.any(UNREADY))
             return NONE;
 
         Replay replay = NONE;

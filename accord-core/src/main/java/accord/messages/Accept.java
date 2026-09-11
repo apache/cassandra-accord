@@ -140,6 +140,12 @@ public class Accept extends RouteRequest.WithUnsynced<Accept.AcceptReply>
     }
 
     @Override
+    protected boolean abort(Refuse.MinMax refuses)
+    {
+        return refuses.max != Refuse.NONE;
+    }
+    
+    @Override
     public AcceptReply applyInternal(SafeCommandStore safeStore)
     {
         PartialDeps partialDeps = this.partialDeps;

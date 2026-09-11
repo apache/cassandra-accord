@@ -242,6 +242,11 @@ public class CommandChange
             return saveStatus;
         }
 
+        public final Cleanup cleanup()
+        {
+            return cleanup;
+        }
+
         public final Durability durability()
         {
             return durability;

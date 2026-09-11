@@ -85,9 +85,7 @@ public class GetMaxConflict extends RouteRequest.WithUnsynced<GetMaxConflict.Get
     @Override
     public String toString()
     {
-        return "GetMaxConflict{" +
-               ", scope:" + scope +
-               '}';
+        return "GetMaxConflict{scope:" + scope + '}';
     }
 
     @Override

@@ -80,10 +80,11 @@ import org.agrona.collections.Int2IntHashMap;
 import org.agrona.collections.Int2ObjectHashMap;
 
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_ADJACENT;
+import static accord.local.BootstrapReason.GAIN_OWNERSHIP;
 import static accord.topology.EpochReady.done;
 import static accord.api.DataStore.FetchKind.Sync;
-import static accord.local.CommandStores.BootstrapRangeAction.BOOTSTRAP_NOT_NEEDED;
-import static accord.local.CommandStores.BootstrapRangeAction.SAFE_BOOTSTRAP;
+import static accord.local.CommandStores.GainOwnership.NEW_RANGE;
+import static accord.local.CommandStores.GainOwnership.REASSIGNED;
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.utils.Invariants.illegalState;
 import static java.util.stream.Collectors.toList;
@@ -520,7 +521,7 @@ public abstract class CommandStores implements AsyncExecutorFactory
         public void forEach(BiConsumer<Long, Ranges> forEach)
         {
             for (int i = 0; i < epochs.length; i++)
-                forEach.accept(epochs[i], ranges[i]);
+                forEach.accept((Long)epochs[i], ranges[i]);
         }
 
         @Override
@@ -884,25 +885,37 @@ public abstract class CommandStores implements AsyncExecutorFactory
         }
     }
 
-    public enum BootstrapRangeAction
+    public enum GainOwnership
     {
-        BOOTSTRAP_NOT_NEEDED, SAFE_BOOTSTRAP, UNSAFE_BOOTSTRAP
+        NEW_RANGE, REASSIGNED
     }
 
-    protected BootstrapRangeAction shouldBootstrap(Node node, Topology prevGlobal, Topology newLocalTopology, Range add)
+    protected GainOwnership gainOwnership(Topology prevGlobal, Topology newLocalTopology, Range add)
     {
         if (newLocalTopology.epoch() == 1 || !prevGlobal.ranges().contains(add))
-            return BOOTSTRAP_NOT_NEEDED;
+            return NEW_RANGE;
 
-        return SAFE_BOOTSTRAP;
+        return REASSIGNED;
     }
 
-    public AsyncResult<Void> rebootstrap(Node node)
+    public AsyncResult<Void> rebootstrap(Node node, BootstrapReason reason)
     {
+        return rebootstrap(node, null, reason);
+    }
+
+    public AsyncResult<Void> rebootstrap(Node node, @Nullable Ranges ranges, BootstrapReason reason)
+    {
+        Invariants.requireArgument(reason != GAIN_OWNERSHIP, "Rebootstrap reason cannot be " + reason);
         List<AsyncResult<EpochReady>> results = new ArrayList<>();
         Snapshot snapshot = current;
         for (ShardHolder shard : snapshot.shards)
-            results.add(shard.store.startUnsafeBootstrap(node, shard.ranges.all(), snapshot.global.epoch(), Sync));
+        {
+            Ranges rebootstrap = ranges == null ? shard.ranges.currentRanges()
+                                                : shard.ranges().currentRanges().slice(ranges, Minimal);
+
+            if (!rebootstrap.isEmpty())
+                results.add(shard.store.startBootstrap(node, rebootstrap, snapshot.global.epoch(), Sync, reason));
+        }
         return AsyncResults.allOf(results).flatMap(list -> {
             return AsyncChains.reduce(list.stream()
                                              .map(b -> b.reads.chain())
@@ -953,7 +966,8 @@ public abstract class CommandStores implements AsyncExecutorFactory
             // ranges can be empty when ranges are lost or consolidated across epochs.
             if (epoch > 1 && requiresSync(ranges, prev.global, newTopology))
             {
-                logger.debug("Epoch {} requires visibility sync for {}", epoch, ranges);
+                if (logger.isDebugEnabled())
+                    logger.debug("Epoch {} requires visibility sync for {}", (Long)epoch, ranges);
                 bootstrapUpdates.add(shard.store.refreshReadyToCoordinate(node, ranges, epoch));
             }
 
@@ -962,7 +976,7 @@ public abstract class CommandStores implements AsyncExecutorFactory
 
         if (!added.isEmpty())
         {
-            logger.info("Epoch {} adding {} to local command stores", epoch, added);
+            logger.info("Epoch {} adding {} to local command stores", (Long)epoch, added);
             for (Ranges addRanges : shardDistributor.split(added))
             {
                 RangesForEpoch rangesForEpoch = new RangesForEpoch(epoch, addRanges);
@@ -972,10 +986,10 @@ public abstract class CommandStores implements AsyncExecutorFactory
                     safeStore.setRangesForEpoch(rangesForEpoch); // to persist it
                 })));
 
-                Map<BootstrapRangeAction, Ranges> partitioned = addRanges.partitioningBy(range -> shouldBootstrap(node, prev.global, newLocalTopology, range), BootstrapRangeAction.class);
-                for (Map.Entry<BootstrapRangeAction, Ranges> entry : partitioned.entrySet())
+                Map<GainOwnership, Ranges> partitioned = addRanges.partitioningBy(range -> gainOwnership(prev.global, newLocalTopology, range), GainOwnership.class);
+                for (Map.Entry<GainOwnership, Ranges> entry : partitioned.entrySet())
                 {
-                    BootstrapRangeAction action = entry.getKey();
+                    GainOwnership action = entry.getKey();
                     bootstrapUpdates.add(shard.store.bootstrapper(node, entry.getValue(), newLocalTopology.epoch(), action));
                 }
                 result.add(shard);
@@ -985,13 +999,14 @@ public abstract class CommandStores implements AsyncExecutorFactory
         Supplier<EpochReady> bootstrap;
         if (bootstrapUpdates.isEmpty())
         {
-            logger.debug("Epoch {} implies no change to local command stores", epoch);
+            if (logger.isDebugEnabled())
+                logger.debug("Epoch {} implies no change to local command stores", (Long)epoch);
             bootstrap = () -> done(epoch);
         }
         else
         {
             if (!subtracted.isEmpty())
-                logger.info("Epoch {} removes {} from local command stores", epoch, subtracted);
+                logger.info("Epoch {} removes {} from local command stores", (Long)epoch, subtracted);
 
             bootstrap = () -> {
                 List<EpochReady> list = bootstrapUpdates.stream().map(Supplier::get).collect(toList());
@@ -1132,7 +1147,9 @@ public abstract class CommandStores implements AsyncExecutorFactory
             if (ranges == null)
                 continue;
 
-            if (minEpoch >= 0 && unsafelyTouchesRegainedRanges(snapshot, shard, mapReduceConsume.scope, minEpoch))
+            // TODO (required): audit no epoch restriction cases to ensure they are robust to overlaps
+            //     also figure out how to encode this semantic in the caller
+            if (minEpoch > 0 && unsafelyTouchesRegainedRanges(snapshot, shard, mapReduceConsume.scope, minEpoch))
                 return AsyncChains.failure(new OverlappingCommandStoresException());
 
             AsyncChain<O> next = mapReduceConsume.applyAsync(ranges, shard.store);
@@ -1140,7 +1157,7 @@ public abstract class CommandStores implements AsyncExecutorFactory
                 chain = chain != null ? AsyncChains.reduce(chain, next, mapReduceConsume) : next;
         }
 
-        if (minEpoch >= 0 && snapshot.previouslyOwned.overlapsDeletedCommandStore(snapshot.shardRanges, minEpoch, mapReduceConsume.scope))
+        if (minEpoch > 0 && snapshot.previouslyOwned.overlapsDeletedCommandStore(snapshot.shardRanges, minEpoch, mapReduceConsume.scope))
             return AsyncChains.failure(new DeletedCommandStoresException());
 
         return chain == null ? AsyncChains.success(null) : chain;

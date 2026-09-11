@@ -50,6 +50,7 @@ import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.durability.DurabilityService;
+import accord.local.durability.DurabilityService.SyncRemote;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.Routables;
@@ -63,6 +64,7 @@ import org.agrona.collections.IntHashSet;
 import static accord.burn.BurnTestBase.HASH_RANGE_END;
 import static accord.burn.BurnTestBase.HASH_RANGE_START;
 import static accord.local.durability.DurabilityService.SyncLocal.NoLocal;
+import static accord.local.durability.DurabilityService.SyncReadable.UnknownReadable;
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_ADJACENT;
 
 // TODO (testing): add change replication factor
@@ -585,7 +587,7 @@ public class TopologyRandomizer
             {
                 Node node = nodeLookup.apply(id);
                 Integer generation = bootstrappingGeneration.get(id);
-                node.durability().sync("Rebootstrap", Txn.Kind.ExclusiveSyncPoint, ranges, NoLocal, DurabilityService.SyncRemote.Quorum, 100L, TimeUnit.DAYS)
+                node.durability().sync("Rebootstrap", Txn.Kind.ExclusiveSyncPoint, ranges, NoLocal, SyncRemote.Quorum, UnknownReadable, 100L, TimeUnit.DAYS)
                     .flatMap(ignore -> commandStore.awaitVisibility(epoch, ranges))
                     .invoke((success, fail) -> {
                         Invariants.require(fail == null);

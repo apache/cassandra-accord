@@ -42,14 +42,12 @@ import accord.local.SafeCommandStore;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.RoutableKey;
-import accord.primitives.Seekable;
-import accord.primitives.MinimalSyncPoint;
-import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topology;
 import accord.utils.Invariants;
 import accord.utils.RandomSource;
+import accord.utils.SortedArrays;
 import accord.utils.Timestamped;
 import accord.utils.async.AsyncResult;
 import org.agrona.collections.Int2ObjectHashMap;
@@ -86,13 +84,13 @@ public class ListStore extends Snapshotter<ListStore.Snapshot> implements DataSt
     private static class FetchComplete
     {
         private final int storeId;
-        private final MinimalSyncPoint syncPoint;
+        private final TxnId bound;
         private final Ranges ranges;
 
-        private FetchComplete(int storeId, MinimalSyncPoint syncPoint, Ranges ranges)
+        private FetchComplete(int storeId, TxnId bound, Ranges ranges)
         {
             this.storeId = storeId;
-            this.syncPoint = syncPoint;
+            this.bound = bound;
             this.ranges = ranges;
         }
 
@@ -101,8 +99,7 @@ public class ListStore extends Snapshotter<ListStore.Snapshot> implements DataSt
         {
             return "FetchComplete{" +
                    "storeId=" + storeId +
-                   ", syncPoint=(" + syncPoint.syncId + ", " + syncPoint.route + ")" +
-                   ", ranges=" + ranges +
+                   ", bound=" + bound +
                    '}';
         }
     }
@@ -302,7 +299,7 @@ public class ListStore extends Snapshotter<ListStore.Snapshot> implements DataSt
         {
             ChangeAt adds = addedAts.get(i);
             if (test.test(adds.ranges))
-                sb.append(String.format("Added in %d: %s", adds.epoch, adds.ranges)).append('\n');
+                sb.append(String.format("Added in %d: %s", (Long)adds.epoch, adds.ranges)).append('\n');
         }
         for (Map.Entry<Integer, Ranges> e : pendingFetches.entrySet())
         {
@@ -313,39 +310,24 @@ public class ListStore extends Snapshotter<ListStore.Snapshot> implements DataSt
         {
             FetchComplete fetch = fetchCompletes.get(i);
             if (test.test(fetch.ranges))
-                sb.append(String.format("Fetch seen in store=%d for %s: %s", fetch.storeId, format(fetch.syncPoint), fetch.ranges)).append('\n');
+                sb.append(String.format("Fetch seen in store=%d for %s", (Integer)fetch.storeId, fetch.bound)).append('\n');
         }
         for (int i = 0; i < removedAts.size(); i++)
         {
             ChangeAt removes = removedAts.get(i);
             if (test.test(removes.ranges))
-                sb.append(String.format("Removed in %d: %s", removes.epoch, removes.ranges)).append('\n');
+                sb.append(String.format("Removed in %d: %s", (Long)removes.epoch, removes.ranges)).append('\n');
         }
         for (int i = 0; i < purgedAts.size(); i++)
         {
             PurgeAt purge = purgedAts.get(i);
             if (test.test(purge.ranges))
                 sb.append(String.format("Purged %s in epoch %d",
-                                        key, purge.epoch)).append('\n');
+                                        key, (Long)purge.epoch)).append('\n');
         }
         if (sb.length() == 0)
             sb.append(String.format("Attempted to access %s %s, this node never owned that", type, key));
         return sb.toString();
-    }
-
-    private static String format(MinimalSyncPoint sp)
-    {
-        return String.format("(%s -> %s)", sp.syncId, sp.route);
-    }
-
-    public String historySeekable(Seekable o)
-    {
-        switch (o.domain())
-        {
-            case Key: return history(o.asKey());
-            case Range: return history(Ranges.single(o.asRange()));
-            default: throw new IllegalArgumentException("Unknown domain: " + o.domain() + ", input=" + o);
-        }
     }
 
     private String history(Ranges ranges)
@@ -361,7 +343,7 @@ public class ListStore extends Snapshotter<ListStore.Snapshot> implements DataSt
     private final Int2ObjectHashMap<Ranges> pendingFetches = new Int2ObjectHashMap<>();
 
     @Override
-    public FetchResult image(Node node, SafeCommandStore safeStore, Ranges ranges, SyncPoint syncPoint, FetchRanges delegate)
+    public FetchResult image(Node node, SafeCommandStore safeStore, Ranges ranges, TxnId atLeast, SortedArrays.SortedArrayList<Node.Id> readable, FetchRanges delegate)
     {
         int storeId = safeStore.commandStore().id();
         synchronized (this)
@@ -392,7 +374,7 @@ public class ListStore extends Snapshotter<ListStore.Snapshot> implements DataSt
                         else                   pendingFetches.put(storeId, pending);
                     }
                     if (success.equals(ranges))
-                        fetchCompletes.add(new FetchComplete(storeId, syncPoint, ranges));
+                        fetchCompletes.add(new FetchComplete(storeId, atLeast, ranges));
                 }
                 delegate.fetched(fetched);
             }
@@ -410,15 +392,17 @@ public class ListStore extends Snapshotter<ListStore.Snapshot> implements DataSt
                     }
 
                     if (!success.isEmpty())
-                        fetchCompletes.add(new FetchComplete(storeId, syncPoint, success));
+                        fetchCompletes.add(new FetchComplete(storeId, atLeast, success));
                 }
                 delegate.fail(ranges, new Throwable("Failed Fetch", failure));
             }
         };
+
+        // TODO (desired): start separate coordinators for each TxnId, or otherwise handle the bounds better
         ListFetchCoordinator coordinator;
         try
         {
-            coordinator = new ListFetchCoordinator(node, ranges, syncPoint, hook, safeStore.commandStore(), this);
+            coordinator = new ListFetchCoordinator(node, atLeast, ranges, readable, hook, safeStore.commandStore(), this);
         }
         catch (Throwable t)
         {
@@ -426,12 +410,6 @@ public class ListStore extends Snapshotter<ListStore.Snapshot> implements DataSt
         }
         coordinator.start();
         return coordinator.result();
-    }
-
-    @Override
-    public FetchResult sync(Node node, SafeCommandStore safeStore, Map<TxnId, Ranges> atLeast, FetchRanges callback)
-    {
-        throw new UnsupportedOperationException();
     }
 
     static Timestamped<int[]> merge(Timestamped<int[]> a, Timestamped<int[]> b)
@@ -522,7 +500,7 @@ public class ListStore extends Snapshotter<ListStore.Snapshot> implements DataSt
         }
         if (!removed.isEmpty())
         {
-            pendingRemoves.add(epoch);
+            pendingRemoves.add((Long)epoch);
             removedAts.add(new ChangeAt(epoch, removed));
         }
         previousTopology = topology;

@@ -21,16 +21,17 @@ package accord.coordinate;
 import java.util.ArrayList;
 import java.util.List;
 
-import accord.api.DataStore.StartingRangeFetch;
 import accord.api.DataStore.FetchRanges;
-import accord.local.Node;
+import accord.api.DataStore.StartingRangeFetch;
 import accord.api.ExclusiveAsyncExecutor;
-import accord.primitives.SyncPoint;
+import accord.local.Node;
 import accord.primitives.Ranges;
 import accord.primitives.Route;
+import accord.primitives.TxnId;
 import accord.topology.Topology;
 import accord.topology.TopologyException;
 import accord.utils.Invariants;
+import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.SortedList;
 import accord.utils.SortedListMap;
 
@@ -132,7 +133,7 @@ public abstract class FetchCoordinator extends AbstractSimpleCoordination<Route<
     }
 
     protected final Ranges ranges;
-    protected final SyncPoint syncPoint;
+    protected final TxnId atLeast;
     // provided to us, and manages the safe-to-read state
     private final FetchRanges fetchRanges;
     private Throwable failures = null;
@@ -145,16 +146,16 @@ public abstract class FetchCoordinator extends AbstractSimpleCoordination<Route<
     private Ranges needed;
     private int inflight;
 
-    protected FetchCoordinator(Node node, ExclusiveAsyncExecutor executor, Ranges ranges, SyncPoint syncPoint, FetchRanges fetchRanges) throws TopologyException
+    protected FetchCoordinator(Node node, ExclusiveAsyncExecutor executor, Ranges ranges, TxnId atLeast, SortedArrayList<Node.Id> readable, FetchRanges fetchRanges) throws TopologyException
     {
-        super(node, executor, syncPoint.syncId, syncPoint.route);
+        super(node, executor, TxnId.NONE, node.computeRoute(atLeast.epoch(), ranges));
+        this.atLeast = atLeast;
         this.ranges = remaining = ranges;
-        this.syncPoint = syncPoint;
         this.fetchRanges = fetchRanges;
         // TODO (expected): prioritise nodes that were members in the "prior" epoch also
         //  (by prior, we mean the prior epoch affecting ownership of this shard, not the prior numerical epoch)
-        Topology topology = node.topology().active().forEpoch(ranges, syncPoint.syncId.epoch(), ALL).get(0);
-        this.stateMap = new SortedListMap<>(topology.nodes(), State[]::new);
+        Topology topology = node.topology().active().forEpoch(ranges, atLeast.epoch(), ALL).get(0);
+        this.stateMap = new SortedListMap<>(readable, State[]::new);
         for (int i = 0 ; i < stateMap.domainSize() ; ++i)
         {
             Node.Id id = stateMap.getKey(i);
@@ -219,13 +220,13 @@ public abstract class FetchCoordinator extends AbstractSimpleCoordination<Route<
 
         // some portion of the range is completely unavailable
         setDone();
-        failures = FailureAccumulator.fail(node.agent(), failures, syncPoint.syncId, null, needed);
+        failures = FailureAccumulator.fail(node.agent(), failures, null, null, needed);
         onDone(success, failures);
     }
 
     protected void exhausted(Ranges exhausted)
     {
-        fetchRanges.fail(exhausted, Exhausted.exhausted(node.agent(), syncPoint.syncId, null, exhausted));
+        fetchRanges.fail(exhausted, Exhausted.exhausted(node.agent(), null, null, exhausted));
     }
 
     protected void abort(Ranges abort)
@@ -367,6 +368,7 @@ public abstract class FetchCoordinator extends AbstractSimpleCoordination<Route<
     {
         return stateMap.keySet();
     }
+
     @Override
     public SortedListMap<Node.Id, ?> replies()
     {

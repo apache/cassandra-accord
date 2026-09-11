@@ -539,7 +539,7 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
             {
                 Invariants.require(values.get(values.size() - 1) == null);
                 values.remove(values.size() - 1);
-                Invariants.require(values.get(0) != null);
+                Invariants.require(values.isEmpty() || values.get(0) != null);
                 Invariants.require(starts.size() == values.size() + 1);
             }
             return buildInternal();

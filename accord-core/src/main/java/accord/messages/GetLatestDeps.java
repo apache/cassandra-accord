@@ -136,6 +136,12 @@ public class GetLatestDeps extends RouteRequest.WithUnsynced<GetLatestDeps.GetLa
         return LoadKeysFor.READ_WRITE;
     }
 
+    @Override
+    protected boolean abort(Refuse.MinMax refuses)
+    {
+        return refuses.max != Refuse.NONE;
+    }
+
     public interface GetLatestDepsReply extends Reply
     {
         boolean isOk();

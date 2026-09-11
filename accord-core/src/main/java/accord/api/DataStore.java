@@ -18,16 +18,16 @@
 
 package accord.api;
 
-import java.util.Map;
-
 import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.RedundantBefore;
 import accord.local.SafeCommandStore;
+import accord.local.durability.DurabilityResults;
 import accord.primitives.Ranges;
-import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.utils.SortedArrays;
+import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.UnhandledEnum;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
@@ -142,26 +142,21 @@ public interface DataStore
      * If RequestKind#Sync is used, fetches only a minimal subset of data, assuming there has been some data locally
      * (it is to up store's implementer to know how to achieve this)
      */
-    default FetchResult fetch(Node node, SafeCommandStore safeStore, Ranges ranges, SyncPoint syncPoint, FetchRanges callback, FetchKind kind)
+    default FetchResult fetch(Node node, SafeCommandStore safeStore, Ranges ranges, TxnId atLeast, SortedArrayList<Node.Id> readable, FetchRanges callback, FetchKind kind)
     {
         switch (kind)
         {
             default: throw UnhandledEnum.unknown(kind);
-            case Sync: return sync(node, safeStore, ranges, syncPoint, callback);
-            case Image: return image(node, safeStore, ranges, syncPoint, callback);
+            case Sync: return sync(node, safeStore, ranges, atLeast, readable, callback);
+            case Image: return image(node, safeStore, ranges, atLeast, readable, callback);
         }
     }
 
-    FetchResult image(Node node, SafeCommandStore safeStore, Ranges ranges, SyncPoint syncPoint, FetchRanges callback);
-
-    default FetchResult sync(Node node, SafeCommandStore safeStore, Ranges ranges, SyncPoint syncPoint, FetchRanges callback)
-    {
-        return sync(node, safeStore, Map.of(syncPoint.syncId, ranges), callback);
-    }
+    FetchResult image(Node node, SafeCommandStore safeStore, Ranges ranges, TxnId atLeast, SortedArrayList<Node.Id> readable, FetchRanges callback);
 
     // TODO (desired): standardise on using only TxnId bounds for image/sync, not a full SyncPoint;
     //  leave it to the durability service to ensure the relevant durability via sync point or otherwise
-    default FetchResult sync(Node node, SafeCommandStore safeStore, Map<TxnId, Ranges> atLeast, FetchRanges callback)
+    default FetchResult sync(Node node, SafeCommandStore safeStore, Ranges ranges, TxnId atLeast, SortedArrayList<Node.Id> readable, FetchRanges callback)
     {
         throw new UnsupportedOperationException();
     }

@@ -106,6 +106,7 @@ public class ProtocolModifiers
     public enum InformOfDurability { NONE, HOME, ALL }
 
     public enum ReplicaExecution { NONE, BLIND_WRITE, ALL }
+    public enum UniqueTimestampOnConflict { STALE, NOW }
 
     public static class Configure
     {
@@ -127,6 +128,9 @@ public class ProtocolModifiers
 
         private static AbandonFastPath abandonFastPath = AbandonFastPath.IF_ANY_DELAYED_OR_REJECTED;
         public static synchronized void setAbandonFastPath(AbandonFastPath newAbandonFastPath) { pre(); abandonFastPath = newAbandonFastPath; }
+
+        private static UniqueTimestampOnConflict uniqueTimestampOnConflict = UniqueTimestampOnConflict.STALE;
+        public static synchronized void setUniqueTimestampOnConflict(UniqueTimestampOnConflict newUniqueTimestampOnConflict) { pre();uniqueTimestampOnConflict = newUniqueTimestampOnConflict; }
 
         private static boolean recoveryAwaitsSupersedingSyncPoints = true;
         public static synchronized void setRecoveryAwaitsSupersedingSyncPoints(boolean newRecoveryAwaitsSupersedingSyncPoints) { pre(); recoveryAwaitsSupersedingSyncPoints = newRecoveryAwaitsSupersedingSyncPoints; }
@@ -248,6 +252,9 @@ public class ProtocolModifiers
 
     private static final AbandonFastPath abandonFastPath = Configure.abandonFastPath;
     public static AbandonFastPath abandonFastPath() { return abandonFastPath; }
+
+    private static final UniqueTimestampOnConflict UNIQUE_TIMESTAMP_ON_CONFLICT = Configure.uniqueTimestampOnConflict;
+    public static UniqueTimestampOnConflict uniqueTimestampOnConflict() { return UNIQUE_TIMESTAMP_ON_CONFLICT; }
 
     private static final boolean recoveryAwaitsSupersedingSyncPoints = Configure.recoveryAwaitsSupersedingSyncPoints;
     public static boolean recoveryAwaitsSupersedingSyncPoints() { return recoveryAwaitsSupersedingSyncPoints; }

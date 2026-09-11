@@ -34,7 +34,7 @@ import accord.coordinate.tracking.RequestStatus;
 import accord.local.Commands;
 import accord.local.Commands.CommitOutcome;
 import accord.local.LoadKeys;
-import accord.local.LogUnavailableException;
+import accord.local.LogFaultException;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.SafeCommand;
@@ -628,7 +628,7 @@ public class ExecuteTxn extends ReadCoordinator<Result, ReadReply>
         protected CommitOrReadNack refuseInternal(SafeCommandStore safeStore)
         {
             if (isPrivilegedVoteCommitting)
-                throw new LogUnavailableException();
+                throw new LogFaultException();
             return super.refuseInternal(safeStore);
         }
 

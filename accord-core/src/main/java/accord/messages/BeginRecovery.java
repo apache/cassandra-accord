@@ -134,6 +134,12 @@ public class BeginRecovery extends RouteRequest.WithUnsynced<BeginRecovery.Recov
     }
 
     @Override
+    protected boolean abort(Refuse.MinMax refuses)
+    {
+        return refuses.max != Refuse.NONE;
+    }
+
+    @Override
     public RecoverReply applyInternal(SafeCommandStore safeStore)
     {
         StoreParticipants participants = StoreParticipants.update(safeStore, route, minEpoch, txnId, executeAtOrTxnIdEpoch);
