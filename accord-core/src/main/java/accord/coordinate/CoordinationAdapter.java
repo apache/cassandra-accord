@@ -50,6 +50,7 @@ import accord.topology.Topologies;
 import accord.topology.TopologyException;
 import accord.utils.Invariants;
 import accord.utils.SortedArrays.SortedArrayList;
+import accord.utils.ThrowableSafety;
 import accord.utils.UnhandledEnum;
 
 import static accord.api.ProtocolModifiers.QuorumEpochIntersections;
@@ -457,7 +458,7 @@ public interface CoordinationAdapter<R>
             {
                 if (callback != null)
                 {
-                    callback.accept(txn.result(txnId, executeAt, null), null);
+                    ThrowableSafety.safeSuccess(callback, txn.result(txnId, executeAt, null), node);
                 }
                 if (txnId.is(Routable.Domain.Range))
                 {
@@ -478,7 +479,7 @@ public interface CoordinationAdapter<R>
                 SyncPoint syncPoint = new SyncPoint(txnId, executeAt, (FullRangeRoute)route, deps);
                 if (callback != null)
                 {
-                    callback.accept(syncPoint, null);
+                    ThrowableSafety.safeSuccess(callback, syncPoint, node);
                 }
                 if (txnId.is(Routable.Domain.Range))
                 {

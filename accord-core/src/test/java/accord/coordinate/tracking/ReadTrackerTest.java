@@ -31,11 +31,10 @@ import java.util.HashSet;
 import java.util.Set;
 
 import static accord.Utils.*;
-import static accord.utils.Utils.toArray;
 
 public class ReadTrackerTest
 {
-    private static final Id[] ids = toArray(ids(5), Id[]::new);
+    private static final Id[] ids = ids(5).toArray(Id[]::new);
     private static final Ranges ranges = TopologyUtils.initialRanges(5, 500);
     private static final Topology topology = TopologyUtils.initialTopology(ids, ranges, 3);
         /*

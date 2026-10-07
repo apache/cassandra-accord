@@ -67,7 +67,7 @@ import static accord.utils.VIntCoding.sizeOfVInt;
 public class Serialize
 {
     private static final int TIMESTAMP_BASE_SIZE = 16;
-    private static final InternalStatus[] DECODE_STATUS = InternalStatus.values();
+    private static final InternalStatus[] DECODE_STATUS = InternalStatus.BY_ID; // NOTE: we serialize InternalStatus.id, NOT ordinal
 
     private static final int HAS_MISSING_DEPS_HEADER_BIT = 0x1;
     private static final int HAS_MISSING_DEPS_HEADER_BIT_SHIFT = 0;
@@ -82,6 +82,8 @@ public class Serialize
     private static final int HAS_BOOTSTRAPPED_AT_HEADER_BIT = 0x20;
     private static final int HAS_BOUNDS_FLAGS_HEADER_BIT = 0x40;
     private static final int HAS_MAX_HLC_HEADER_BIT = 0x80;
+    private static final int HAS_EXTRA_STATUS_BITS = 0x100;
+    private static final int MIN_STATUS_BITS = 4;
 
 
     /**
@@ -96,16 +98,21 @@ public class Serialize
      *   bit 0 is set if there are any missing ids;
      *   bit 1 is set if there are any executeAt specified
      *   bit 2 is set if there are any ballots specified
-     *   bit 3 is set if there are any queries with override flags
-     *   bit 4 is set if there are any queries with missing ids that have non-identity flags set
-     *   bits 6-7 number of header bytes to read for each command
-     *   bits 8-9: level 0 extra hlc bytes to read
-     *   bits 10-11: level 1 extra hlc bytes to read (+ 1 + level 0)
-     *   bits 12-13: level 2 extra hlc bytes to read (+ 1 + level 1)
-     *   bits 14-15: level 3 extra hlc bytes to read (+ 1 + level 2)
+     *   bit 3 is set if there are any entries with override flags
+     *   bit 4 is set if there are any entries with missing ids that have non-identity flags set
+     *   bit 5 is set if there is a separate readyAt bound
+     *   bit 6 is set if the bounds have non-standard flags
+     *   bit 7 is set if there is a separate maxUniqueHlc
+     *   bit 8 is set if we use an additional status bit
+     *   bits 9-13 are unused
+     *   bits 14-15 number of header bytes to read for each command
+     *   bits 16-17: level 0 extra hlc bytes to read
+     *   bits 18-19: level 1 extra hlc bytes to read (+ 1 + level 0)
+     *   bits 20-21: level 2 extra hlc bytes to read (+ 1 + level 1)
+     *   bits 22-23: level 3 extra hlc bytes to read (+ 1 + level 2)
      *
      * In order, for each command, we consume:
-     * 3 bits for the InternalStatus of the command
+     * 4 or 5 bits (conditioned on bit 8 above) for the InternalStatus.id of the command (NOT the ordinal)
      * 1 optional bit: if the status is not APPLIED_DURABLE for encoding if the transaction is durably committed
      * 1 optional bit: if any command has override flags; 2 bits more to read if this bit is set
      * 1 optional bit: if the status encodes an executeAt, indicating if the executeAt is not the TxnId
@@ -169,6 +176,7 @@ public class Serialize
             // whether we have any missing transactions to encode, any executeAt that are not equal to their TxnId
             // and whether there are any non-standard flag bits to encode
             int nodeIdCount, missingIdCount = 0, missingIdWithFlagsCount = 0, executeAtCount = 0, ballotCount = 0, overrideCount = 0;
+            boolean hasExtraStatusBits = false;
             int bitsPerExecuteAtEpoch = 0, bitsPerExecuteAtFlags = 0, bitsPerExecuteAtHlc = 1, bitsPerMissingIdFlags = 0; // to permit us to use full 64 bits and encode in 5 bits we force at least one hlc bit
             {
                 nodeIds[0] = cfk.redundantBefore().node.id;
@@ -189,6 +197,7 @@ public class Serialize
 
                     TxnInfo txn = cfk.get(i);
                     overrideCount += txn.statusOverrides();
+                    hasExtraStatusBits |= txn.hasHighId();
                     nodeIds[nodeIdCount++] = txn.node.id;
 
                     if (txn.executeAt != txn)
@@ -249,7 +258,8 @@ public class Serialize
             // We can now use this information to calculate the fixed header size, compute the amount
             // of additional space we'll need to store the TxnId and its basic info
             int bitsPerNodeId = numberOfBitsToRepresent(nodeIdCount);
-            int minHeaderBits = 10 + bitsPerNodeId + (overrideCount > 0 ? 1 : 0);
+            int statusBits = (hasExtraStatusBits ? MIN_STATUS_BITS + 1 : MIN_STATUS_BITS);
+            int minHeaderBits = statusBits + 6 + bitsPerNodeId + (overrideCount > 0 ? 1 : 0);
             int headerFlags = (executeAtCount > 0 ? HAS_EXECUTE_AT_HEADER_BIT : 0)
                             | (missingIdCount > 0 ? HAS_MISSING_DEPS_HEADER_BIT : 0)
                             | (ballotCount > 0    ? HAS_BALLOT_HEADER_BIT : 0);
@@ -334,6 +344,7 @@ public class Serialize
                               | (cfk.readyAt() != null        ? HAS_BOOTSTRAPPED_AT_HEADER_BIT    : 0)
                               | (hasBoundsFlags(cfk)          ? HAS_BOUNDS_FLAGS_HEADER_BIT       : 0)
                               | (cfk.hasMaxUniqueHlc()        ? HAS_MAX_HLC_HEADER_BIT            : 0)
+                              | (hasExtraStatusBits           ? HAS_EXTRA_STATUS_BITS             : 0)
             ;
 
             int headerBytes = (maxHeaderBits+7)/8;
@@ -505,8 +516,8 @@ public class Serialize
             for (int i = 0 ; i < commandCount ; ++i)
             {
                 TxnInfo txn = cfk.get(i);
-                long bits = txn.status().ordinal();
-                int bitIndex = 4;
+                long bits = txn.statusId();
+                int bitIndex = statusBits;
 
                 // TODO (desired): these are all single bit flags, so we could do explicit shift and mask to produce this value
                 int statusHasExecuteAt = txn.hasExecuteAt() ? 1 : 0;
@@ -799,6 +810,10 @@ public class Serialize
         }
 
         int globalFlags = (int) readLeastSignificantBytes(3, in);
+        int statusBits = MIN_STATUS_BITS;
+        if (0 != (globalFlags & HAS_EXTRA_STATUS_BITS))
+            statusBits = MIN_STATUS_BITS + 1;
+        int statusMask = (1 << statusBits) - 1;
         int headerByteCount, hlcBytesLookup;
         {
             headerByteCount = 1 + ((globalFlags >>> 14) & 0x3);
@@ -843,9 +858,9 @@ public class Serialize
         {
             long header = readLeastSignificantBytes(headerByteCount, in);
             header |= 1L << (8 * headerByteCount); // marker so we know where to shift-left most-significant bytes to
-            int commandDecodeFlags = (int)(header & 0xF);
+            int commandDecodeFlags = (int)(header & statusMask);
             InternalStatus status = DECODE_STATUS[commandDecodeFlags];
-            header >>>= 4;
+            header >>>= statusBits;
             commandDecodeFlags <<= 6;
 
             {

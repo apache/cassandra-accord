@@ -57,6 +57,7 @@ import static accord.api.TopologySorter.NodeStatus.HEALTHY;
 import static accord.coordinate.AbstractCoordination.LocalExecuteState.PENDING;
 import static accord.coordinate.AbstractCoordination.LocalExecuteState.SUCCESS;
 import static accord.coordinate.AbstractCoordination.LocalExecuteState.TIMEOUT;
+import static accord.utils.ThrowableSafety.safeFail;
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
 
 public abstract class AbstractCoordination<P extends Participants<?>, Result, Reply extends accord.messages.Reply, Ok> extends AbstractSimpleCoordination<P> implements Callback<Reply>, Callback.CallbackExclusive<Reply>
@@ -384,7 +385,7 @@ public abstract class AbstractCoordination<P extends Participants<?>, Result, Re
         {
             setDone();
             BiConsumer<?, Throwable> callback = tryTakeCallback();
-            if (callback != null) callback.accept(null, failure);
+            if (callback != null) safeFail(callback, failure, node);
             else node.agent().onException(failure);
             if (tracing != null)
                 tracing.trace(null, "callback failure processing from %s: %s", from, failure);

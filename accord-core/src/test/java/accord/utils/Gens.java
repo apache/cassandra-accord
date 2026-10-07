@@ -922,7 +922,7 @@ public class Gens
                     if (rs.nextBoolean())
                     {
                         array = Arrays.copyOf(array, array.length);
-                        Utils.reverse(array);
+                        ArrayUtils.reverse(array);
                     }
                     return pickZipf(array);
                 case 3: // random weight

@@ -18,6 +18,7 @@
 
 package accord.topology;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumMap;
@@ -130,6 +131,94 @@ public class TopologyManagerTest
 
         tm.onReadyToCoordinate(id(2), 2);
         Assertions.assertTrue(tm.unsafeGetActiveEpoch(2).isQuorumReady());
+    }
+
+    /**
+     * A topology that fills a gap must be activated even if it is reported after another thread in updateActive()
+     * has observed the gap, but before that thread has relinquished ownership of the update.
+     * We simulate this by reporting the missing topology from within the owner's eligibility check.
+     */
+    @Test
+    void gapFilledDuringUpdateActiveIsNotLost() throws Exception
+    {
+        Shard[] shards = { shard(range(0, 100), idList(1, 2, 3), idSet(1, 2, 3)) };
+        Topology topology1 = topology(1, shards);
+        Topology topology2 = topology(2, shards);
+        Topology topology3 = topology(3, shards);
+
+        TopologyManager manager = createTopologyManager();
+        boolean[] armed = new boolean[1];
+        PendingEpochs pending = new PendingEpochs(manager)
+        {
+            @Override
+            long minEpoch()
+            {
+                long result = super.minEpoch();
+                if (armed[0])
+                {
+                    armed[0] = false;
+                    manager.reportTopology(topology2);
+                }
+                return result;
+            }
+        };
+        Field field = TopologyManager.class.getDeclaredField("pending");
+        field.setAccessible(true);
+        field.set(manager, pending);
+
+        manager.reportTopology(topology1);
+        manager.reportTopology(topology3);
+        Assertions.assertEquals(1, manager.epoch());
+        Assertions.assertEquals(3, manager.pendingEpoch());
+
+        armed[0] = true;
+        manager.reportTopology(topology3);
+        Assertions.assertFalse(armed[0]);
+        Assertions.assertEquals(3, manager.epoch());
+    }
+
+    /**
+     * Multiple reentrant updateActive() calls while the owner is active must each return promptly (the second used to
+     * spin forever on PENDING_UPDATE_ACTIVE), and the owner must still observe all of their work.
+     */
+    @Test
+    void repeatedReentrantUpdateActiveDoesNotHang() throws Exception
+    {
+        Shard[] shards = { shard(range(0, 100), idList(1, 2, 3), idSet(1, 2, 3)) };
+        Topology topology1 = topology(1, shards);
+        Topology topology2 = topology(2, shards);
+        Topology topology3 = topology(3, shards);
+        Topology topology4 = topology(4, shards);
+
+        TopologyManager manager = createTopologyManager();
+        boolean[] armed = new boolean[1];
+        PendingEpochs pending = new PendingEpochs(manager)
+        {
+            @Override
+            long minEpoch()
+            {
+                long result = super.minEpoch();
+                if (armed[0])
+                {
+                    armed[0] = false;
+                    manager.reportTopology(topology2);
+                    manager.reportTopology(topology3);
+                }
+                return result;
+            }
+        };
+        Field field = TopologyManager.class.getDeclaredField("pending");
+        field.setAccessible(true);
+        field.set(manager, pending);
+
+        manager.reportTopology(topology1);
+        manager.reportTopology(topology4);
+        Assertions.assertEquals(1, manager.epoch());
+
+        armed[0] = true;
+        Assertions.assertTimeoutPreemptively(java.time.Duration.ofSeconds(10), () -> manager.reportTopology(topology4));
+        Assertions.assertFalse(armed[0]);
+        Assertions.assertEquals(4, manager.epoch());
     }
 
     private static TopologyManager tracker()

@@ -458,7 +458,7 @@ public abstract class InMemoryCommandStore extends CommandStore
             }
             else if (context.findKeys() != DECLARED)
             {
-                SummaryLoader loader = SummaryLoader.loader(unsafeGetRedundantBefore(), unsafeGetMaxDecidedRX(), context);
+                SummaryLoader loader = loader(unsafeGetRedundantBefore(), unsafeGetMaxDecidedRX(), context);
                 for (GlobalCommandsForKey global : this.commandsForKey.values())
                 {
                     if (!unseekables.contains(global.key))
@@ -842,7 +842,7 @@ public abstract class InMemoryCommandStore extends CommandStore
             Invariants.require(context.findKeys() != DECLARED);
             MaxDecidedRX maxDecidedRX = commandStore().unsafeGetMaxDecidedRX();
             SummaryLoader loader = cfrLoad != null ? cfrLoad.loader
-                                                   : SummaryLoader.loader(redundantBefore(), maxDecidedRX, context);
+                                                   : commandStore.loader(redundantBefore(), maxDecidedRX, context);
 
             TreeMap<Timestamp, Summary> loaded = new TreeMap<>();
             commandStore().commandsForRanges.populateMinFutureRx(loader);
@@ -935,12 +935,27 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
     }
 
+    SummaryLoader loader(RedundantBefore redundantBefore, MaxDecidedRX maxDecidedRX, ExecutionContext context)
+    {
+        return loader(redundantBefore, maxDecidedRX, context.primaryTxnId(), context.executeAt(), context.findKeys(), context.keys());
+    }
+
+    SummaryLoader loader(RedundantBefore redundantBefore, MaxDecidedRX maxDecidedRX, TxnId primaryTxnId, Timestamp executeAt, FindKeys findKeys, Unseekables<?> keysOrRanges)
+    {
+        return SummaryLoader.loader(null, redundantBefore, maxDecidedRX, primaryTxnId, executeAt, findKeys, keysOrRanges, InMemoryCommandStore::newLoader);
+    }
+
+    private static SummaryLoader newLoader(Object ignore, RedundantBefore redundantBefore, MaxDecidedRX maxDecidedRX, TxnId primaryTxnId, Unseekables<?> searchKeysOrRanges, Kinds testKind, TxnId minTxnId, Timestamp executeAt, FindKeys findKeys)
+    {
+        return new SummaryLoader(redundantBefore, maxDecidedRX, primaryTxnId, searchKeysOrRanges, testKind, minTxnId, executeAt, findKeys);
+    }
+
     protected CommandsForRangeLoad cfrLoad(ExecutionContext context)
     {
         if (context.findKeys() != FindKeys.SUPERSEDING)
             return null;
 
-        SummaryLoader loader = SummaryLoader.loader(unsafeGetRedundantBefore(), unsafeGetMaxDecidedRX(), context);
+        SummaryLoader loader = loader(unsafeGetRedundantBefore(), unsafeGetMaxDecidedRX(), context);
         commandsForRanges.populateMinFutureRx(loader);
         TreeMap<Timestamp, Summary> loaded = new TreeMap<>();
         commandsForRanges.search(loader, null, txnId -> {

@@ -281,7 +281,7 @@ public class RelationMultiMap
                 {
                     if (adapter.compareKeys(sortedKeys[i-1], sortedKeys[i]) == 0)
                         throw illegalArgument("Key " + sortedKeys[i] + " has been visited more than once ("
-                                + Arrays.toString(Arrays.copyOf(keys, keyCount)) + ")");
+                                              + Arrays.toString(Arrays.copyOf(keys, keyCount)) + ")");
                 }
                 for (int i = 0 ; i < keyCount ; ++i)
                     sortedKeyIndexes[Arrays.binarySearch(sortedKeys, keys[i], adapter.keyComparator())] = i;

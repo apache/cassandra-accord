@@ -334,4 +334,75 @@ public class AsyncChainsTest
         chain.begin(mock);
         return org.assertj.core.api.Assertions.assertThat(captor.getValue());
     }
+
+    private static Throwable failure(AsyncResult<?> result)
+    {
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        result.invoke((success, fail) -> failure.set(fail));
+        return failure.get();
+    }
+
+    @Test
+    void intermediateCallbackExceptionFailsDownstream()
+    {
+        RuntimeException boom = new RuntimeException("callback");
+        AtomicReference<Throwable> reported = new AtomicReference<>();
+        Thread thread = Thread.currentThread();
+        Thread.UncaughtExceptionHandler old = thread.getUncaughtExceptionHandler();
+        AsyncResult.Settable<Integer> source = AsyncResults.settable();
+        AsyncResult<Integer> downstream = source.chain().invoke((value, failure) -> { throw boom; }).beginAsResult();
+        try
+        {
+            thread.setUncaughtExceptionHandler((ignored, failure) -> reported.set(failure));
+            source.setSuccess(1);
+        }
+        finally
+        {
+            thread.setUncaughtExceptionHandler(old);
+        }
+
+        Assertions.assertNull(reported.get());
+        Assertions.assertTrue(downstream.isDone());
+        Assertions.assertSame(boom, failure(downstream));
+    }
+
+    @Test
+    void intermediateCallbackExceptionSuppressesOriginalFailure()
+    {
+        RuntimeException original = new RuntimeException("original");
+        RuntimeException boom = new RuntimeException("callback");
+        AsyncResult<Integer> downstream = AsyncChains.<Integer>failure(original).invoke((value, failure) -> { throw boom; }).beginAsResult();
+
+        Assertions.assertSame(boom, failure(downstream));
+        Assertions.assertSame(original, boom.getSuppressed()[0]);
+        Assertions.assertEquals(0, original.getSuppressed().length); // the (possibly shared) upstream failure is not mutated
+    }
+
+    @Test
+    void intermediateCallbackRethrowingFailureIsNotSelfSuppressed()
+    {
+        RuntimeException original = new RuntimeException("original");
+        AsyncResult<Integer> downstream = AsyncChains.<Integer>failure(original).invoke((value, failure) -> { throw (RuntimeException) failure; }).beginAsResult();
+        Assertions.assertSame(original, failure(downstream));
+        Assertions.assertEquals(0, original.getSuppressed().length);
+    }
+
+    @Test
+    void asyncCallbackExceptionFailsDownstream()
+    {
+        RuntimeException boom = new RuntimeException("callback");
+        AbstractAsyncExecutor immediate = Runnable::run;
+        AsyncResult<Integer> downstream = AsyncChains.success(1).invoke((value, failure) -> { throw boom; }, immediate).beginAsResult();
+        Assertions.assertSame(boom, failure(downstream));
+    }
+
+    @Test
+    void asyncCallbackRejectionFailsDownstream()
+    {
+        RejectedExecutionException rejected = new RejectedExecutionException();
+        AbstractAsyncExecutor rejecting = ignore -> { throw rejected; };
+        AsyncResult<Integer> downstream = AsyncChains.success(1).invoke((value, failure) -> {}, rejecting).beginAsResult();
+        Assertions.assertTrue(downstream.isDone());
+        Assertions.assertSame(rejected, failure(downstream));
+    }
 }

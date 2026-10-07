@@ -25,6 +25,8 @@ import java.util.Objects;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import accord.api.Result;
 import accord.api.Result.PersistableResult;
 import accord.api.RoutingKey;
@@ -58,8 +60,6 @@ import accord.utils.Invariants;
 import accord.utils.LargeBitSet;
 import accord.utils.UnhandledEnum;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import static accord.local.Command.Committed.committed;
 import static accord.local.Command.Executed.executed;
 import static accord.local.Command.NotAcceptedWithoutDefinition.notAccepted;
@@ -70,7 +70,11 @@ import static accord.primitives.Routable.Domain.Key;
 import static accord.primitives.Routable.Domain.Range;
 import static accord.primitives.Routables.Slice;
 import static accord.primitives.SaveStatus.AcceptedInvalidate;
+import static accord.primitives.SaveStatus.AcceptedPrivCoord;
+import static accord.primitives.SaveStatus.AcceptedPrivCoordRecovery;
 import static accord.primitives.SaveStatus.Erased;
+import static accord.primitives.SaveStatus.PreAcceptedPrivCoord;
+import static accord.primitives.SaveStatus.PreAcceptedPrivCoordRecovery;
 import static accord.primitives.SaveStatus.TruncatedApply;
 import static accord.primitives.SaveStatus.TruncatedUnapplied;
 import static accord.primitives.SaveStatus.Uninitialised;
@@ -83,8 +87,6 @@ import static accord.utils.Invariants.ParanoiaCostFactor.LOW;
 import static accord.utils.Invariants.illegalArgument;
 import static accord.utils.Invariants.illegalState;
 import static accord.utils.SortedArrays.forEachIntersection;
-import static accord.utils.Utils.ensureImmutable;
-import static accord.utils.Utils.ensureMutable;
 import static java.lang.String.format;
 
 public abstract class Command extends MinimalWithConcreteDeps
@@ -100,8 +102,9 @@ public abstract class Command extends MinimalWithConcreteDeps
         this.promised = Invariants.nonNull(promised);
         this.partialTxn = partialTxn;
         this.acceptedOrCommitted = Invariants.nonNull(acceptedOrCommitted);
-        Invariants.require(partialTxn == null || txnId.isSystemTxn() || participants.owns().containsAll(partialTxn.keys()));
-        Invariants.require(partialTxn == null || txnId.isSystemTxn() || participants.owns().containsAll(partialTxn.read().keys()));
+        Invariants.require(!saveStatus.isPrivilegedCoordinatorZeroBallot() || Ballot.ZERO.equals(promised), "%s invalid with non-zero promised ballot %s", saveStatus, promised);
+        Invariants.paranoid(partialTxn == null || txnId.isSystemTxn() || participants.owns().containsAll(partialTxn.keys()));
+        Invariants.paranoid(partialTxn == null || txnId.isSystemTxn() || participants.owns().containsAll(partialTxn.read().keys()));
     }
 
     protected Command(TxnId txnId, SaveStatus saveStatus, Durability durability, @Nonnull StoreParticipants participants, Ballot promised, Timestamp executeAt, @Nullable PartialTxn partialTxn, @Nullable PartialDeps partialDeps, Ballot acceptedOrCommitted, boolean unsafeInitialisation)
@@ -493,7 +496,10 @@ public abstract class Command extends MinimalWithConcreteDeps
         @Override
         public Command updateAttributes(StoreParticipants participants, Ballot promised, Durability durability)
         {
-            return new PreAccepted(txnId(), saveStatus(), durability, participants, promised, executeAt(), partialTxn(), partialDeps());
+            SaveStatus saveStatus = this.saveStatus;
+            if (saveStatus == PreAcceptedPrivCoord && !Ballot.ZERO.equals(promised))
+                saveStatus = PreAcceptedPrivCoordRecovery;
+            return new PreAccepted(txnId(), saveStatus, durability, participants, promised, executeAt(), partialTxn(), partialDeps());
         }
     }
 
@@ -569,7 +575,10 @@ public abstract class Command extends MinimalWithConcreteDeps
         @Override
         public Command updateAttributes(StoreParticipants participants, Ballot promised, Durability durability)
         {
-            return validate(new Accepted(txnId(), saveStatus(), durability, participants, promised, executeAt(), partialTxn(), partialDeps(), acceptedOrCommitted()));
+            SaveStatus saveStatus = this.saveStatus;
+            if (saveStatus == AcceptedPrivCoord && !Ballot.ZERO.equals(promised))
+                saveStatus = AcceptedPrivCoordRecovery;
+            return validate(new Accepted(txnId(), saveStatus, durability, participants, promised, executeAt(), partialTxn(), partialDeps(), acceptedOrCommitted()));
         }
     }
 
@@ -1214,6 +1223,18 @@ public abstract class Command extends MinimalWithConcreteDeps
         {
             return 0;
         }
+
+        public static LargeBitSet ensureMutable(LargeBitSet set)
+        {
+            if (set == null) return null;
+            return set instanceof ImmutableBitSet ? new LargeBitSet(set) : set;
+        }
+
+        public static ImmutableBitSet ensureImmutable(LargeBitSet set)
+        {
+            if (set == null) return null;
+            return set instanceof ImmutableBitSet ? (ImmutableBitSet) set : new ImmutableBitSet(set, true);
+        }
     }
 
     public static final class WaitingOnWithExecuteAt extends WaitingOn
@@ -1413,11 +1434,16 @@ public abstract class Command extends MinimalWithConcreteDeps
             case PreAccepted:
             case PreAcceptedWithDeps:
             case PreAcceptedWithVote:
+            case PreAcceptedPrivCoord:
+            case PreAcceptedPrivCoordRecovery:
+            case FastAcceptedPrivCoord:
                 return validateCommandClass(status, PreAccepted.class, klass);
             case AcceptedInvalidate:
                 return validateCommandClass(status, NotAcceptedWithoutDefinition.class, klass);
             case AcceptedInvalidateWithDefinition:
             case AcceptedMedium:
+            case AcceptedPrivCoord:
+            case AcceptedPrivCoordRecovery:
             case AcceptedMediumWithDefinition:
             case AcceptedMediumWithDefAndVote:
             case AcceptedSlow:
@@ -1529,6 +1555,7 @@ public abstract class Command extends MinimalWithConcreteDeps
                 case DepsFromCoordinator:
                 case DepsProposedFixed:
                 case DepsProposed:
+                case DepsProposedFromCoordinator:
                 case DepsCommitted:
                 case DepsKnown:
                     Invariants.require(deps != null);

@@ -261,8 +261,9 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
             StoreParticipants participants = StoreParticipants.update(safeStore, scope, minEpoch, txnId, txnId.epoch());
             SafeCommand safeCommand = safeStore.get(txnId, participants);
 
-            boolean hasCoordinatorVote = txnId.hasPrivilegedCoordinator();
-            Commands.AcceptOutcome outcome = Commands.preaccept(safeStore, safeCommand, participants, txnId, txn, null, hasCoordinatorVote);
+            Commands.AcceptOutcome outcome = txnId.hasPrivilegedCoordinator()
+                                             ? Commands.preacceptAsPrivilegedCoordinator(safeStore, safeCommand, participants, txnId, txn)
+                                             : Commands.preaccept(safeStore, safeCommand, participants, txnId, txn, null, false);
             if (outcome != Success)
                 return PreAcceptNack.INSTANCE;
 

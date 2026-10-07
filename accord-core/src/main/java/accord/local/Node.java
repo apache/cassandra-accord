@@ -40,6 +40,7 @@ import accord.api.ExclusiveAsyncExecutor;
 import accord.api.TopologyService;
 import accord.api.TopologySorter.NodeStatus;
 import accord.api.Tracing;
+import accord.api.UncaughtExceptionListener;
 import accord.coordinate.ExecuteTxn;
 import accord.impl.LocalDelivery;
 import accord.local.CommandStores.UnrestrictedStoreSelector;
@@ -124,7 +125,7 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
 
-public class Node implements NodeCommandStoreService
+public class Node implements NodeCommandStoreService, UncaughtExceptionListener.Supplier
 {
     public static class Id implements Comparable<Id>
     {
@@ -226,7 +227,7 @@ public class Node implements NodeCommandStoreService
         this.listeners = remoteListenersFactory.apply(this);
         this.agent = agent;
         this.random = random;
-        this.persistDurableBefore = new PersistentField<>(() -> durableBefore,
+        this.persistDurableBefore = new PersistentField<>("DurableBefore", () -> durableBefore,
                                                           DurableBefore::merge, DurableBefore::mergeIfDifferent,
                                                           safeDurableBeforePersister(durableBeforePersister),
                                                           this::setPersistedDurableBefore,
@@ -313,6 +314,12 @@ public class Node implements NodeCommandStoreService
             {
                 Invariants.require(addValue.maxEpoch() <= epoch());
                 return wrap.persist(addValue, newValue);
+            }
+            @Override
+            public AsyncResult<?> persist(DurableBefore newValue)
+            {
+                Invariants.require(newValue.maxEpoch() <= epoch());
+                return wrap.persist(newValue);
             }
             @Override public DurableBefore load() { return wrap.load(); }
         };
@@ -864,6 +871,11 @@ public class Node implements NodeCommandStoreService
     }
 
     public Agent agent()
+    {
+        return agent;
+    }
+
+    public UncaughtExceptionListener uncaughtExceptions()
     {
         return agent;
     }

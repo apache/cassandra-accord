@@ -30,6 +30,7 @@ import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiFunction;
+import java.util.function.Predicate;
 import javax.annotation.Nullable;
 
 import accord.api.LocalListeners;
@@ -460,6 +461,23 @@ public class DefaultLocalListeners implements LocalListeners
             return cur;
         });
         return entry;
+    }
+
+    @Override
+    public boolean matchesAnyComplex(TxnId waitingOn, Predicate<? super ComplexListener> test)
+    {
+        RegisteredComplexListeners registered = complexListeners.get(waitingOn);
+        if (registered == null)
+            return false;
+
+        RegisteredComplexListener[] listeners = registered.listeners;
+        for (int i = 0, length = Math.min(registered.length, listeners.length) ; i < length ; ++i)
+        {
+            RegisteredComplexListener listener = listeners[i];
+            if (listener != null && test.test(listener.listener))
+                return true;
+        }
+        return false;
     }
 
     @Override

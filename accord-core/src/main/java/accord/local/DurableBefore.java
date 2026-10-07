@@ -276,6 +276,7 @@ public class DurableBefore extends BTreeReducingRangeMap<DurableBefore.Entry>
     public static final PersistentField.Persister<DurableBefore, DurableBefore> NOOP_PERSISTER = new PersistentField.Persister<>()
     {
         @Override public AsyncResult<?> persist(DurableBefore addValue, DurableBefore newValue) { return AsyncResults.success(null); }
+        @Override public AsyncResult<?> persist(DurableBefore newValue) { return AsyncResults.success(null); }
         @Override public DurableBefore load() { return DurableBefore.EMPTY; }
     };
 

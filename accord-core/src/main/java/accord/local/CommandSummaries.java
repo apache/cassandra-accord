@@ -57,6 +57,8 @@ import static accord.local.FindKeys.DECLARED;
 import static accord.local.MaxDecidedRX.forDeps;
 import static accord.primitives.Known.KnownDeps.NoDeps;
 import static accord.primitives.Routables.Slice.Minimal;
+import static accord.primitives.SaveStatus.PreAcceptedPrivCoord;
+import static accord.primitives.SaveStatus.PreAcceptedPrivCoordRecovery;
 import static accord.primitives.Status.Durability.NotDurable;
 import static accord.primitives.Txn.Kind.Nothing;
 
@@ -80,7 +82,15 @@ public interface CommandSummaries
 
     enum IsDep
     {
-        IS_COORD_DEP, IS_NOT_COORD_DEP, NOT_ELIGIBLE, IS_PROPOSED_OR_STABLE_DEP, IS_NOT_PROPOSED_OR_STABLE_DEP;
+        SELF_COORD,
+        SELF_COORD_RECOVERY,
+        IS_COORD_DEP,
+        IS_NOT_COORD_DEP,
+        COORD_NO_FAST_COMMIT,
+        NOT_ELIGIBLE,
+        IS_PROPOSED_OR_STABLE_DEP,
+        IS_NOT_PROPOSED_OR_STABLE_DEP;
+
         private static final IsDep[] IS_DEPS = values();
     }
 
@@ -97,7 +107,6 @@ public interface CommandSummaries
         SUPERSEDING(6),
         BOTH(7),
         ;
-
 
         private static final Relevance[] lookup = values();
         public static final int ENCODED_MASK = 7;
@@ -234,9 +243,9 @@ public interface CommandSummaries
 
     class SummaryLoader
     {
-        public interface Factory<L extends SummaryLoader>
+        public interface Factory<P, L extends SummaryLoader>
         {
-            L create(RedundantBefore redundantBefore, @Nullable MaxDecidedRX maxDecidedRX, TxnId primaryTxnId, Unseekables<?> searchKeysOrRanges, Kinds testKind, TxnId minTxnId, Timestamp executeAt, FindKeys findKeys);
+            L create(P param, RedundantBefore redundantBefore, @Nullable MaxDecidedRX maxDecidedRX, TxnId primaryTxnId, Unseekables<?> searchKeysOrRanges, Kinds testKind, TxnId minTxnId, Timestamp executeAt, FindKeys findKeys);
         }
 
         private static final ReducingRangeMap<TxnId> NO_RX = new ReducingRangeMap<>();
@@ -255,29 +264,17 @@ public interface CommandSummaries
         private TxnId maxRx = TxnId.MAX; // a cached summary of minVisitedFutureRX to avoid consulting the full collection
 
         // TODO (expected): provide executeAt to PreLoadContext so we can more aggressively filter what we load, esp. by Kind
-        public static SummaryLoader loader(RedundantBefore redundantBefore, MaxDecidedRX maxDecidedRX, ExecutionContext context)
-        {
-            return loader(redundantBefore, maxDecidedRX, context.primaryTxnId(), context.executeAt(), context.findKeys(), context.keys());
-        }
-
-        public static SummaryLoader loader(RedundantBefore redundantBefore, MaxDecidedRX maxDecidedRX, TxnId primaryTxnId, Timestamp executeAt, FindKeys findKeys, Unseekables<?> keysOrRanges)
-        {
-            return loader(redundantBefore, maxDecidedRX, primaryTxnId, executeAt, findKeys, keysOrRanges, SummaryLoader::new);
-        }
-
-        public static <L extends SummaryLoader> L loader(RedundantBefore redundantBefore, MaxDecidedRX maxDecidedRX, ExecutionContext context, Factory<L> factory)
-        {
-            return loader(redundantBefore, maxDecidedRX, context.primaryTxnId(), context.executeAt(), context.findKeys(), context.keys(), factory);
-        }
-
-        public static <L extends SummaryLoader> L loader(RedundantBefore redundantBefore, MaxDecidedRX maxDecidedRX, TxnId primaryTxnId, Timestamp executeAt, FindKeys findKeys, Unseekables<?> keysOrRanges, Factory<L> factory)
+        /**
+         * Note: we accept a parameter so that implementations may supply a non-capturing factory, e.g. an unbound method reference
+         */
+        public static <P, L extends SummaryLoader> L loader(P param, RedundantBefore redundantBefore, MaxDecidedRX maxDecidedRX, TxnId primaryTxnId, Timestamp executeAt, FindKeys findKeys, Unseekables<?> keysOrRanges, Factory<P, L> factory)
         {
             Invariants.require(primaryTxnId != null);
             TxnId minTxnId = redundantBefore.min(keysOrRanges, Bounds::gcBefore);
             Kinds kinds = primaryTxnId.witnesses().or(findKeys == FindKeys.SUPERSEDING ? primaryTxnId.witnessedBy() : Nothing);
             if (!primaryTxnId.is(Txn.Kind.ExclusiveSyncPoint)) // the main distinction between RX and RV is that RV doesn't filter out decided transactions
                 maxDecidedRX = null;
-            return factory.create(redundantBefore, maxDecidedRX, primaryTxnId, keysOrRanges, kinds, minTxnId, executeAt, findKeys);
+            return factory.create(param, redundantBefore, maxDecidedRX, primaryTxnId, keysOrRanges, kinds, minTxnId, executeAt, findKeys);
         }
 
         public SummaryLoader(RedundantBefore redundantBefore, MaxDecidedRX maxDecidedRX, TxnId primaryTxnId, Unseekables<?> searchFor, Kinds testKind, TxnId minTxnId, Timestamp primaryExecuteAt, FindKeys findKeys)
@@ -456,6 +453,15 @@ public interface CommandSummaries
                         // This does not risk deadlock as there is no fast path to recover for sync points
                         if (txnId.isSyncPoint() && !saveStatus.is(Status.NotDefined))
                             break;
+                        // We do not record our own deps as privileged coordinator, but recovery needs to know we are the coordinator
+                        // (SELF_COORD or SELF_COORD_RECOVERY). This mirrors CommandsForKey's PREACCEPTED_COORD(_RECOVERY).
+                        // Note that we treat executeAt as txnId, as if we didn't vote we have no deps to reason about.
+                        // TODO (required): FastAcceptedPrivCoord
+                        if (saveStatus == PreAcceptedPrivCoord || saveStatus == PreAcceptedPrivCoordRecovery)
+                        {
+                            executeAt = txnId;
+                            break;
+                        }
                     case DepsErased:
                         return IRRELEVANT;
                     case DepsFromCoordinator:
@@ -463,6 +469,7 @@ public interface CommandSummaries
                         executeAt = txnId;
                         break;
                     case DepsProposed:
+                    case DepsProposedFromCoordinator:
                         if (txnId.compareTo(primaryTxnId) < 0)
                             ifRelevant = MAYBE_SUPERSEDING;
                         // cannot assume executeAt is txnId for DepsProposed when not sync point,
@@ -536,11 +543,19 @@ public interface CommandSummaries
                 case IRRELEVANT: return null;
                 case BOTH:
                 case SUPERSEDING:
-                    if (deps != null)
+                    if (saveStatus == PreAcceptedPrivCoord)
+                    {
+                        isDep = IsDep.SELF_COORD;
+                    }
+                    else if (saveStatus == PreAcceptedPrivCoordRecovery)
+                    {
+                        isDep = IsDep.SELF_COORD_RECOVERY;
+                    }
+                    else if (deps != null)
                     {
                         boolean isCoordDeps = saveStatus.summary.compareTo(ACCEPTED) < 0;
                         boolean isAnyDep = depTester.test(deps, primaryTxnId, touches);
-                        isDep = isAnyDep ? (isCoordDeps ? IsDep.IS_COORD_DEP     : IsDep.IS_PROPOSED_OR_STABLE_DEP)
+                        isDep = isAnyDep ? (isCoordDeps ? IsDep.IS_COORD_DEP : IsDep.IS_PROPOSED_OR_STABLE_DEP)
                                          : (isCoordDeps ? IsDep.IS_NOT_COORD_DEP : IsDep.IS_NOT_PROPOSED_OR_STABLE_DEP);
                     }
                     else Invariants.require(txnId.isSyncPoint() && (saveStatus.summary == PREACCEPTED || saveStatus.summary == NOTACCEPTED));

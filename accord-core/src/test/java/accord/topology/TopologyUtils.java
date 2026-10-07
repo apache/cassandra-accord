@@ -30,14 +30,11 @@ import accord.primitives.Unseekables.UnseekablesKind;
 import accord.utils.Gens;
 import accord.utils.RandomSource;
 import accord.utils.SortedArrays.SortedArrayList;
-import accord.utils.Utils;
 import accord.utils.WrapAroundList;
 import accord.utils.WrapAroundSet;
 
 import javax.annotation.Nullable;
 import java.util.*;
-
-import static accord.utils.Utils.toArray;
 
 public class TopologyUtils
 {
@@ -62,7 +59,7 @@ public class TopologyUtils
 
     public static Topology topology(long epoch, List<Node.Id> cluster, Ranges ranges, int rf)
     {
-        return topology(epoch, toArray(cluster, Node.Id[]::new), ranges, rf);
+        return topology(epoch, cluster.toArray(Node.Id[]::new), ranges, rf);
     }
 
     public static Topology topology(long epoch, Node.Id[] cluster, Ranges ranges, int rf)
@@ -93,7 +90,7 @@ public class TopologyUtils
         if (!noShard.isEmpty())
             throw new AssertionError(String.format("The following electorates were found without a shard: %s", noShard));
 
-        return new Topology(epoch, toArray(shards, Shard[]::new));
+        return new Topology(epoch, shards.toArray(Shard[]::new));
     }
 
     public static Topology initialTopology(Node.Id[] cluster, Ranges ranges, int rf)
@@ -103,7 +100,7 @@ public class TopologyUtils
 
     public static Topology initialTopology(List<Node.Id> cluster, Ranges ranges, int rf)
     {
-        return initialTopology(toArray(cluster, Node.Id[]::new), ranges, rf);
+        return initialTopology(cluster.toArray(Node.Id[]::new), ranges, rf);
     }
 
     public static RoutingKey routingKey(Range range, RandomSource rs)
@@ -182,12 +179,12 @@ public class TopologyUtils
                 Set<RoutingKey> keys = new TreeSet<>();
                 for (int i = 0, attempts = rs.nextInt(1, 10); i < attempts; i++)
                     keys.add(routingKey(ranges.get(rs.nextInt(ranges.size())), rs));
-                return RoutingKeys.ofSortedUnique(Utils.toArray(new ArrayList<>(keys), RoutingKey[]::new));
+                return RoutingKeys.ofSortedUnique(keys);
             case RoutingRanges:
                 Set<Range> selected = new TreeSet<>(Range::compare);
                 for (int i = 0, attempts = rs.nextInt(1, 10); i < attempts; i++)
                     selected.add(ranges.get(rs.nextInt(ranges.size()))); // TODO sub-ranges
-                return Ranges.ofSortedAndDeoverlapped(Utils.toArray(new ArrayList<>(selected), Range[]::new));
+                return Ranges.ofSortedAndDeoverlapped(selected.toArray(Range[]::new));
         }
     }
 }

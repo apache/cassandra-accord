@@ -23,7 +23,7 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import javax.annotation.Nullable;
@@ -362,11 +362,22 @@ public class TopologyManager
         return null;
     }
 
-    private final AtomicBoolean updatingActive = new AtomicBoolean();
+    private static final int NO_ACTIVE_WORK = 0;
+    private static final int UPDATING_ACTIVE = 1;
+    private static final int PENDING_UPDATE_ACTIVE = 2;
+    private final AtomicInteger updatingActive = new AtomicInteger();
     private void updateActive()
     {
-        if (!updatingActive.compareAndSet(false, true))
-            return;
+        // a caller that fails to acquire updatingActive relies on the owner to observe its work, so re-check after release
+        while (true)
+        {
+            int cur = updatingActive.get();
+            if (cur == PENDING_UPDATE_ACTIVE || (cur == UPDATING_ACTIVE && updatingActive.compareAndSet(cur, PENDING_UPDATE_ACTIVE)))
+                return;
+
+            if (cur == NO_ACTIVE_WORK && updatingActive.compareAndSet(cur, UPDATING_ACTIVE))
+                break;
+        }
 
         try
         {
@@ -377,12 +388,24 @@ public class TopologyManager
                 synchronized (this)
                 {
                     if (this.pending.isEmpty() || (!active.isEmpty() && active.currentEpoch + 1 != this.pending.minEpoch()))
-                        return;
+                    {
+                        pending = null;
+                        topology = null;
+                    }
+                    else
+                    {
+                        pending = this.pending.atIndex(0);
+                        topology = pending.topology();
+                    }
 
-                    pending = this.pending.atIndex(0);
-                    topology = pending.topology();
                     if (topology == null)
-                        return;
+                    {
+                        if (updatingActive.compareAndSet(UPDATING_ACTIVE, NO_ACTIVE_WORK))
+                            break;
+
+                        updatingActive.set(UPDATING_ACTIVE);
+                        continue;
+                    }
 
                     this.pending.setMinPermitted(topology.epoch + 1);
                 }
@@ -450,9 +473,10 @@ public class TopologyManager
                 });
             }
         }
-        finally
+        catch (Throwable t)
         {
-            updatingActive.set(false);
+            updatingActive.set(NO_ACTIVE_WORK);
+            throw t;
         }
     }
 
@@ -535,17 +559,22 @@ public class TopologyManager
             {
                 if (fail instanceof TopologyRetiredException)
                 {
+                    boolean abort, update = false;
                     synchronized (this)
                     {
-                        if (active.isEmpty())
+                        if (abort = active.isEmpty())
                         {
                             while (this.pending.minEpoch() <= pending.epoch)
                                 this.pending.removeFirst(this.pending.minEpoch());
-                            if (!this.pending.isEmpty() && this.pending.atIndex(0).topology() != null)
-                                updateActive();
-                            // don't retry
-                            return;
+                            update = !this.pending.isEmpty() && this.pending.atIndex(0).topology() != null;
                         }
+                    }
+
+                    if (abort)
+                    {
+                        if (update)
+                            updateActive();
+                        return;
                     }
                 }
                 logger.warn("Failed to fetch epoch {}. Retrying.", pending.epoch, fail);

@@ -422,7 +422,7 @@ public class CommandsForKeyUnreadyTest
                                                    .result(new PersistableResult() {});
             builder.waitingOn(Command.WaitingOn.Update.unsafeInitialise(txnId, RANGES, builder.participants().route(), deps).build());
             if (txnId.is(Txn.Kind.Write))
-                builder.writes(new Writes(txnId, executeAt, KEYS, null));
+                builder.writes(new Writes(txnId, executeAt, Keys.EMPTY, null));
             return builder.build(SaveStatus.Applied);
         }
 

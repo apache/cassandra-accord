@@ -566,7 +566,7 @@ public class CommandsForKeyTest
                               .result(new PersistableResult(){});
 
             if (txnId.is(Write))
-                builder.writes(new Writes(txnId, executeAt, KEYS, null));
+                builder.writes(new Writes(txnId, executeAt, Keys.EMPTY, null));
 
             return builder.build(SaveStatus.Applied);
         }

@@ -94,7 +94,7 @@ public class BeginInvalidation extends ParticipantsRequest<Participants<?>, Begi
         if (saveStatus == SaveStatus.Vestigial)
             saveStatus = SaveStatus.NotDefined;
         boolean acceptedFastPath = BeginRecovery.acceptsFastPath(txnId, participants, saveStatus, command.executeAt());
-        return new InvalidateReply(supersededBy, command.acceptedOrCommitted(), saveStatus, acceptedFastPath, command.route(), command.homeKey(), truncated);
+        return new InvalidateReply(supersededBy, command.acceptedOrCommitted(), saveStatus.report(), acceptedFastPath, command.route(), command.homeKey(), truncated);
     }
 
     @Override

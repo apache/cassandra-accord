@@ -38,7 +38,6 @@ import accord.utils.SortedArrays.SortedArrayList;
 
 import static accord.utils.ArrayBuffers.uncached;
 import static accord.utils.Property.qt;
-import static accord.utils.Utils.toArray;
 
 class SortedArraysTest
 {
@@ -181,7 +180,7 @@ class SortedArraysTest
             Set<Integer> seen = new HashSet<>();
             Stream.of(a).forEach(seen::add);
             Stream.of(b).forEach(seen::add);
-            Integer[] expected = toArray(seen, Integer[]::new);
+            Integer[] expected = seen.toArray(Integer[]::new);
             Arrays.sort(expected);
 
             assertArrayEquals(expected, SortedArrays.linearUnion(a, b, Integer[]::new));
@@ -197,7 +196,7 @@ class SortedArraysTest
             Set<Integer> left = new HashSet<>(Arrays.asList(a));
             Set<Integer> right = new HashSet<>(Arrays.asList(b));
             Set<Integer> intersection = Sets.intersection(left, right);
-            Integer[] expected = toArray(intersection, Integer[]::new);
+            Integer[] expected = intersection.toArray(Integer[]::new);
             Arrays.sort(expected);
 
             assertArrayEquals(expected, SortedArrays.linearIntersection(a, b, Integer[]::new));
@@ -349,13 +348,13 @@ class SortedArraysTest
 
                 {
                     Set<Integer> difference = Sets.difference(left, right);
-                    Integer[] expected = toArray(difference, Integer[]::new);
+                    Integer[] expected = difference.toArray(Integer[]::new);
                     Arrays.sort(expected);
                     assertArrayEquals(expected, SortedArrays.linearSubtract(a, b, uncached(Integer[]::new)));
                 }
                 {
                     Set<Integer> difference = Sets.difference(right, left);
-                    Integer[] expected = toArray(difference, Integer[]::new);
+                    Integer[] expected = difference.toArray(Integer[]::new);
                     Arrays.sort(expected);
                     assertArrayEquals(expected, SortedArrays.linearSubtract(b, a, uncached(Integer[]::new)));
                 }

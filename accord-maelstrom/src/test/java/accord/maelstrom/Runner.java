@@ -35,8 +35,6 @@ import accord.maelstrom.Cluster.QueueSupplier;
 import accord.utils.DefaultRandom;
 import accord.utils.RandomSource;
 
-import static accord.utils.Utils.toArray;
-
 public class Runner
 {
     private static final Logger logger = LoggerFactory.getLogger(Runner.class);
@@ -139,7 +137,7 @@ public class Runner
         for (int i = 1 ; i <= nodeCount ; ++i)
             nodes.add(new Id(i));
 
-        Cluster.run(toArray(nodes, Id[]::new), queueSupplier, ignore -> {}, randomSupplier, () -> new AtomicLong()::incrementAndGet, factory, commands, System.err);
+        Cluster.run(nodes.toArray(Id[]::new), queueSupplier, ignore -> {}, randomSupplier, () -> new AtomicLong()::incrementAndGet, factory, commands, System.err);
     }
 
     public static Builder test()

@@ -175,23 +175,16 @@ public class ReadEphemeralTxnData extends ReadData
     }
 
     @Override
-    protected boolean cancel()
+    void cleanupWaitingOnExclusive(IntHashSet waitingOn)
     {
-        if (!super.cancel())
-            return false;
-
-        synchronized (this)
+        IntHashSet.IntIterator iter = waitingOn.iterator();
+        while (iter.hasNext())
         {
-            IntHashSet.IntIterator iter = waitingOn.iterator();
-            while (iter.hasNext())
-            {
-                node.commandStores().forId(iter.nextValue())
-                    .execute((ExecutionContext.Empty) () -> "Timeout Ephemeral Read", safeStore -> {
-                        eraseEphemeralRead(safeStore, txnId);
-                    }, node.agent());
-            }
+            node.commandStores().forId(iter.nextValue())
+                .execute((ExecutionContext.Empty) () -> "Timeout Ephemeral Read", safeStore -> {
+                    eraseEphemeralRead(safeStore, txnId);
+                }, node.agent());
         }
-        return true;
     }
 
     @Override

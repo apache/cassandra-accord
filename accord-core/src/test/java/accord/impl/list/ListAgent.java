@@ -60,6 +60,7 @@ import accord.primitives.TxnId;
 import accord.topology.TopologyMismatch;
 import accord.topology.TopologyRetiredException;
 import accord.utils.Invariants;
+import accord.utils.NoStackCancellationException;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
@@ -168,7 +169,7 @@ public class ListAgent implements InMemoryAgent, CoordinatorEventListener, Owner
         ownershipEventListener.onFailedBootstrap(attempt, phase, ranges, retry, fail, failure);
     }
 
-    private static final Set<Class<?>> expectedExceptions = new HashSet<>(Arrays.asList(SimulatedFault.class, ExecuteSyncPoint.SyncPointErased.class, CancellationException.class, TopologyRetiredException.class, TopologyMismatch.class, Snapshotter.SnapshotAborted.class, TimeoutException.class, LogFaultException.class, OverlappingCommandStoresException.class, DeletedCommandStoresException.class));
+    private static final Set<Class<?>> expectedExceptions = new HashSet<>(Arrays.asList(SimulatedFault.class, ExecuteSyncPoint.SyncPointErased.class, CancellationException.class, TopologyRetiredException.class, TopologyMismatch.class, Snapshotter.SnapshotAborted.class, TimeoutException.class, LogFaultException.class, OverlappingCommandStoresException.class, DeletedCommandStoresException.class, NoStackCancellationException.class));
     @Override
     public void onException(Throwable t)
     {

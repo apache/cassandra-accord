@@ -51,7 +51,6 @@ import accord.utils.Invariants;
 import accord.utils.LargeBitSet;
 import accord.utils.SortedArrays;
 import accord.utils.SortedArrays.SortedArrayList;
-import accord.utils.Utils;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.collections.IntArrayList;
 
@@ -115,7 +114,7 @@ public class Topology
                 matches.add(index);
                 matchedRanges.add(ranges.get(idx));
             }
-            Ranges ranges = Ranges.ofSortedAndDeoverlapped(Utils.toArray(matchedRanges, Range[]::new));
+            Ranges ranges = Ranges.ofSortedAndDeoverlapped(matchedRanges.toArray(Range[]::new));
             int[] supersetIndexes = matches.toIntArray();
             return new NodeInfo(ranges, supersetIndexes);
         }

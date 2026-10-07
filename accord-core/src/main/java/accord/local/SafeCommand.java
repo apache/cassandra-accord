@@ -103,9 +103,15 @@ public abstract class SafeCommand extends SafeState<Command>
         return update(safeStore, Command.markDefined(current(), participants, promised, partialTxn));
     }
 
-    public Command updatePromised(Ballot promised)
+    public Command updatePromised(SafeCommandStore safeStore, Ballot promised)
     {
-        return incidentalUpdate(current().updatePromised(promised));
+        Command prev = current();
+        Command next = prev.updatePromised(promised);
+        // if we are the privileged coordinator, promising a non-zero ballot disables the fast path, which we encode
+        // in the SaveStatus (see SaveStatus.onPromise); this must be made visible to CommandsForKey etc.
+        if (next.saveStatus() != prev.saveStatus())
+            return update(safeStore, next);
+        return incidentalUpdate(next);
     }
 
     public Command.Accepted accept(SafeCommandStore safeStore, TxnId txnId, SaveStatus status, @Nonnull StoreParticipants participants, Ballot promised, Timestamp executeAt, PartialTxn partialTxn, PartialDeps partialDeps, Ballot acceptedOrCommitted)

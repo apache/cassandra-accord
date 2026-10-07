@@ -19,6 +19,7 @@
 package accord.api;
 
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -113,6 +114,9 @@ public class ProtocolModifiers
         private static boolean isConfigured;
         private static synchronized void setConfigured() { isConfigured = true; }
         private static void pre() { if (isConfigured) throw illegalState("Cannot set ProtocolModifiers after the configuration has been first used"); }
+
+        private static RateLimitedLogStatement.Factory rateLimitedLogStatementFactory = new RateLimitedLogStatement.NoLimitFactory();
+        public static synchronized void setRateLimitedLogStatementFactory(RateLimitedLogStatement.Factory newFactory) { pre(); rateLimitedLogStatementFactory = newFactory; }
 
         private static boolean rangeEndInclusive = true;
         public static synchronized void setRangeEndInclusive(boolean newRangeEndInclusive) { pre(); rangeEndInclusive = newRangeEndInclusive; }
@@ -221,10 +225,14 @@ public class ProtocolModifiers
         private static float replicaExecuteDistributedPersistChance = 1.0f;
         public static synchronized void setReplicaExecuteDistributedPersistChance(float newChance) { pre(); replicaExecuteDistributedPersistChance = newChance; }
 
+        private static Predicate<? super Txn> permitReplicaExecution = ignore -> true;
+        public static synchronized void setPermitReplicaExecution(Predicate<? super Txn> newPredicate) { pre(); permitReplicaExecution = newPredicate; }
+
         public static void validate()
         {
             Invariants.require(dataStoreDetectsFutureReads || (fastWriteExecution != MAY_BYPASS_SAFESTORE && fastReadExecution != MAY_BYPASS_SAFESTORE), "MAY_BYPASS_SAFESTORE is only permitted when dataStoreDetectsFutureReads");
             Invariants.require(permitCoordinatorLocalExecution || (!permittedFastPaths.contains(PrivilegedCoordinatorWithDeps) && !permittedFastPaths.contains(PrivilegedCoordinatorWithoutDeps)), "Privileged coordinator optimisations require coordinator local execution");
+            Invariants.require(replicaExecution != ReplicaExecution.ALL || dataStoreDetectsFutureReads, "ReplicaExecution.ALL requires that the data store can detect future reads, as it does not validate the command state after a read, and so the read may race with its own write");
         }
     }
 
@@ -239,6 +247,8 @@ public class ProtocolModifiers
     public static boolean isRangeEndExclusive() { return !rangeEndInclusive; }
     public static boolean isRangeStartInclusive() { return !rangeEndInclusive; }
     public static boolean isRangeStartExclusive() { return rangeEndInclusive; }
+
+    public static final RateLimitedLogStatement.Factory rateLimitedLogStatementFactory = Configure.rateLimitedLogStatementFactory;
 
     private static final FastPaths permittedFastPaths = Configure.permittedFastPaths;
     public static boolean usePrivilegedCoordinator() { return permittedFastPaths.hasPrivilegedCoordinator(); }
@@ -273,7 +283,7 @@ public class ProtocolModifiers
     public static boolean filterDuplicateDependenciesFromAcceptReply() { return filterDuplicateDependenciesFromAcceptReply; }
 
     private static final SendStableMessages sendStableMessages = Configure.sendStableMessages;
-    public static boolean sendOnlyReadStableMessages(TxnId txnId) { return sendStableMessages.compareTo(FOR_READS) >= 0 || (sendStableMessages == TO_ALL_REPLICA_EXECUTABLE_ELSE_FOR_READS && (!txnId.is(SingleKey) || !txnId.is(Txn.Kind.Write))); }
+    public static boolean sendOnlyReadStableMessages(TxnId txnId) { return sendStableMessages.compareTo(FOR_READS) >= 0 || (sendStableMessages == TO_ALL_REPLICA_EXECUTABLE_ELSE_FOR_READS && !mayExecuteAtReplica(txnId)); }
     public static boolean sendNoStableIfFastExec() { return sendStableMessages == FOR_READS_OR_NONE_IF_FASTEXEC; }
 
     private static final boolean sendMinimal = Configure.sendMinimal;
@@ -311,7 +321,7 @@ public class ProtocolModifiers
             return true;
 
         // TODO (expected): why do we check txn != null?
-        return executeAtReplica(txnId, txn) && txn != null;
+        return txn != null && executeAtReplica(txnId, txn);
     }
 
     private static final InformOfDurability informOfDurability = Configure.informOfDurability;
@@ -371,17 +381,27 @@ public class ProtocolModifiers
     }
 
     private static ReplicaExecution replicaExecution = Configure.replicaExecution;
+    private static final Predicate<? super Txn> permitReplicaExecution = Configure.permitReplicaExecution;
+
+    public static boolean mayExecuteAtReplica(TxnId txnId)
+    {
+        return replicaExecution != ReplicaExecution.NONE
+               && txnId.is(Txn.Kind.Write)
+               && txnId.is(SingleKey)
+               && txnId.is(Domain.Key);
+    }
+
     public static boolean executeAtReplica(TxnId txnId, @Nullable Txn txn)
     {
-        if (!txnId.is(SingleKey))
+        if (!mayExecuteAtReplica(txnId))
             return false;
 
         switch (replicaExecution)
         {
             default:          throw new UnhandledEnum(replicaExecution);
             case NONE:        return false;
-            case ALL:         return txnId.is(Txn.Kind.Write);
-            case BLIND_WRITE: return txnId.is(Txn.Kind.Write) && txn != null && txn.read().keys().isEmpty();
+            case BLIND_WRITE: return txn != null && txn.read().keys().isEmpty() && permitReplicaExecution.test(txn);
+            case ALL:         return txn != null && permitReplicaExecution.test(txn);
         }
     }
 

@@ -30,6 +30,7 @@ import org.slf4j.LoggerFactory;
 
 import accord.utils.Invariants;
 import accord.utils.Reduce;
+import accord.utils.ThrowableSafety;
 
 import static accord.utils.Invariants.createIllegalState;
 
@@ -82,23 +83,7 @@ public class AsyncResults
 
             while (listener != null)
             {
-                try
-                {
-                    listener.callback.accept(success, failure);
-                }
-                catch (Throwable t)
-                {
-                    try
-                    {
-                        Thread thread = Thread.currentThread();
-                        thread.getUncaughtExceptionHandler().uncaughtException(thread, t);
-                    }
-                    catch (Throwable t2)
-                    {
-                        t2.addSuppressed(t);
-                        logger.error("Unexpected exception thrown by UncaughtExceptionHandler", t2);
-                    }
-                }
+                ThrowableSafety.safeInvoke(listener.callback, success, failure);
                 listener = listener.next;
             }
         }
@@ -153,7 +138,7 @@ public class AsyncResults
                 {
                     V success = current instanceof FailureHolder ? null : (V)current;
                     Throwable failure = current instanceof FailureHolder ? ((FailureHolder)current).cause : null;
-                    callback.accept(success, failure);
+                    ThrowableSafety.safeInvoke(callback, success, failure);
                     return this;
                 }
 
@@ -394,7 +379,7 @@ public class AsyncResults
         @Override
         public AsyncResult<V> invoke(BiConsumer<? super V, Throwable> callback)
         {
-            callback.accept(success, null);
+            ThrowableSafety.safeSuccess(callback, success);
             return this;
         }
 
@@ -423,7 +408,7 @@ public class AsyncResults
         @Override
         public AsyncResult<V> invoke(BiConsumer<? super V, Throwable> callback)
         {
-            callback.accept(null, failure);
+            ThrowableSafety.safeFail(callback, failure);
             return this;
         }
 

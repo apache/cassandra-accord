@@ -52,7 +52,6 @@ import static accord.primitives.Status.Phase.Commit;
 import static accord.primitives.Status.Phase.Execute;
 import static accord.primitives.Status.Phase.Invalidate;
 import static accord.primitives.Status.Phase.PreAccept;
-import static org.agrona.BitUtil.findNextPositivePowerOfTwo;
 
 /**
  * A vector of various facets of knowledge about, or required for, processing a transaction.
@@ -64,17 +63,47 @@ import static org.agrona.BitUtil.findNextPositivePowerOfTwo;
  */
 public class Known
 {
-    private static final int ROUTE_MASK = findNextPositivePowerOfTwo(KnownRoute.VALUES.length) - 1;
-    private static final int DEFINITION_SHIFT = Integer.bitCount(ROUTE_MASK);
-    private static final int DEFINITION_MASK = (findNextPositivePowerOfTwo(Definition.VALUES.length) - 1) << DEFINITION_SHIFT;
-    private static final int EXECUTE_AT_SHIFT = DEFINITION_SHIFT + Integer.bitCount(DEFINITION_MASK);
-    private static final int EXECUTE_AT_MASK = (findNextPositivePowerOfTwo(KnownExecuteAt.VALUES.length) - 1) << EXECUTE_AT_SHIFT;
-    private static final int DEPS_SHIFT = EXECUTE_AT_SHIFT + Integer.bitCount(EXECUTE_AT_MASK);
-    private static final int DEPS_MASK = (findNextPositivePowerOfTwo(KnownDeps.VALUES.length) - 1) << DEPS_SHIFT;
-    private static final int OUTCOME_SHIFT = DEPS_SHIFT + Integer.bitCount(DEPS_MASK);
-    private static final int OUTCOME_MASK = (findNextPositivePowerOfTwo(Outcome.VALUES.length) - 1) << OUTCOME_SHIFT;
-    private static final int PRIVILEGED_VOTE_SHIFT = OUTCOME_SHIFT + Integer.bitCount(OUTCOME_MASK);
+    private static final int ROUTE_MASK = 0x3;
+    private static final int DEFINITION_SHIFT = 2;
+    private static final int DEFINITION_MASK = 0x3 << DEFINITION_SHIFT;
+    private static final int EXECUTE_AT_SHIFT = 4;
+    private static final int EXECUTE_AT_MASK = 0x7 << EXECUTE_AT_SHIFT;
+    private static final int DEPS_SHIFT = 7;
+    private static final int DEPS_MASK = 0xf << DEPS_SHIFT;
+    private static final int OUTCOME_SHIFT = 11;
+    private static final int OUTCOME_MASK = 0x7 << OUTCOME_SHIFT;
+    private static final int PRIVILEGED_VOTE_SHIFT = 14;
     private static final int PRIVILEGED_VOTE_MASK = 1 << PRIVILEGED_VOTE_SHIFT;
+
+    /*
+     * {@link #encoded} is a purely local representation, and may change between versions. The representation we
+     * serialize to peers (see {@link #serializeCompat}) must however NEVER change; it may only be extended:
+     *
+     *   bits 0-1:   KnownRoute.ordinal()
+     *   bits 2-3:   Definition.ordinal()
+     *   bits 4-6:   KnownExecuteAt.ordinal()
+     *   bits 7-9:   KnownDeps.id & 0x7
+     *   bits 10-12: Outcome.ordinal()
+     *   bit  13:    PrivilegedVote.ordinal()
+     *   bit  14:    KnownDeps.id >>> 3 (added after the above; ignored by earlier versions)
+     */
+    private static final int SERIALIZE_LOW_MASK = ROUTE_MASK | DEFINITION_MASK | EXECUTE_AT_MASK; // bits 0-6, identical to encoded
+    private static final int SERIALIZE_SHIFTED_MASK = OUTCOME_MASK | PRIVILEGED_VOTE_MASK; // encoded bits 11-14, serialized as bits 10-13
+    private static final int SERIALIZE_DEPS_LOW_SHIFT = 7;
+    private static final int SERIALIZE_DEPS_LOW_MASK = 0x7;
+    private static final int SERIALIZE_DEPS_HIGH_MASK = 0x8;
+    private static final int SERIALIZE_DEPS_HIGH_SHIFT = 14 - 3;
+
+    static
+    {
+        Invariants.require(KnownRoute.VALUES.length <= 1 + ROUTE_MASK);
+        Invariants.require(Definition.VALUES.length <= 1 + (DEFINITION_MASK >>> DEFINITION_SHIFT));
+        Invariants.require(KnownExecuteAt.VALUES.length <= 1 + (EXECUTE_AT_MASK >>> EXECUTE_AT_SHIFT));
+        Invariants.require(Outcome.VALUES.length <= 1 + (OUTCOME_MASK >>> OUTCOME_SHIFT));
+        Invariants.require(PrivilegedVote.values().length <= 2);
+        Invariants.require(KnownDeps.BY_ORDINAL.length <= 1 + (DEPS_MASK >>> DEPS_SHIFT));
+        Invariants.require(KnownDeps.BY_ID.length <= 1 + (SERIALIZE_DEPS_LOW_MASK | SERIALIZE_DEPS_HIGH_MASK));
+    }
 
     public static final Known Nothing = new Known(MaybeRoute, DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, Unknown, NoVote);
     public static final Known DefinitionOnly = new Known(MaybeRoute, DefinitionKnown, ExecuteAtUnknown, DepsUnknown, Unknown, NoVote);
@@ -115,6 +144,35 @@ public class Known
              | (deps.ordinal() << DEPS_SHIFT)
              | (outcome.ordinal() << OUTCOME_SHIFT)
              | (privilegedVote.ordinal() << PRIVILEGED_VOTE_SHIFT);
+    }
+
+    public int serializeCompat()
+    {
+        return serializeCompatInternal(encoded);
+    }
+
+    public static Known deserializeCompat(int serialized)
+    {
+        return new Known(deserializeCompatInternal(serialized));
+    }
+
+    private static int serializeCompatInternal(int encoded)
+    {
+        int depsId = KnownDeps.ORDINAL_TO_ID[depsOrdinal(encoded)];
+        return    (encoded & SERIALIZE_LOW_MASK)
+               | ((encoded & SERIALIZE_SHIFTED_MASK) >>> 1)
+               | ((depsId & SERIALIZE_DEPS_LOW_MASK) << SERIALIZE_DEPS_LOW_SHIFT)
+               | ((depsId & SERIALIZE_DEPS_HIGH_MASK) << SERIALIZE_DEPS_HIGH_SHIFT);
+    }
+
+    private static int deserializeCompatInternal(int serialized)
+    {
+        int depsId = ((serialized >>> SERIALIZE_DEPS_LOW_SHIFT) & SERIALIZE_DEPS_LOW_MASK)
+                   | ((serialized >>> SERIALIZE_DEPS_HIGH_SHIFT) & SERIALIZE_DEPS_HIGH_MASK);
+        int depsOrdinal = KnownDeps.forId(depsId).ordinal();
+        return   (serialized & SERIALIZE_LOW_MASK)
+               | (depsOrdinal << DEPS_SHIFT)
+               | ((serialized & (SERIALIZE_SHIFTED_MASK >>> 1)) << 1);
     }
 
     public Known atLeast(Known that)
@@ -493,12 +551,17 @@ public class Known
 
     private int depsOrdinal()
     {
+        return depsOrdinal(encoded);
+    }
+
+    private static int depsOrdinal(int encoded)
+    {
         return (encoded & DEPS_MASK) >>> DEPS_SHIFT;
     }
-    
+
     public KnownDeps deps()
     {
-        return KnownDeps.VALUES[depsOrdinal()];
+        return KnownDeps.BY_ORDINAL[depsOrdinal()];
     }
 
     public boolean hasAnyDeps()
@@ -724,13 +787,13 @@ public class Known
         /**
          * No decision is known to have been reached
          */
-        DepsUnknown(PreAccept),
+        DepsUnknown(0, PreAccept),
 
         /**
          * No decision is known to have been reached, but we have dependencies broadcast from the original coordinator
          * (or its proxy) that may be used for recovery decisions.
          */
-        DepsFromCoordinator(PreAccept),
+        DepsFromCoordinator(1, PreAccept),
 
         /**
          * A decision to execute the transaction at the original timestamp (TxnId) is known to have been proposed,
@@ -738,7 +801,7 @@ public class Known
          *
          * Proposed means Accepted at some replica, but not necessarily a majority and so not committed
          */
-        DepsProposedFixed(Accept),
+        DepsProposedFixed(2, Accept),
 
         /**
          * A decision to execute the transaction at a given timestamp is known to have been proposed,
@@ -746,7 +809,14 @@ public class Known
          *
          * Proposed means Accepted at some replica, but not necessarily a majority and so not committed
          */
-        DepsProposed(Accept),
+        DepsProposed(3, Accept),
+
+        /**
+         * Deps proposed by a privileged coordinator during the Accept phase, including the coordinator's own vote for
+         * dependencies up to executeAt. This permits the coordinator to take the fast quorum medium path
+         * (i.e. skipping Commit phase)
+         */
+        DepsProposedFromCoordinator(8, Accept),
 
         /**
          * A decision to execute the transaction at a given timestamp with certain dependencies is known to have been proposed,
@@ -754,32 +824,47 @@ public class Known
          *
          * However, the dependencies are only known to committed at a replica, not necessarily a majority, i.e. not stable
          */
-        DepsCommitted(Commit),
+        DepsCommitted(4, Commit),
 
         /**
          * A decision to execute or invalidate the transaction is known to have been reached, and any associated
          * dependencies for the shard(s) in question have been cleaned up.
          */
-        DepsErased(Cleanup),
+        DepsErased(5, Cleanup),
 
         /**
          * A decision to execute the transaction is known to have been reached, and the associated dependencies
          * for the shard(s) in question are known for the coordination and execution epochs, and are stable.
          */
-        DepsKnown(Execute),
+        DepsKnown(6, Execute),
 
         /**
          * A decision to invalidate the transaction is known to have been reached
          */
-        NoDeps(Invalidate);
+        NoDeps(7, Invalidate);
 
-        private static final int HAS_ANY = TinyEnumSet.encode(DepsFromCoordinator, DepsProposed, DepsProposedFixed, DepsCommitted, DepsKnown);
-        private static final KnownDeps[] VALUES = values();
+        private static final int HAS_ANY = TinyEnumSet.encode(DepsFromCoordinator, DepsProposed, DepsProposedFixed, DepsProposedFromCoordinator, DepsCommitted, DepsKnown);
+        private static final KnownDeps[] BY_ORDINAL = values();
+        private static final KnownDeps[] BY_ID = new KnownDeps[BY_ORDINAL.length];
+        private static final int[] ORDINAL_TO_ID = new int[BY_ORDINAL.length];
 
+        static
+        {
+            for (KnownDeps deps : BY_ORDINAL)
+            {
+                Invariants.require(deps.id >= 0 && deps.id < BY_ID.length, "KnownDeps id %s (%s) must be in the range [0..%s)", (Object) deps.id, deps, BY_ID.length); // can be relaxed in future if necessary
+                Invariants.require(BY_ID[deps.id] == null, "Duplicate KnownDeps id %d (%s, %s)", deps.id, deps, BY_ID[deps.id]);
+                BY_ID[deps.id] = deps;
+                ORDINAL_TO_ID[deps.ordinal()] = deps.id;
+            }
+        }
+
+        public final int id;
         public final Status.Phase phase;
 
-        KnownDeps(Status.Phase phase)
+        KnownDeps(int id, Status.Phase phase)
         {
+            this.id = id;
             this.phase = phase;
         }
 
@@ -798,9 +883,10 @@ public class Known
             switch (this)
             {
                 default: throw new UnhandledEnum(this);
-                case DepsCommitted:
-                case DepsProposed:
                 case DepsProposedFixed:
+                case DepsProposed:
+                case DepsProposedFromCoordinator:
+                case DepsCommitted:
                 case DepsKnown:
                     return true;
                 case DepsFromCoordinator:
@@ -816,14 +902,38 @@ public class Known
             switch (this)
             {
                 default: throw new UnhandledEnum(this);
-                case DepsProposed:
                 case DepsProposedFixed:
+                case DepsProposed:
+                case DepsProposedFromCoordinator:
                     return true;
                 case DepsCommitted:
                 case DepsKnown:
                 case NoDeps:
                 case DepsErased:
                 case DepsUnknown:
+                    return false;
+            }
+        }
+
+        /**
+         * @return true iff any dependencies are known (for this replica) to be complete until executeAt;
+         * otherwise they may only be known to be complete until TxnId
+         */
+        public boolean isKnownUntilExecuteAt()
+        {
+            switch (this)
+            {
+                default: throw new UnhandledEnum(this);
+                case DepsProposedFromCoordinator:
+                case DepsCommitted:
+                case DepsKnown:
+                    return true;
+                case DepsUnknown:
+                case DepsFromCoordinator:
+                case DepsProposedFixed:
+                case DepsProposed:
+                case DepsErased:
+                case NoDeps:
                     return false;
             }
         }
@@ -860,6 +970,18 @@ public class Known
             KnownDeps max = c >= 0 ? this : that;
             KnownDeps min = c <= 0 ? this : that;
             return max != NoDeps || (min != DepsCommitted && min != DepsKnown);
+        }
+
+        public static KnownDeps forId(int id)
+        {
+            if (id < 0 || id >= BY_ID.length)
+                throw new IllegalArgumentException("Unknown KnownDeps id " + id);
+            return BY_ID[id];
+        }
+
+        public static KnownDeps forOrdinal(int ordinal)
+        {
+            return BY_ORDINAL[ordinal];
         }
     }
 

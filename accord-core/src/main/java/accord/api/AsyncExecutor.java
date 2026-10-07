@@ -26,6 +26,10 @@ import accord.utils.async.AsyncChain;
 import accord.utils.async.Cancellable;
 
 // TODO (required): consistent RejectedExecutionException handling
+
+/**
+ * The methods on this class should throw an exception only if the task was not executed
+ */
 public interface AsyncExecutor extends Executor
 {
     Cancellable execute(Runnable run, BiConsumer<? super Void, Throwable> callback);

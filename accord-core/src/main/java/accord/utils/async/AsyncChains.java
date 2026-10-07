@@ -38,6 +38,7 @@ import com.google.common.annotations.VisibleForTesting;
 import accord.api.AsyncExecutor;
 import accord.utils.Invariants;
 import accord.utils.Reduce;
+import accord.utils.ThrowableSafety;
 import accord.utils.TriFunction;
 import accord.utils.async.AsyncCombiner.ChainCombiner;
 
@@ -375,10 +376,18 @@ public class AsyncChains
         }
 
         @Override
-        public void accept(I i, Throwable throwable)
+        public void accept(I success, Throwable fail)
         {
-            callback.accept(i, throwable);
-            super.accept(i, throwable);
+            try
+            {
+                callback.accept(success, fail);
+            }
+            catch (Throwable t)
+            {
+                fail = ThrowableSafety.merge(t, fail);
+                success = null;
+            }
+            super.accept(success, fail);
         }
     }
 
@@ -397,10 +406,24 @@ public class AsyncChains
         @Override
         public void accept(I success, Throwable fail)
         {
-            executor.execute(() -> {
-                callback.accept(success, fail);
-                next.accept(success, fail);
-            });
+            try
+            {
+                executor.execute(() -> {
+                    I s = success;
+                    Throwable f = fail;
+                    try { callback.accept(s, f); }
+                    catch (Throwable t)
+                    {
+                        f = ThrowableSafety.merge(t, f);
+                        s = null;
+                    }
+                    next.accept(s, f);
+                });
+            }
+            catch (Throwable t)
+            {
+                next.accept(null, ThrowableSafety.merge(t, fail));
+            }
         }
     }
 

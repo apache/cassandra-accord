@@ -20,6 +20,7 @@ package accord.utils;
 
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -92,6 +93,32 @@ public class Functions
                 result = foldl.apply(in, result);
         }
         return result;
+    }
+
+    public static <T, P> void forEach(BiConsumer<T, P> accept, List<T> in, P param)
+    {
+        for (int i = 0, mi = in.size(); i < mi ; ++i)
+            accept.accept(in.get(i), param);
+    }
+
+    public static <T> boolean anyMatches(Predicate<T> test, List<T> in)
+    {
+        for (int i = 0, mi = in.size(); i < mi ; ++i)
+        {
+            if (test.test(in.get(i)))
+                return true;
+        }
+        return false;
+    }
+
+    public static <T> boolean allMatches(Predicate<T> test, List<T> in)
+    {
+        for (int i = 0, mi = in.size(); i < mi ; ++i)
+        {
+            if (!test.test(in.get(i)))
+                return false;
+        }
+        return true;
     }
 
     public static <T> Predicate<T> alwaysFalse()

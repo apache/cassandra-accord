@@ -20,6 +20,7 @@ package accord.messages;
 import javax.annotation.Nullable;
 
 import accord.api.Tracing;
+import accord.impl.LocalDelivery;
 import accord.local.Commands;
 import accord.local.Commands.CommitOutcome;
 import accord.local.LoadKeys;
@@ -46,6 +47,7 @@ import accord.topology.ActiveEpochs;
 import accord.topology.Topologies;
 import accord.topology.TopologyException;
 import accord.utils.Invariants;
+import accord.utils.NoStackCancellationException;
 import accord.utils.UnhandledEnum;
 import accord.utils.async.Cancellable;
 
@@ -264,7 +266,9 @@ public class Commit extends RouteRequest.WithUnsynced<CommitOrReadNack>
         {
             if (isCancelled())
             {
-                failure = CANCELLATION_EXCEPTION;
+                if (!(replyContext instanceof LocalDelivery<?>))
+                    return;
+                failure = new NoStackCancellationException();
             }
             else
             {

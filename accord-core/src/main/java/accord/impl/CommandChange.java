@@ -21,7 +21,6 @@ package accord.impl;
 import java.util.Objects;
 import java.util.function.BiPredicate;
 import java.util.function.Predicate;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
@@ -68,7 +67,6 @@ import static accord.impl.CommandChange.Field.WRITES;
 import static accord.local.Cleanup.ERASE;
 import static accord.local.Cleanup.EXPUNGE;
 import static accord.local.Cleanup.NO;
-import static accord.local.Cleanup.VESTIGIAL;
 import static accord.local.Command.Accepted.accepted;
 import static accord.local.Command.Committed.committed;
 import static accord.local.Command.Executed.executed;

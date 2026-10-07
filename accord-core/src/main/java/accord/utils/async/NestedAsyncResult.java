@@ -37,9 +37,16 @@ public class NestedAsyncResult<V> extends AsyncResults.AbstractResult<V>
             }
             else
             {
-                AsyncResult<V> next = apply.apply(success);
-                waitingOn = next;
-                next.invoke(this::callback);
+                try
+                {
+                    AsyncResult<V> next = apply.apply(success);
+                    waitingOn = next;
+                    next.invoke(this::callback);
+                }
+                catch (Throwable t)
+                {
+                    callback(null, t);
+                }
             }
         });
     }

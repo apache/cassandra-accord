@@ -132,7 +132,15 @@ public abstract class AsyncCombiner<A, I, O> extends AsyncChains.Head<O>
         I[] results = results();
         results[idx] = success;
         if (REMAINING.decrementAndGet(this) == 0)
-            callback.accept(process(results), null);
+            complete(callback, results);
+    }
+
+    private void complete(BiConsumer<? super O, Throwable> callback, I[] results)
+    {
+        O result;
+        try { result = process(results); }
+        catch (Throwable t) { callback.accept(null, t); return; }
+        callback.accept(result, null);
     }
 
     BiConsumer<I, Throwable> callbackFor(int idx)
@@ -154,7 +162,7 @@ public abstract class AsyncCombiner<A, I, O> extends AsyncChains.Head<O>
 
         if (size == 0)
         {
-            callback.accept(process(results()), null);
+            complete(callback, results());
             return null;
         }
         Cancellable cancellable = null;

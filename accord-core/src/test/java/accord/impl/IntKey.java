@@ -32,8 +32,6 @@ import accord.utils.Invariants;
 
 import javax.annotation.Nonnull;
 
-import static accord.utils.Utils.toArray;
-
 public abstract class IntKey implements RoutableKey
 {
     public static class Splitter implements ShardDistributor.EvenSplit.Splitter<Long>
@@ -245,7 +243,7 @@ public abstract class IntKey implements RoutableKey
             prev = next;
         }
         result.add(new Range(prev, new Routing(Integer.MAX_VALUE)));
-        return toArray(result, accord.primitives.Range[]::new);
+        return result.toArray(accord.primitives.Range[]::new);
     }
 
     @Override

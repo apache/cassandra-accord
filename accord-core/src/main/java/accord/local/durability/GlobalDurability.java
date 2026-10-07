@@ -24,6 +24,8 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
+import javax.annotation.Nullable;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,10 +38,11 @@ import accord.messages.GetDurableBefore.DurableBeforeReply;
 import accord.messages.Reply;
 import accord.messages.SetGloballyDurable;
 import accord.topology.Topology;
+import org.agrona.collections.IntHashSet;
 
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
 
-public class GlobalDurability implements Callback<Reply>
+public class GlobalDurability
 {
     private static final Logger logger = LoggerFactory.getLogger(GlobalDurability.class);
 
@@ -58,6 +61,56 @@ public class GlobalDurability implements Callback<Reply>
             counter = (counter + 1) & Integer.MAX_VALUE;
             int offset = topology.nodes().indexOf(self);
             return topology.nodes().get((counter + offset) % topology.nodes().size());
+        }
+    }
+
+    class InFlight extends IntHashSet implements Callback<Reply>
+    {
+        @Override
+        public void onSuccess(Node.Id from, Reply reply)
+        {
+            synchronized (GlobalDurability.this)
+            {
+                remove(from.id);
+            }
+        }
+
+        @Override
+        public void onFailure(Node.Id from, @Nullable Throwable failure)
+        {
+            synchronized (GlobalDurability.this)
+            {
+                remove(from.id);
+            }
+        }
+    }
+
+    class InFlightSend extends InFlight
+    {
+        @Override
+        public void onFailure(Node.Id from, @Nullable Throwable failure)
+        {
+            super.onFailure(from, failure);
+            if (failure == null) logger.warn("Failed to send DurableBefore to {} due to timeout", from);
+            else logger.warn("Failed to send DurableBefore to {}", from, failure);
+        }
+    }
+
+    class InFlightRead extends InFlight
+    {
+        @Override
+        public void onSuccess(Node.Id from, Reply reply)
+        {
+            super.onSuccess(from, reply);
+            node.markDurable(((DurableBeforeReply)reply).durableBefore);
+        }
+
+        @Override
+        public void onFailure(Node.Id from, @Nullable Throwable failure)
+        {
+            super.onFailure(from, failure);
+            if (failure == null) logger.warn("Failed to fetch DurableBefore from {} due to timeout", from);
+            else logger.warn("Failed to fetch DurableBefore from {}", from, failure);
         }
     }
 
@@ -80,7 +133,7 @@ public class GlobalDurability implements Callback<Reply>
 
     private Topology currentGlobalTopology;
     private int globalIndex;
-    private int inflight;
+    private final InFlight inflightSend = new InFlightSend(), inflightRead = new InFlightRead();
     private int maxConcurrency = 8;
     private volatile boolean stop;
 
@@ -148,23 +201,52 @@ public class GlobalDurability implements Callback<Reply>
 
     private void startGlobalSync()
     {
+        Node.Id sendTo = null, readFrom = null;
         try
         {
             AsyncExecutor executor = node.someExecutor();
             synchronized (this)
             {
-                if (inflight >= maxConcurrency)
+                if (inflightSend.size() + inflightRead.size() >= maxConcurrency)
                     return;
-                inflight += 2;
+
+                sendTo = selectAndRecordInFlight(selectSendTo, inflightSend, currentGlobalTopology);
+                readFrom = selectAndRecordInFlight(selectReadFrom, inflightRead, currentGlobalTopology);
             }
 
-            node.send(selectSendTo.apply(currentGlobalTopology), new SetGloballyDurable(node.durableBefore()), executor, this, null);
-            node.send(selectReadFrom.apply(currentGlobalTopology), new GetDurableBefore(), executor, this, null);
+            if (sendTo != null)
+            {
+                node.send(sendTo, new SetGloballyDurable(node.durableBefore()), executor, inflightSend, null);
+                sendTo = null;
+            }
+            if (readFrom != null)
+            {
+                node.send(readFrom, new GetDurableBefore(), executor, inflightRead, null);
+                readFrom = null;
+            }
         }
-        catch (Exception e)
+        catch (Throwable t)
         {
-            logger.warn("Exception invoking withEpoch to start coordination for global durability", e);
+            synchronized (this)
+            {
+                if (readFrom != null)
+                    inflightRead.remove(readFrom.id);
+                if (sendTo != null)
+                    inflightSend.remove(sendTo.id);
+            }
+            logger.warn("Failed starting global durability", t);
         }
+    }
+
+    private static Node.Id selectAndRecordInFlight(Function<Topology, Node.Id> select, IntHashSet inflight, Topology topology)
+    {
+        for (int i = 0 ; i < 10 ; ++i)
+        {
+            Node.Id id = select.apply(topology);
+            if (inflight.add(id.id))
+                return id;
+        }
+        return null;
     }
 
     synchronized void updateTopology(Topology latestGlobal)
@@ -210,25 +292,8 @@ public class GlobalDurability implements Callback<Reply>
         return targetTime;
     }
 
-    @Override
-    public synchronized void onSuccess(Node.Id from, Reply reply)
-    {
-        --inflight;
-        if (reply instanceof DurableBeforeReply)
-            node.markDurable(((DurableBeforeReply)reply).durableBefore);
-    }
-
-    @Override
-    public synchronized void onFailure(Node.Id from, Throwable failure)
-    {
-        --inflight;
-        if (failure == null) logger.warn("Failed to fetch DurableBefore from {} due to timeout", from);
-        else logger.warn("Failed to fetch DurableBefore from {}", from, failure);
-    }
-
     public synchronized void setMaxConcurrency(int newMaxConcurrency)
     {
         this.maxConcurrency = newMaxConcurrency;
     }
-
 }

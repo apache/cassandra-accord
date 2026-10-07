@@ -28,6 +28,7 @@ import javax.annotation.concurrent.GuardedBy;
 import accord.api.AsyncExecutor;
 import accord.api.Timeouts;
 import accord.api.Timeouts.RegisteredTimeout;
+import accord.api.Timeouts.SentinelRegisteredTimeout;
 import accord.coordinate.EpochTimeout;
 import accord.local.Node;
 import accord.primitives.Ranges;
@@ -42,7 +43,7 @@ import static java.util.concurrent.TimeUnit.MICROSECONDS;
 class PendingEpoch implements Timeouts.Timeout
 {
     private static final AtomicReferenceFieldUpdater<PendingEpoch, RegisteredTimeout> timeoutUpdater = AtomicReferenceFieldUpdater.newUpdater(PendingEpoch.class, RegisteredTimeout.class, "timeout");
-    private static final RegisteredTimeout DONE = () -> {};
+    private static final RegisteredTimeout DONE = new SentinelRegisteredTimeout();
 
     final long epoch;
 
@@ -113,12 +114,20 @@ class PendingEpoch implements Timeouts.Timeout
                 waiting.add(result = new WaitingForEpoch(deadlineMicros + (timeoutMicros / 10)));
         }
         if (last == null)
+            ensureTimeout(result.deadlineMicros);
+        return result;
+    }
+
+    private void ensureTimeout(long deadlineMicros)
+    {
+        // we first set a sentinel entry to handle the unlikely case of the timeout firing before we can update the timeout field
+        SentinelRegisteredTimeout sentinel;
+        if (timeoutUpdater.compareAndSet(this, null, sentinel = new SentinelRegisteredTimeout()))
         {
-            RegisteredTimeout timeout = manager.timeouts.registerAt(this, result.deadlineMicros, MICROSECONDS);
-            if (!timeoutUpdater.compareAndSet(this, null, timeout))
+            RegisteredTimeout timeout = manager.timeouts.registerAt(this, deadlineMicros, MICROSECONDS);
+            if (!timeoutUpdater.compareAndSet(this, sentinel, timeout))
                 timeout.cancel();
         }
-        return result;
     }
 
     void setActive()
@@ -149,12 +158,12 @@ class PendingEpoch implements Timeouts.Timeout
             while (true)
             {
                 WaitingForEpoch next = waiting.peek();
-                if (next == null)
-                    break;
-
-                if (next.deadlineMicros > nowMicros)
+                if (next == null || next.deadlineMicros > nowMicros)
                 {
-                    nextDeadlineMicros = next.deadlineMicros;
+                    // clear our now-expired registration so a new one can be registered later
+                    timeoutUpdater.compareAndSet(this, curTimeout, null);
+                    if (next != null)
+                        nextDeadlineMicros = next.deadlineMicros;
                     break;
                 }
 
@@ -164,11 +173,7 @@ class PendingEpoch implements Timeouts.Timeout
             }
         }
         if (nextDeadlineMicros > 0)
-        {
-            RegisteredTimeout newTimeout = manager.timeouts.registerAt(this, nextDeadlineMicros, MICROSECONDS);
-            if (!timeoutUpdater.compareAndSet(this, curTimeout, newTimeout))
-                newTimeout.cancel();
-        }
+            ensureTimeout(nextDeadlineMicros);
     }
 
     @Override

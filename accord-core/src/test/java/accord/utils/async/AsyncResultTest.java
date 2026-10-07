@@ -18,6 +18,8 @@
 
 package accord.utils.async;
 
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -29,6 +31,7 @@ import org.junit.jupiter.api.Test;
 
 import accord.impl.AbstractAsyncExecutor;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class AsyncResultTest
@@ -366,10 +369,20 @@ public class AsyncResultTest
     void callbackExceptionTest()
     {
         AsyncResult<Integer> result = AsyncResults.success(42);
-        
-        assertThatThrownBy(() -> result.invoke((value, ex) -> {
-            throw new RuntimeException("callback exception");
-        })).isInstanceOf(RuntimeException.class);
+        AtomicReference<Throwable> reported = new AtomicReference<>();
+        Thread.UncaughtExceptionHandler old = Thread.currentThread().getUncaughtExceptionHandler();
+        Thread.currentThread().setUncaughtExceptionHandler((t, e) -> reported.set(e));
+        try
+        {
+            result.invoke((value, ex) -> {
+                throw new RuntimeException("callback exception");
+            });
+            assertThat(reported.get()).isInstanceOf(RuntimeException.class);
+        }
+        finally
+        {
+            Thread.currentThread().setUncaughtExceptionHandler(old);
+        }
     }
 
     @Test
@@ -383,5 +396,95 @@ public class AsyncResultTest
         ResultCallback<String> callback = new ResultCallback<>();
         nullResult.invoke(callback);
         Assertions.assertNull(callback.value());
+    }
+
+    private static Throwable failure(AsyncResult<?> result)
+    {
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        result.invoke((success, fail) -> failure.set(fail));
+        return failure.get();
+    }
+
+    private static void withUncaughtHandler(AtomicReference<Throwable> reported, Runnable run)
+    {
+        Thread thread = Thread.currentThread();
+        Thread.UncaughtExceptionHandler old = thread.getUncaughtExceptionHandler();
+        thread.setUncaughtExceptionHandler((ignore, failure) -> reported.set(failure));
+        try { run.run(); }
+        finally { thread.setUncaughtExceptionHandler(old); }
+    }
+
+    @Test
+    void reducerExceptionFailsCombinedResult()
+    {
+        RuntimeException boom = new RuntimeException("reducer");
+        AtomicReference<Throwable> reported = new AtomicReference<>();
+        AsyncResult.Settable<Integer> left = AsyncResults.settable();
+        AsyncResult.Settable<Integer> right = AsyncResults.settable();
+        AsyncResult<Integer> combined = AsyncResults.reduce(Arrays.asList(left, right), (a, b) -> { throw boom; });
+
+        withUncaughtHandler(reported, () -> {
+            left.setSuccess(1);
+            right.setSuccess(2);
+        });
+
+        Assertions.assertNull(reported.get());
+        Assertions.assertTrue(combined.isDone());
+        Assertions.assertSame(boom, failure(combined));
+    }
+
+    @Test
+    void zeroInputProcessExceptionFailsCombinedResult()
+    {
+        RuntimeException boom = new RuntimeException("process");
+        AsyncResult<Integer> combined = new AsyncCombiner.ResultCombiner<Object, Integer>(Collections.emptyList())
+        {
+            @Override
+            Integer process(Object[] inputs)
+            {
+                throw boom;
+            }
+        }.beginAsResult();
+
+        Assertions.assertTrue(combined.isDone());
+        Assertions.assertSame(boom, failure(combined));
+    }
+
+    @Test
+    void nestedMapperExceptionFailsResult()
+    {
+        RuntimeException boom = new RuntimeException("mapper");
+        AtomicReference<Throwable> reported = new AtomicReference<>();
+        AsyncResult.Settable<Integer> source = AsyncResults.settable();
+        AsyncResult<String> nested = NestedAsyncResult.flatMap(source, value -> { throw boom; });
+
+        withUncaughtHandler(reported, () -> source.setSuccess(1));
+
+        Assertions.assertNull(reported.get());
+        Assertions.assertTrue(nested.isDone());
+        Assertions.assertSame(boom, failure(nested));
+        Assertions.assertEquals("Done", nested.toString());
+    }
+
+    @Test
+    void listenerRethrowingFailureDoesNotPreventLaterListeners()
+    {
+        RuntimeException original = new RuntimeException("original");
+        AtomicReference<Throwable> reported = new AtomicReference<>();
+        AtomicBoolean secondNotified = new AtomicBoolean();
+        AsyncResult.Settable<Integer> source = AsyncResults.settable();
+        source.invoke((success, fail) -> { throw (RuntimeException) fail; });
+        source.invoke((success, fail) -> secondNotified.set(true));
+
+        withUncaughtHandler(reported, () -> source.setFailure(original));
+
+        Assertions.assertTrue(secondNotified.get());
+        Assertions.assertSame(original, reported.get());
+        Assertions.assertEquals(0, original.getSuppressed().length);
+
+        // immediate (already completed) path
+        reported.set(null);
+        withUncaughtHandler(reported, () -> AsyncResults.failure(original).invoke((success, fail) -> { throw (RuntimeException) fail; }));
+        Assertions.assertSame(original, reported.get());
     }
 }

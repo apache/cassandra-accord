@@ -32,6 +32,11 @@ import java.util.function.Supplier;
 import javax.annotation.Nonnull;
 import javax.annotation.concurrent.GuardedBy;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import accord.api.ProtocolModifiers;
+import accord.api.RateLimitedLogStatement;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
@@ -39,9 +44,15 @@ import accord.utils.async.AsyncResults;
 // need to be merged and ordered
 public class PersistentField<Input, Saved>
 {
+    private static final Logger logger = LoggerFactory.getLogger(PersistentField.class);
+    private static final RateLimitedLogStatement failedToPersistDelta = ProtocolModifiers.rateLimitedLogStatementFactory.error("Failed to persist {} {}", logger);
+    private static final RateLimitedLogStatement persistingImage = ProtocolModifiers.rateLimitedLogStatementFactory.info("Persisting {} image {} after earlier failure", logger);
+    private static final RateLimitedLogStatement failedToPersistImage = ProtocolModifiers.rateLimitedLogStatementFactory.error("Failed to {} {} image {}; discarding save record", logger);
+
     public interface Persister<Input, Saved>
     {
         AsyncResult<?> persist(Input addValue, Saved newValue);
+        AsyncResult<?> persist(Saved newValue);
         Saved load();
     }
 
@@ -60,14 +71,18 @@ public class PersistentField<Input, Saved>
     {
         final int id;
         final Saved saving;
+        final List<AsyncResult.Settable<Void>> notifyOnDone;
+        boolean failed;
 
-        private PendingSave(int id, Saved saving)
+        private PendingSave(int id, Saved saving, List<AsyncResult.Settable<Void>> notifyOnDone)
         {
             this.id = id;
             this.saving = saving;
+            this.notifyOnDone = notifyOnDone;
         }
     }
 
+    private final String name;
     private final Supplier<Saved> currentValue;
     private final BiFunction<Input, Input, Input> mergeInputs;
     private final BiFunction<Input, Saved, Saved> mergeToSave;
@@ -77,14 +92,16 @@ public class PersistentField<Input, Saved>
 
     private Saved latestSave;
     private int nextId;
+    private boolean requireImage;
     private final List<PendingInput<Input>> inputBuffer = new ArrayList<>();
     private final ArrayDeque<PendingInput<Input>> inputs = new ArrayDeque<>();
     private final ArrayDeque<PendingSave<Saved>> saves = new ArrayDeque<>();
     private final TreeSet<Integer> complete = new TreeSet<>();
     private final Lock mergeLock = new ReentrantLock();
 
-    public PersistentField(@Nonnull Supplier<Saved> currentValue, @Nonnull BiFunction<Input, Input, Input> mergeInputs, @Nonnull BiFunction<Input, Saved, Saved> mergeToSave, @Nonnull Persister<Input, Saved> persister, Consumer<Saved> set, Executor mergeExecutor)
+    public PersistentField(String name, @Nonnull Supplier<Saved> currentValue, @Nonnull BiFunction<Input, Input, Input> mergeInputs, @Nonnull BiFunction<Input, Saved, Saved> mergeToSave, @Nonnull Persister<Input, Saved> persister, Consumer<Saved> set, Executor mergeExecutor)
     {
+        this.name = name;
         Invariants.nonNull(currentValue, "currentValue cannot be null");
         Invariants.nonNull(mergeInputs, "mergeInputs cannot be null");
         Invariants.nonNull(mergeToSave, "mergeToSave cannot be null");
@@ -130,7 +147,6 @@ public class PersistentField<Input, Saved>
         }
     }
 
-    static int counter;
     @GuardedBy("mergeLock")
     private void save()
     {
@@ -169,31 +185,96 @@ public class PersistentField<Input, Saved>
             notifyOnDone.add(pending.done);
         inputBuffer.clear();
 
-        int id;
+        // submit persistence before taking our slot, so we can report a failure without interfering with other work
+        AsyncResult<?> persist;
+        try
+        {
+            persist = persister.persist(inputValue, newValue);
+        }
+        catch (Throwable t)
+        {
+            notifyOnDone.forEach(i -> i.setFailure(t));
+            return;
+        }
+
+        PendingSave<Saved> save;
         synchronized (this)
         {
             this.latestSave = newValue;
-            id = ++nextId;
-            saves.add(new PendingSave<>(id, newValue));
+            save = new PendingSave<>(++nextId, newValue, notifyOnDone);
+            saves.addLast(save);
         }
 
-        AsyncResult<?> pendingWrite = persister.persist(inputValue, newValue);
-        pendingWrite.invoke((success, fail) -> {
-            synchronized (this)
+        persist.invoke((success, fail) -> persisted(save, fail));
+    }
+
+    private synchronized void persisted(PendingSave<Saved> save, Throwable fail)
+    {
+        if (fail != null)
+        {
+            failedToPersistDelta.log(name, save.id, fail);
+            save.failed = true;
+        }
+        complete.add(save.id);
+        postPersisted();
+    }
+
+    private synchronized void persistedImage(@Nonnull PendingSave<Saved> save, Throwable fail)
+    {
+        Invariants.expect(saves.peekFirst() == save);
+        if (fail != null)
+        {
+            failedToPersistImage.log("persist", name, save.id, fail);
+            saves.pollFirst();
+            save.notifyOnDone.forEach(i -> i.setFailure(fail));
+        }
+        else
+        {
+            requireImage = false;
+            save.failed = false;
+            complete.add(save.id);
+        }
+        postPersisted();
+    }
+
+    private synchronized void postPersisted()
+    {
+        Saved latest = null;
+        while (!complete.isEmpty())
+        {
+            PendingSave<Saved> next = Invariants.nonNull(saves.peekFirst());
+            if (complete.first() != next.id)
+                break;
+
+            complete.pollFirst();
+            if (next.failed)
+                requireImage = true;
+
+            if (requireImage)
             {
-                complete.add(id);
-                boolean upd = false;
-                Saved latest = null;
-                while (!complete.isEmpty() && saves.peek().id == complete.first())
+                persistingImage.log(name, next.id);
+                AsyncResult<?> writeImage;
+                try { writeImage = persister.persist(next.saving); }
+                catch (Throwable t)
                 {
-                    latest = saves.poll().saving;
-                    complete.pollFirst();
-                    upd = true;
+                    failedToPersistImage.log("initiate persist of", name, next.id, t);
+                    next.notifyOnDone.forEach(i -> i.setFailure(t));
+                    saves.pollFirst();
+                    continue;
                 }
-                ++counter;
-                if (upd) set.accept(latest);
-                notifyOnDone.forEach(i -> i.setSuccess(null));
+
+                if (latest != null)
+                    set.accept(latest);
+                writeImage.invoke((s2, f2) -> persistedImage(next, f2));
+                return;
             }
-        });
+
+            saves.pollFirst();
+            next.notifyOnDone.forEach(i -> i.setSuccess(null));
+            latest = next.saving;
+        }
+
+        if (latest != null)
+            set.accept(latest);
     }
 }
