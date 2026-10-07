@@ -36,6 +36,11 @@ public interface Timeouts
         void cancel();
     }
 
+    class SentinelRegisteredTimeout implements RegisteredTimeout
+    {
+        @Override public void cancel() {}
+    }
+
     RegisteredTimeout registerAt(Timeout timeout, long deadline, TimeUnit units);
     void maybeNotify();
 }

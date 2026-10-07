@@ -25,6 +25,11 @@ import accord.utils.Rethrowable;
 
 public interface UncaughtExceptionListener extends BiConsumer<Object, Throwable>
 {
+    interface Supplier
+    {
+        UncaughtExceptionListener uncaughtExceptions();
+    }
+
     void onException(Throwable t);
 
     @Override

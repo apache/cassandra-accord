@@ -107,6 +107,7 @@ import static accord.primitives.Known.KnownDeps.DepsFromCoordinator;
 import static accord.primitives.Known.KnownDeps.DepsKnown;
 import static accord.primitives.Known.KnownDeps.DepsProposed;
 import static accord.primitives.Known.KnownDeps.DepsProposedFixed;
+import static accord.primitives.Known.KnownDeps.DepsProposedFromCoordinator;
 import static accord.primitives.Known.KnownExecuteAt.ApplyAtKnown;
 import static accord.primitives.Known.Outcome.Apply;
 import static accord.primitives.Routables.Slice.Minimal;
@@ -114,6 +115,7 @@ import static accord.primitives.SaveStatus.Applying;
 import static accord.primitives.SaveStatus.Erased;
 import static accord.primitives.SaveStatus.LocalExecution.WaitingToExecute;
 import static accord.primitives.SaveStatus.PreAccepted;
+import static accord.primitives.SaveStatus.PreAcceptedPrivCoord;
 import static accord.primitives.SaveStatus.PreAcceptedWithDeps;
 import static accord.primitives.SaveStatus.PreAcceptedWithVote;
 import static accord.primitives.SaveStatus.ReadyToExecute;
@@ -157,6 +159,19 @@ public class Commands
         return preacceptOrRecover(safeStore, safeCommand, participants, newSaveStatus, txnId, partialTxn, partialDeps, Ballot.ZERO);
     }
 
+    /**
+     * Pre-accept a transaction we coordinate with a privileged coordinator fast path, recording our state as
+     * {@link SaveStatus#PreAcceptedPrivCoord} whether or not we vote for the fast path (our vote is implied by
+     * executeAt == txnId). This permits us to later determine that we are the transaction's privileged coordinator
+     * without reference to our node id. Promising any non-zero ballot moves us to {@link SaveStatus#PreAcceptedPrivCoordRecovery}.
+     */
+    public static AcceptOutcome preacceptAsPrivilegedCoordinator(SafeCommandStore safeStore, SafeCommand safeCommand, StoreParticipants participants, TxnId txnId, Txn partialTxn)
+    {
+        Invariants.require(txnId.hasPrivilegedCoordinator());
+        Invariants.require(txnId.node.equals(safeStore.node().id()));
+        return preacceptOrRecover(safeStore, safeCommand, participants, PreAcceptedPrivCoord, txnId, partialTxn, null, Ballot.ZERO);
+    }
+
     public static AcceptOutcome recover(SafeCommandStore safeStore, SafeCommand safeCommand, StoreParticipants participants, TxnId txnId, PartialTxn partialTxn, Ballot ballot)
     {
         // for recovery we only ever propose either the original epoch or an Accept that we witness; otherwise we invalidate
@@ -193,7 +208,7 @@ public class Commands
             }
             else
             {
-                safeCommand.updatePromised(ballot);
+                safeCommand.updatePromised(safeStore, ballot);
                 outcome = AcceptOutcome.Success;
             }
             logger.trace("{}: skipping preaccept - {}", txnId, outcome);
@@ -218,7 +233,9 @@ public class Commands
             Timestamp executeAt = safeStore.commandStore().preaccept(txnId, participants.route(), safeStore, ballot.equals(Ballot.ZERO));
             if (txnId != executeAt || !command.is(NotDefined))
             {
-                newSaveStatus = PreAccepted;
+                // the privileged coordinator retains its status whether or not it votes for the fast path, as its vote is implied by executeAt
+                if (newSaveStatus != PreAcceptedPrivCoord)
+                    newSaveStatus = PreAccepted;
                 validated = UPDATE_TXN_IGNORE_DEPS;
             }
 
@@ -253,7 +270,7 @@ public class Commands
         }
 
         safeStore.agent().replicaEvents().onPreNotAccepted(safeStore, command);
-        safeCommand.updatePromised(ballot);
+        safeCommand.updatePromised(safeStore, ballot);
         return true;
     }
 
@@ -589,7 +606,7 @@ public class Commands
 
         if (newSaveStatus == SaveStatus.PreApplied && !waitingOn.isWaiting())
             newSaveStatus = Applying;
-        if (newSaveStatus == Applying && (!txnId.is(Write) || writes == null || !writes.keys.intersects(participants.stillExecutes())))
+        if (newSaveStatus == Applying && (!txnId.is(Write) || writes == null || !writes.appliesToAny(partialTxn, participants.stillExecutes())))
             newSaveStatus = SaveStatus.Applied;
 
         switch (newSaveStatus)
@@ -858,15 +875,12 @@ public class Commands
         {
             default: throw UnhandledEnum.invalid(command.status());
             case Stable:
-                if (executeAtReplica(txnId, command.partialTxn())
-                    && !command.participants().executes().isEmpty()
-                    && safeStore.safeToReadAt(command.executeAt()).containsAll(command.participants().executes())
-                    && safeStore.commandStore().node().topology().epoch() >= command.executeAt.epoch()
-                )
+                if (shouldExecuteAtReplica(safeStore, command))
                 {
+                    // if we must read, we complete execution asynchronously
                     if (null == (command = replicaExecute(safeStore, safeCommand, command, txnId)))
                         break;
-                    // else fall-through
+                    // else fall-through to apply
                 }
                 else
                 {
@@ -879,7 +893,7 @@ public class Commands
 
             case PreApplied:
                 Command.Executed executed = command.asExecuted();
-                if (txnId.is(Write) && executed.writes().keys.intersects(executed.participants().stillExecutes()))
+                if (txnId.is(Write) && executed.writes().appliesToAny(executed.partialTxn(), executed.participants().stillExecutes()))
                 {
                     safeCommand.applying(safeStore);
                     safeStore.notifyListeners(safeCommand, command);
@@ -898,6 +912,15 @@ public class Commands
 
         adapter.notWaiting(safeStore);
         return true;
+    }
+
+    private static boolean shouldExecuteAtReplica(SafeCommandStore safeStore, Command command)
+    {
+        TxnId txnId = command.txnId();
+        return executeAtReplica(txnId, command.partialTxn())
+               && !command.participants().executes().isEmpty()
+               && safeStore.safeToReadAt(command.executeAt()).containsAll(command.participants().executes())
+               && safeStore.commandStore().node().topology().epoch() >= command.executeAt.epoch();
     }
 
     private static Command replicaExecute(SafeCommandStore safeStore, SafeCommand safeCommand, Command command, TxnId txnId)
@@ -931,6 +954,8 @@ public class Commands
                 {
                     if (!fastWritesMayBypassSafeStore())
                         replicaExecuteSlowApply(unsafeStore, ballot, txnId, route, txn, data, applyAt, stamp);
+                    else if (data != null && !data.validateReply(txnId, applyAt, applyAt.uniqueHlc()))
+                        notifyAfterFailedFastApply(unsafeStore, txnId);
                     else if (stamp == unsafeStore.node.currentStamp() || unsafeStore.unsafeGetSafeToRead().lowerEntry(applyAt).getValue().containsAll(executes))
                         replicaExecuteFastApply(unsafeStore, ballot, txnId, route, txn, data, applyAt, executes);
                     else
@@ -1934,7 +1959,7 @@ public class Commands
 
         if (commitKind == StableMediumPath)
         {
-            if ((haveKnown.is(DepsProposedFixed) || (haveKnown.is(DepsProposed) && cur.acceptedOrCommitted().equals(Ballot.ZERO)))
+            if ((haveKnown.is(DepsProposedFixed) || ((haveKnown.is(DepsProposed) || haveKnown.is(DepsProposedFromCoordinator)) && cur.acceptedOrCommitted().equals(Ballot.ZERO)))
                 && expectKnown.is(DepsKnown) && ballot != null && ballot.equals(Ballot.ZERO) && participants.stillTouches().equals(cur.participants().touches()))
                 return UPDATE_TXN_MERGE_DEPS;
             return INSUFFICIENT;

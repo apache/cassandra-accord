@@ -50,8 +50,8 @@ import static accord.primitives.Known.KnownDeps.DepsCommitted;
 import static accord.primitives.Known.KnownDeps.DepsErased;
 import static accord.primitives.Known.KnownDeps.DepsFromCoordinator;
 import static accord.primitives.Known.KnownDeps.DepsKnown;
-import static accord.primitives.Known.KnownDeps.DepsProposed;
 import static accord.primitives.Known.KnownDeps.DepsProposedFixed;
+import static accord.primitives.Known.KnownDeps.DepsProposedFromCoordinator;
 import static accord.primitives.Known.KnownDeps.DepsUnknown;
 
 public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
@@ -211,7 +211,7 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
                 b = tmp;
             }
 
-            if (a.known.compareTo(DepsProposed) <= 0)
+            if (a.known.compareTo(DepsProposedFromCoordinator) <= 0)
                 return merge.apply(a, b);
             // note that it is *not* necessarily guaranteed that stable deps will be the same - only that they will imply the same relations once filtered
             // so it is not safe to test equality of deps when merging two stable deps, as one might include additional TxnId that will not impact execution
@@ -513,7 +513,7 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
                 case DepsFromCoordinator:
                     Stream<V> merge = e.merge.stream().map(d -> getter.apply(d, slice));
                     return Stream.concat(Stream.of(getter.apply(e.coordinatedDeps, slice)), merge);
-                case DepsProposedFixed: case DepsProposed:
+                case DepsProposedFixed: case DepsProposed: case DepsProposedFromCoordinator:
                     return Stream.of(getter.apply(e.coordinatedDeps, slice));
                 case DepsKnown: case DepsErased: case NoDeps: case DepsCommitted:
                     throw UnhandledEnum.invalid(e.known);
@@ -541,6 +541,7 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
                         case DepsUnknown:
                         case DepsFromCoordinator:
                         case DepsProposed:
+                        case DepsProposedFromCoordinator:
                         case DepsCommitted:
                             Invariants.require(hasMedium <= 0, "Highest ballot for %s had %s, but another range had DepsProposedFixed", range, known);
                             hasMedium = -1;
@@ -574,6 +575,7 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
                         return Stream.of(getter.apply(e.coordinatedDeps, ranges));
 
                     case DepsProposed:
+                    case DepsProposedFromCoordinator:
                         // we may encounter DepsProposed for any interrupted commit. This might be a fast-path commit that
                         // was partially recovered by a prior recovery coordinator, or a slow-path commit that was interrupted.
                         // For the former we would only require the previously proposed deps as these would represent a complete set of deps

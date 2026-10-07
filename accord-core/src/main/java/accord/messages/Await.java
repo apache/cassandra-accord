@@ -30,7 +30,6 @@ import accord.api.LocalListeners;
 import accord.api.ProgressLog.BlockedUntil;
 import accord.api.RemoteListeners;
 import accord.api.Timeouts;
-import accord.api.Timeouts.RegisteredTimeout;
 import accord.local.Command;
 import accord.local.Commands;
 import accord.local.Node;
@@ -204,7 +203,6 @@ public class Await extends AbstractRequest<Participants<?>, Void> implements Req
 
     private transient volatile Collection<LocalListeners.Registered> syncRegistrations;
     private static final AtomicReferenceFieldUpdater<Await, Collection<LocalListeners.Registered>> syncRegistrationsUpdater = AtomicReferenceFieldUpdater.newUpdater(Await.class, (Class)Collection.class, "syncRegistrations");
-    private transient RegisteredTimeout timeout;
 
     // we use exactly -1 to make serialization easy (can increment by 1 and store a non-negative integer)
     private static final int SYNCHRONOUS_CALLBACKID = -1;
@@ -243,8 +241,8 @@ public class Await extends AbstractRequest<Participants<?>, Void> implements Req
         this.node = node;
         this.replyTo = replyToNode;
         this.replyContext = replyContext;
-        // TODO (expected): integrate with cancellation
-        return node.commandStores().mapReduceConsume(minAwaitEpoch, maxAwaitEpoch, this);
+        setupWork(node.commandStores().mapReduceConsume(minAwaitEpoch, maxAwaitEpoch, this));
+        return this;
     }
 
     @Override
@@ -283,10 +281,14 @@ public class Await extends AbstractRequest<Participants<?>, Void> implements Req
         }
         else
         {
-            if (syncRegistrations == null)
+            Collection<LocalListeners.Registered> registrations;
+            while (null == (registrations = syncRegistrations)) // may be concurrently cleared by cancel()
                 syncRegistrationsUpdater.compareAndSet(this, null, new ConcurrentLinkedQueue<>());
-            syncRegistrations.add(safeStore.register(txnId, this));
+            LocalListeners.Registered registered = safeStore.register(txnId, this);
+            registrations.add(registered);
             synchronouslyWaitingOnUpdater.incrementAndGet(this);
+            if (isCancelled()) // may have raced with tryCancel(); ensure our registration is removed
+                registered.cancel();
         }
 
         if (notifyProgressLog)
@@ -305,13 +307,14 @@ public class Await extends AbstractRequest<Participants<?>, Void> implements Req
     {
         if (failure != null)
         {
-            cancel();
+            tryCancel();
             reply(null, failure);
         }
         else if (callbackId >= 0)
         {
             RemoteListeners.Registration asyncRegistration = this.asyncRegistration;
             AwaitOk reply = unavailable ? AwaitOk.Unavailable : asyncRegistration == null || 0 == asyncRegistration.done() ? AwaitOk.Ready : AwaitOk.NotReady;
+            trySuccess();
             reply(reply, null);
         }
         else
@@ -319,16 +322,14 @@ public class Await extends AbstractRequest<Participants<?>, Void> implements Req
             int waitingOn = synchronouslyWaitingOnUpdater.decrementAndGet(this);
             if (waitingOn >= 0)
             {
-                long expiresAtMicros = replyContext.expiresAt(MICROSECONDS);
+                // replyContext may be null for purely local awaits (e.g. KeyBarriers.awaitLocal)
+                long expiresAtMicros = replyContext == null ? 0 : replyContext.expiresAt(MICROSECONDS);
                 if (expiresAtMicros > 0)
-                {
-                    timeout = node.timeouts().registerAt(this, expiresAtMicros, MICROSECONDS);
-                    if (-1 == synchronouslyWaitingOn)
-                        timeout.cancel(); // we could leave a dangling timeout in this rare race condition
-                }
+                    setupTimeout(node.timeouts().registerAt(this, expiresAtMicros, MICROSECONDS)); // ensures no dangling timeout if already complete
             }
             else
             {
+                trySuccess();
                 onSynchronousAwaitComplete();
             }
         }
@@ -341,8 +342,7 @@ public class Await extends AbstractRequest<Participants<?>, Void> implements Req
 
     public void timeout()
     {
-        timeout = null;
-        cancel();
+        tryTimeout();
     }
 
     public int stripe()
@@ -350,15 +350,14 @@ public class Await extends AbstractRequest<Participants<?>, Void> implements Req
         return txnId.hashCode();
     }
 
-    void cancel()
+    @Override
+    protected void cleanupOnFailure(@Nullable Cancellable cancel)
     {
-        RegisteredTimeout cancelTimeout = timeout;
+        super.cleanupOnFailure(cancel);
+
         Collection<LocalListeners.Registered> cancelRegistrations = syncRegistrations;
-        if (cancelTimeout != null)
-            cancelTimeout.cancel();
         if (cancelRegistrations != null)
             cancelRegistrations.forEach(LocalListeners.Registered::cancel);
-        timeout = null;
         syncRegistrations = null;
         asyncRegistration = null;
     }
@@ -408,8 +407,7 @@ public class Await extends AbstractRequest<Participants<?>, Void> implements Req
         if (-1 == synchronouslyWaitingOnUpdater.decrementAndGet(this))
         {
             onSynchronousAwaitComplete();
-            if (timeout != null)
-                timeout.cancel();
+            trySuccess();
             syncRegistrations = null;
         }
 

@@ -76,6 +76,10 @@ import static accord.local.cfk.CommandsForKey.InternalStatus.APPLIED_DURABLE;
 import static accord.local.cfk.CommandsForKey.InternalStatus.APPLIED_NOT_DURABLE;
 import static accord.local.cfk.CommandsForKey.InternalStatus.COMMITTED;
 import static accord.local.cfk.CommandsForKey.InternalStatus.ERASED;
+import static accord.local.cfk.CommandsForKey.InternalStatus.HAS_HIGH_ID;
+import static accord.local.cfk.CommandsForKey.InternalStatus.ORDINAL_TO_ID;
+import static accord.local.cfk.CommandsForKey.InternalStatus.PREACCEPTED_COORD;
+import static accord.local.cfk.CommandsForKey.InternalStatus.PREACCEPTED_COORD_RECOVERY;
 import static accord.local.cfk.CommandsForKey.InternalStatus.PRUNED;
 import static accord.local.cfk.CommandsForKey.InternalStatus.STABLE;
 import static accord.local.cfk.CommandsForKey.InternalStatus.TO_SUMMARY_STATUS;
@@ -308,13 +312,13 @@ public class CommandsForKey extends CommandsForKeyUpdate
                && bounds.startEpoch <= txnId.epoch(); // if we don't own from txnId.epoch() we will learn of this transaction via bootstrap
     }
 
-    public static boolean needsUpdate(SafeCommandStore safeStore, Command prev, Command updated)
+    public static boolean needsUpdate(Command prev, Command updated)
     {
-        InternalStatus newStatus = from(safeStore, updated, false);
+        InternalStatus newStatus = from(updated, false);
         if (newStatus == null)
             return updated.known().is(ApplyAtKnown) && updated.executeAt().hasDistinctHlcAndUniqueHlc();
 
-        InternalStatus prevStatus = from(safeStore, prev, false);
+        InternalStatus prevStatus = from(prev, false);
         if (prevStatus != newStatus)
             return true;
 
@@ -349,16 +353,16 @@ public class CommandsForKey extends CommandsForKeyUpdate
      */
     public static class TxnInfo extends TxnId
     {
-        // TODO (desired): consider saving in TxnId flag bits (plenty of room); can then store just a TxnId in most cases
-        static final int INTERNAL_STATUS_ORDINAL_MASK = 0xF;
+        static final int INTERNAL_STATUS_ORDINAL_MASK = 0x1F;
         static final int INTERNAL_STATUS_ORDINAL_SHIFT = 0;
-        static final int MANAGED = 0x10;
-        static final int MAY_EXECUTE = 0x20;
-        static final int COMMITTED_TO_EXECUTE = 0x40;
+        static final int MANAGED = 0x20;
+        static final int MAY_EXECUTE = 0x40;
+        static final int COMMITTED_TO_EXECUTE = 0x80;
         static final int COMMITTED_AND_EXECUTES = MAY_EXECUTE | COMMITTED_TO_EXECUTE;
-        static final int INTERNAL_STATUS_FLAGS_SHIFT = 7;
-        static final int HAS_DEPS = 0x80; // deps and executeAt (maybe not committed)
-        static final int HAS_EXECUTE_AT = 0x100;
+        static final int INTERNAL_STATUS_FLAGS_SHIFT = 8;
+        static final int STATUS_OVERRIDES_MASK = 0x3; // HAS_DEPS and HAS_EXECUTE_AT
+        static final int HAS_DEPS = 0x100; // deps and executeAt (maybe not committed)
+        static final int HAS_EXECUTE_AT = 0x200;
         static final int DEPS_KNOWN_UNTIL_EXECUTE_AT = 0x400;
         static final int HAS_BALLOT = 0x800;
         static final int SUMMARY_STATUS_ORDINAL_MASK = 0xF;
@@ -487,7 +491,7 @@ public class CommandsForKey extends CommandsForKeyUpdate
 
         public int statusFlags()
         {
-            return (encodedStatus >>> INTERNAL_STATUS_FLAGS_SHIFT) & 0x7;
+            return (encodedStatus >>> INTERNAL_STATUS_FLAGS_SHIFT) & STATUS_OVERRIDES_MASK;
         }
 
         public boolean isDurablyCommitted()
@@ -567,6 +571,16 @@ public class CommandsForKey extends CommandsForKeyUpdate
         public InternalStatus status()
         {
             return InternalStatus.get(internalStatusOrdinal());
+        }
+
+        public int statusId()
+        {
+            return ORDINAL_TO_ID[internalStatusOrdinal()];
+        }
+
+        public boolean hasHighId()
+        {
+            return (HAS_HIGH_ID & (1L << internalStatusOrdinal())) != 0;
         }
 
         public SummaryStatus summaryStatus()
@@ -871,32 +885,40 @@ public class CommandsForKey extends CommandsForKeyUpdate
 
     public enum InternalStatus
     {
-        TRANSITIVE                             (SummaryStatus.NOT_DIRECTLY_WITNESSED, false, false, false, false),
-        TRANSITIVE_VISIBLE                     (SummaryStatus.NOT_DIRECTLY_WITNESSED, false, false, false, false),
-        PREACCEPTED_WITHOUT_DEPS               (SummaryStatus.PREACCEPTED,            false, false, true,  false),
-        PREACCEPTED_WITH_DEPS                  (SummaryStatus.PREACCEPTED,            false, true,  true,  false),
-        PREACCEPTED_COORD_NO_FAST_COMMIT       (SummaryStatus.PREACCEPTED,            false, false, true,  false),
-        NOTACCEPTED                            (SummaryStatus.NOTACCEPTED,            false, false, true,  false),
+        TRANSITIVE                             ( 0, SummaryStatus.NOT_DIRECTLY_WITNESSED, false, false, false, false),
+        TRANSITIVE_VISIBLE                     ( 1, SummaryStatus.NOT_DIRECTLY_WITNESSED, false, false, false, false),
+        PREACCEPTED_WITHOUT_DEPS               ( 2, SummaryStatus.PREACCEPTED,            false, false, true,  false),
+        PREACCEPTED_WITH_DEPS                  ( 3, SummaryStatus.PREACCEPTED,            false, true,  true,  false),
+        PREACCEPTED_COORD                      ( 4, SummaryStatus.PREACCEPTED,            false, false, true,  false),
+        PREACCEPTED_COORD_RECOVERY             (16, SummaryStatus.PREACCEPTED,            false, false, true,  false),
+        NOTACCEPTED                            ( 5, SummaryStatus.NOTACCEPTED,            false, false, true,  false),
         // note that while ACCEPTED does not require executeAt for dependencies, it does require executeAt for computing the earlierWait collection for recovery
-        ACCEPTED                               (SummaryStatus.ACCEPTED,               true,  true,  true,  false),
-        COMMITTED                              (SummaryStatus.COMMITTED,              true,  true,  true,  true),
-        STABLE                                 (SummaryStatus.STABLE,                 true,  true,  false, true),
+        ACCEPTED                               ( 6, SummaryStatus.ACCEPTED,               true,  true,  true,  false),
+        // the privileged coordinator's own proposal (medium or slow path); it computed its own deps, so they are known until executeAt (see KnownDeps.DepsProposedFromCoordinator)
+        // TODO (required): confirm flags once the privileged coordinator accept path is implemented
+        ACCEPTED_COORD                         (15, SummaryStatus.ACCEPTED,               true,  true,  true,  false, true,  false),
+        ACCEPTED_COORD_RECOVERY                (17, SummaryStatus.ACCEPTED,               true,  true,  true,  false, true,  false),
+        COMMITTED                              ( 7, SummaryStatus.COMMITTED,              true,  true,  true,  true),
+        STABLE                                 ( 8, SummaryStatus.STABLE,                 true,  true,  false, true),
         // TODO (expected): do not encode missing collection for APPLIED transactions,
         //  as anything they should have witnessed can be treated as supersedingRejected
         //  NOTE: this only applies for transactions we execute. We need a new state for transactions
         //  that have been APPLIED but we don't execute as we want to retain the missing collection there.
-        APPLIED_NOT_DURABLE                    (APPLIED,                              true, true, false, true),
-        APPLIED_DURABLE                        (APPLIED,                              true, true, false, true, true),
-        APPLIED_NOT_EXECUTED /*(reserved)*/    (APPLIED,                              true, true, false, true),
-        INVALIDATED                            (SummaryStatus.INVALIDATED,            false,false,false, false),
-        ERASED                                 (SummaryStatus.NONE,                   false,false,false, false),
-        PRUNED                                 (SummaryStatus.NONE,                   false,false,false, false),
+        APPLIED_NOT_DURABLE                    ( 9, APPLIED,                              true, true, false, true),
+        APPLIED_DURABLE                        (10, APPLIED,                              true, true, false, true, true),
+        APPLIED_NOT_EXECUTED /*(reserved)*/    (11, APPLIED,                              true, true, false, true),
+        INVALIDATED                            (12, SummaryStatus.INVALIDATED,            false,false,false, false),
+        ERASED                                 (13, SummaryStatus.NONE,                   false,false,false, false),
+        PRUNED                                 (14, SummaryStatus.NONE,                   false,false,false, false), // pruned is not currently serialized, but perhaps we should support it efficiently
         ;
 
         static final InternalStatus[] FROM_SAVE_STATUS = new InternalStatus[SaveStatus.values().length];
         static final InternalStatus[] FROM_SAVE_STATUS_FILTERED = new InternalStatus[SaveStatus.values().length];
         static final InternalStatus[] VALUES = values();
+        static final InternalStatus[] BY_ID;
         static final SummaryStatus[] TO_SUMMARY_STATUS;
+        static final byte[] ORDINAL_TO_ID;
+        static final long HAS_HIGH_ID;
 
         private static void putFromSaveStatus(SaveStatus from, InternalStatus to)
         {
@@ -914,10 +936,16 @@ public class CommandsForKey extends CommandsForKeyUpdate
         {
             putFromSaveStatus(SaveStatus.PreAccepted, PREACCEPTED_WITHOUT_DEPS);
             putFromSaveStatus(SaveStatus.PreAcceptedWithVote, PREACCEPTED_WITHOUT_DEPS);
+            putFromSaveStatus(SaveStatus.PreAcceptedPrivCoord, PREACCEPTED_COORD);
+            putFromSaveStatus(SaveStatus.PreAcceptedPrivCoordRecovery, PREACCEPTED_COORD_RECOVERY);
             putFromSaveStatus(SaveStatus.PreAcceptedWithDeps, PREACCEPTED_WITH_DEPS);
+            // TODO (required): FastAcceptedPrivCoord is not wired up and may require its own state here
+            putFromSaveStatus(SaveStatus.FastAcceptedPrivCoord, PREACCEPTED_COORD);
             putFromSaveStatus(SaveStatus.AcceptedInvalidate, NOTACCEPTED);
             putFromSaveStatus(SaveStatus.AcceptedInvalidateWithDefinition, NOTACCEPTED);
             putFromSaveStatus(SaveStatus.AcceptedMedium, ACCEPTED);
+            putFromSaveStatus(SaveStatus.AcceptedPrivCoord, ACCEPTED_COORD);
+            putFromSaveStatus(SaveStatus.AcceptedPrivCoordRecovery, ACCEPTED_COORD_RECOVERY);
             putFromSaveStatus(SaveStatus.AcceptedMediumWithDefinition, ACCEPTED);
             putFromSaveStatus(SaveStatus.AcceptedMediumWithDefAndVote, ACCEPTED);
             putFromSaveStatus(SaveStatus.AcceptedSlow, ACCEPTED);
@@ -947,29 +975,63 @@ public class CommandsForKey extends CommandsForKeyUpdate
             putFromSaveStatus(SaveStatus.Vestigial, ERASED);
             putFromSaveStatus(SaveStatus.Invalidated, INVALIDATED);
             for (SaveStatus saveStatus : SaveStatus.values())
-                Invariants.require(FROM_SAVE_STATUS[saveStatus.ordinal()] != null || saveStatus.is(Status.NotDefined));
+            {
+                InternalStatus status = FROM_SAVE_STATUS[saveStatus.ordinal()];
+                if (status == null) Invariants.require(saveStatus.is(Status.NotDefined));
+                else if (FROM_SAVE_STATUS_FILTERED[saveStatus.ordinal()] != null)
+                {
+                    // intermediate mappings (e.g. Truncated->APPLIED_DURABLE) retain what we knew prior to truncation, not what the SaveStatus knows
+                    Invariants.require(status.hasDeps == saveStatus.known.hasAnyDeps(), "%s (%s) and %s disagree on whether deps are known", saveStatus, saveStatus.known.deps(), status);
+                    Invariants.require(status.depsKnownUntilExecuteAt == saveStatus.known.deps().isKnownUntilExecuteAt(), "%s (%s) and %s disagree on whether deps are known until executeAt", saveStatus, saveStatus.known.deps(), status);
+                }
+            }
 
             SummaryStatus[] summaryStatuses = SummaryStatus.values();
             TO_SUMMARY_STATUS = Arrays.copyOf(summaryStatuses, summaryStatuses.length + 1);
+
+            Invariants.require(VALUES.length <= 31, "HAS_HIGH_ID encoding assumes no more than 31 statuses");
+            BY_ID = new InternalStatus[VALUES.length];
+            ORDINAL_TO_ID = new byte[VALUES.length];
+            long hasHighId = 0L;
+            for (InternalStatus status : VALUES)
+            {
+                Invariants.require(BY_ID[status.id] == null, "Duplicate InternalStatus id %d", status.id);
+                BY_ID[status.id] = status;
+                ORDINAL_TO_ID[status.ordinal()] = (byte)status.id;
+                hasHighId |= (status.id >= 16 ? 1 : 0) << status.ordinal();
+            }
+            HAS_HIGH_ID = hasHighId;
+            // we have 5 bits to encode the status in memory (TxnInfo); Serialize uses 4 bits unless an id >= 16 is present
+            Invariants.require(VALUES.length <= TxnInfo.INTERNAL_STATUS_ORDINAL_MASK + 1);
         }
 
         public static final int HAS_DEPS = 1;
         public static final int HAS_EXECUTE_AT = 2;
 
+        public final int id;
         public final SummaryStatus summaryStatus;
         public final boolean hasExecuteAt;
         public final boolean hasDeps;
         public final boolean hasBallot;
         public final boolean isCommittedToExecute;
+        public final boolean depsKnownUntilExecuteAt;
         public final int flags;
         final int txnInfoEncoded;
 
-        InternalStatus(SummaryStatus summaryStatus, boolean hasExecuteAt, boolean hasDeps, boolean hasBallot, boolean isCommittedToExecute)
+        InternalStatus(int id, SummaryStatus summaryStatus, boolean hasExecuteAt, boolean hasDeps, boolean hasBallot, boolean isCommittedToExecute)
         {
-            this(summaryStatus, hasExecuteAt, hasDeps, hasBallot, isCommittedToExecute, false);
+            this(id, summaryStatus, hasExecuteAt, hasDeps, hasBallot, isCommittedToExecute, false);
         }
-        InternalStatus(SummaryStatus summaryStatus, boolean hasExecuteAt, boolean hasDeps, boolean hasBallot, boolean isCommittedToExecute, boolean isDurablyCommitted)
+        InternalStatus(int id, SummaryStatus summaryStatus, boolean hasExecuteAt, boolean hasDeps, boolean hasBallot, boolean isCommittedToExecute, boolean isDurablyCommitted)
         {
+            this(id, summaryStatus, hasExecuteAt, hasDeps, hasBallot, isCommittedToExecute, isCommittedToExecute, isDurablyCommitted);
+        }
+        InternalStatus(int id, SummaryStatus summaryStatus, boolean hasExecuteAt, boolean hasDeps, boolean hasBallot, boolean isCommittedToExecute, boolean depsKnownUntilExecuteAt, boolean isDurablyCommitted)
+        {
+            Invariants.require(!isCommittedToExecute || depsKnownUntilExecuteAt);
+            Invariants.require(!depsKnownUntilExecuteAt || (hasDeps && hasExecuteAt));
+            this.id = id;
+            this.depsKnownUntilExecuteAt = depsKnownUntilExecuteAt;
             this.summaryStatus = summaryStatus;
             this.hasBallot = hasBallot;
             this.hasExecuteAt = hasExecuteAt;
@@ -1006,7 +1068,7 @@ public class CommandsForKey extends CommandsForKeyUpdate
 
         boolean depsKnownUntilExecuteAt()
         {
-            return isCommittedToExecute();
+            return depsKnownUntilExecuteAt;
         }
 
         int compareTo(SummaryStatus summaryStatus)
@@ -1037,20 +1099,23 @@ public class CommandsForKey extends CommandsForKeyUpdate
             return result;
         }
 
-        public static InternalStatus from(SafeCommandStore safeStore, Command command, boolean includeIntermediate)
+        public static InternalStatus from(Command command, boolean includeIntermediate)
         {
             SaveStatus saveStatus = command.saveStatus();
             InternalStatus status = (includeIntermediate ? FROM_SAVE_STATUS : FROM_SAVE_STATUS_FILTERED)[saveStatus.ordinal()];
             if (status == APPLIED_NOT_DURABLE && command.durability().isDurable())
                 status = APPLIED_DURABLE;
-            if (status == PREACCEPTED_WITH_DEPS && command.txnId().node.equals(safeStore.node().id()) && !Ballot.ZERO.equals(command.promised()))
-                status = PREACCEPTED_COORD_NO_FAST_COMMIT;
             return status;
         }
 
         public static InternalStatus get(int ordinal)
         {
             return VALUES[ordinal];
+        }
+
+        public static InternalStatus forId(int id)
+        {
+            return BY_ID[id];
         }
     }
 
@@ -1369,9 +1434,15 @@ public class CommandsForKey extends CommandsForKeyUpdate
 
             Timestamp executeAt = txn.executeAt;
             IsDep dep;
-            if (!txn.hasDeps() || (txn.depsKnownUntilExecuteAt() ? executeAt : txn).compareTo(testTxnId) <= 0)
+            if ((txn.depsKnownUntilExecuteAt() ? executeAt : txn).compareTo(testTxnId) <= 0)
             {
                 dep = NOT_ELIGIBLE;
+            }
+            else if (!txn.hasDeps())
+            {
+                if (txn.is(PREACCEPTED_COORD)) dep = IsDep.SELF_COORD;
+                else if (txn.is(PREACCEPTED_COORD_RECOVERY)) dep = IsDep.SELF_COORD_RECOVERY;
+                else dep = NOT_ELIGIBLE;
             }
             else
             {
@@ -1628,7 +1699,7 @@ public class CommandsForKey extends CommandsForKeyUpdate
     private CommandsForKeyUpdate update(SafeCommandStore safeStore, Command update, @Nullable LoadingPruned loading)
     {
         Invariants.require(manages(update.txnId()));
-        InternalStatus newStatus = from(safeStore, update, true);
+        InternalStatus newStatus = from(update, true);
         if (newStatus == null)
         {
             if (loading == null)

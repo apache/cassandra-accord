@@ -23,6 +23,7 @@ import java.util.Queue;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 
+import accord.utils.ThrowableSafety;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncResults;
 
@@ -47,9 +48,20 @@ class ConcurrencyControl implements BiConsumer<Object, Throwable>
             this.supplier = supplier;
         }
 
-        void start(ConcurrencyControl concurrencyControl)
+        boolean start(ConcurrencyControl concurrencyControl)
         {
-            supplier.get().invoke(result).begin(concurrencyControl);
+            AsyncChain<V> chain;
+            try
+            {
+                chain = supplier.get();
+            }
+            catch (Throwable t)
+            {
+                ThrowableSafety.safeFail(result, t);
+                return false;
+            }
+            chain.invoke(result).begin(concurrencyControl);
+            return true;
         }
     }
 
@@ -57,15 +69,20 @@ class ConcurrencyControl implements BiConsumer<Object, Throwable>
     public void accept(Object o, Throwable throwable)
     {
         Pending<?> next;
-        synchronized (this)
+        do
         {
-            if (inflight > 0) --inflight;
-            if (inflight >= maxConcurrency) return;
-            next = pending.poll();
-            if (next == null) return;
-            ++inflight;
-        }
-        next.start(this);
+            synchronized (this)
+            {
+                if (inflight > 0) --inflight;
+                if (inflight >= maxConcurrency)
+                    return;
+
+                next = pending.poll();
+                if (next == null)
+                    return;
+                ++inflight;
+            }
+        } while (!next.start(this));
     }
 
     public <V> AsyncChain<V> submit(Supplier<? extends AsyncChain<V>> supplier)
@@ -80,7 +97,18 @@ class ConcurrencyControl implements BiConsumer<Object, Throwable>
             }
             ++inflight;
         }
-        return supplier.get().invoke(this);
+
+        AsyncChain<V> chain;
+        try
+        {
+            chain = supplier.get();
+        }
+        catch (Throwable t)
+        {
+            accept(null, t); // release our slot
+            throw t;
+        }
+        return chain.invoke(this);
     }
 
     synchronized void setMaxConcurrency(int newMaxConcurrency)

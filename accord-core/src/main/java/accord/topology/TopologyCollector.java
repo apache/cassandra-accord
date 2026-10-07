@@ -164,9 +164,8 @@ abstract class TopologyCollector<C, K, T, E extends Exception>
         private static TxnId.FastPath merge(TxnId.FastPath a, TxnId.FastPath b)
         {
             if (a == null) return b;
-            if (a == Unoptimised || b == Unoptimised) return Unoptimised;
-            if (a == PrivilegedCoordinatorWithDeps || b == PrivilegedCoordinatorWithDeps) return PrivilegedCoordinatorWithDeps;
-            return PrivilegedCoordinatorWithoutDeps;
+            // we cannot safely support fast decisions across multiple local shards until we implement the full multi shard coordinator optimisation
+            return Unoptimised;
         }
 
         @Override

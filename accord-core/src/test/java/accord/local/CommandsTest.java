@@ -58,7 +58,7 @@ import org.slf4j.LoggerFactory;
 import static accord.Utils.listWriteTxn;
 import static accord.primitives.Txn.Kind.Write;
 import static accord.utils.Property.qt;
-import static accord.utils.Utils.addAll;
+import static accord.utils.ArrayUtils.concat;
 
 class CommandsTest
 {
@@ -75,7 +75,7 @@ class CommandsTest
             logger.info("Running with {} nodes and rf={}", nodes.size(), rf);
             Range[] prefix0 = PrefixedIntHashKey.ranges(0, nodes.size());
             Range[] prefix1 = PrefixedIntHashKey.ranges(1, nodes.size());
-            Range[] allRanges = addAll(prefix0, prefix1);
+            Range[] allRanges = concat(prefix0, prefix1);
 
             Topology initialTopology = TopologyUtils.topology(1, nodes, Ranges.of(allRanges), rf);
             Topology updatedTopology = TopologyUtils.topology(2, nodes, Ranges.of(prefix0), rf); // drop prefix1

@@ -62,11 +62,13 @@ import static accord.local.cfk.CommandsForKey.InternalStatus.PRUNED;
 import static accord.local.cfk.CommandsForKey.InternalStatus.TRANSITIVE;
 import static accord.local.cfk.CommandsForKey.InternalStatus.TRANSITIVE_VISIBLE;
 import static accord.local.cfk.CommandsForKey.NOT_LOADING_PRUNED;
+import static accord.local.cfk.CommandsForKey.NO_INFO;
 import static accord.local.cfk.CommandsForKey.NO_INFOS;
 import static accord.local.cfk.CommandsForKey.Unmanaged.Pending.APPLY;
 import static accord.local.cfk.CommandsForKey.Unmanaged.Pending.COMMIT;
 import static accord.local.cfk.CommandsForKey.executesIgnoringBootstrap;
 import static accord.local.cfk.CommandsForKey.manages;
+import static accord.local.cfk.CommandsForKey.managesExecution;
 import static accord.local.cfk.CommandsForKey.reportLinearizabilityViolation;
 import static accord.local.cfk.CommandsForKey.mayExecute;
 import static accord.local.cfk.Pruning.removeLoadingPruned;
@@ -1056,9 +1058,28 @@ class Updating
             if (toIndex < txnIds.size() && waitingTxnId.awaitsOnlyDeps())
                 effectiveExecutesAt = Timestamp.nonNullOrMax(effectiveExecutesAt, txnIds.get(txnIds.size() - 1));
 
-            // TODO (required): are there any other edge cases where we fail to propagate an executeAt we no longer know about due to bootstrap?
-            if (cfk.maxAppliedUnreadyWriteById >= 0) // propagate future executeAt that have been applied since readyAt (but whose txnId fall behind it)
-                effectiveExecutesAt = Timestamp.nonNullOrMax(effectiveExecutesAt, cfk.byId[cfk.maxAppliedUnreadyWriteById].executeAt);
+            {
+                // propagate future executeAt that have been applied since readyAt (but whose txnId fall behind it)
+                TxnId readyAt = cfk.readyAt();
+                if (readyAt != null && cfk.byId.length > 0 && cfk.byId[0].compareTo(readyAt) < 0)
+                {
+                    // TODO (required): are there any other edge cases where we fail to propagate an executeAt we no longer know about due to bootstrap?
+                    TxnInfo maxUnreadyApplied = cfk.maxAppliedUnreadyWriteById < 0 ? NO_INFO : cfk.byId[cfk.maxAppliedUnreadyWriteById];
+                    int ei = 0;
+                    while (ei < cfk.byId.length)
+                    {
+                        TxnInfo txn = cfk.byId[ei];
+                        if (txn.compareTo(readyAt) >= 0)
+                            break;
+
+                        ei++;
+                        if (txn.is(APPLIED) && managesExecution(txn) && waitingTxnId.witnesses(txn) && txn.executeAt.compareTo(maxUnreadyApplied.executeAt) > 0)
+                            maxUnreadyApplied = txn;
+                    }
+
+                    effectiveExecutesAt = Timestamp.nonNullOrMax(effectiveExecutesAt, maxUnreadyApplied.executeAt);
+                }
+            }
 
             // TODO (required): document why we can restrict this test to sync points
             if (waitingToApply && waitingTxnId.isSyncPoint() && Pruning.isAnyPredecessorWaitingOnPruned(cfk.loadingPruned, waitingTxnId))

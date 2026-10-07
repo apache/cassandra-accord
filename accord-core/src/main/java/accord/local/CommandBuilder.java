@@ -201,11 +201,16 @@ public class CommandBuilder
             case PreAccepted:
             case PreAcceptedWithDeps:
             case PreAcceptedWithVote:
+            case PreAcceptedPrivCoord:
+            case PreAcceptedPrivCoordRecovery:
+            case FastAcceptedPrivCoord:
                 return Command.PreAccepted.preaccepted(txnId, saveStatus, durability, participants, promised, executeAt, partialTxn, partialDeps);
             case AcceptedInvalidate:
                 return Command.NotAcceptedWithoutDefinition.notAccepted(txnId, saveStatus, durability, participants, promised, acceptedOrCommitted, partialDeps);
             case AcceptedInvalidateWithDefinition:
             case AcceptedMedium:
+            case AcceptedPrivCoord:
+            case AcceptedPrivCoordRecovery:
             case AcceptedMediumWithDefinition:
             case AcceptedMediumWithDefAndVote:
             case AcceptedSlow:

@@ -64,7 +64,6 @@ import static accord.impl.IntKey.routing;
 import static accord.primitives.Routable.Domain.Key;
 import static accord.primitives.Txn.Kind.Write;
 import static accord.topology.SelectShards.ALL;
-import static accord.utils.Utils.listOf;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class PreAcceptTest
@@ -72,7 +71,7 @@ public class PreAcceptTest
     private static final Id ID1 = id(1);
     private static final Id ID2 = id(2);
     private static final Id ID3 = id(3);
-    private static final List<Id> IDS = listOf(ID1, ID2, ID3);
+    private static final List<Id> IDS = List.of(ID1, ID2, ID3);
     private static final Topology TOPOLOGY = TopologyFactory.toTopology(IDS, 3, IntKey.range(0, 100));
     private static final Ranges FULL_RANGE = Ranges.single(IntKey.range(routing(Integer.MIN_VALUE), routing(Integer.MAX_VALUE)));
 

@@ -29,7 +29,6 @@ import accord.api.Data;
 import accord.api.LocalListeners;
 import accord.api.LocalListeners.Registered;
 import accord.api.Timeouts;
-import accord.api.Timeouts.RegisteredTimeout;
 import accord.coordinate.ExecuteFlag.ExecuteFlags;
 import accord.local.Command;
 import accord.local.Command.Committed;
@@ -39,6 +38,7 @@ import accord.local.Node;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.primitives.SaveStatus;
+import accord.primitives.Status;
 import accord.local.StoreParticipants;
 import accord.primitives.PartialTxn;
 import accord.primitives.Participants;
@@ -147,8 +147,6 @@ public abstract class ReadData extends AbstractRequest<Participants<?>, ReadData
     transient int waitingOnCount;
     transient Ranges unavailable;
     transient Int2ObjectHashMap<LocalListeners.Registered> listeners = new Int2ObjectHashMap<>();
-    transient Cancellable cancel;
-    transient RegisteredTimeout timeout;
 
     public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Participants<?> scope, @Nullable Txn txn, @Nullable Timestamp executeAt, long executeAtEpoch)
     {
@@ -230,26 +228,9 @@ public abstract class ReadData extends AbstractRequest<Participants<?>, ReadData
         this.node = on;
         waitingOn = new IntHashSet();
         reading = new IntHashSet();
-        Cancellable cancel = submit();
-        RegisteredTimeout timeout = expiresAt <= 0 ? null : node.timeouts().registerAt(this, expiresAt, MICROSECONDS);
-        synchronized (this)
-        {
-            switch (state)
-            {
-                case PENDING:
-                    this.cancel = cancel;
-                    this.timeout = timeout;
-                    return cancel;
-                case PENDING_OBSOLETE:
-                case OBSOLETE:
-                    timeout = null;
-                case RETURNED:
-                    cancel = null;
-            }
-        }
-        if (cancel != null) cancel.cancel();
-        if (timeout != null) timeout.cancel();
-        return null;
+        Cancellable work = submit();
+        setupOnce(work, expiresAt <= 0 ? null : node.timeouts().registerAt(this, expiresAt, MICROSECONDS));
+        return this;
     }
 
     protected boolean mayFastExecute() { return false; }
@@ -306,7 +287,7 @@ public abstract class ReadData extends AbstractRequest<Participants<?>, ReadData
             if (logger.isTraceEnabled())
                 logger.trace("{}: setting up read with status {} on {}", txnId, status, safeStore);
 
-            switch (actionForStatus(status))
+            switch (actionFor(command))
             {
                 default: throw new AssertionError();
                 case WAIT:
@@ -402,12 +383,32 @@ public abstract class ReadData extends AbstractRequest<Participants<?>, ReadData
         }
     }
 
-    protected final StoreAction actionForStatus(SaveStatus status)
+    protected final StoreAction actionFor(Command command)
     {
+        SaveStatus saveStatus = command.saveStatus;
         ExecuteOn executeOn = executeOn();
-        if (status.compareTo(executeOn.min) < 0) return StoreAction.WAIT;
-        if (status.compareTo(executeOn.max) > 0) return StoreAction.OBSOLETE;
+        if (saveStatus.compareTo(executeOn.min) < 0) return StoreAction.WAIT;
+        if (saveStatus.compareTo(executeOn.max) > 0 && unsafeToExecute(command)) return StoreAction.OBSOLETE;
         return StoreAction.EXECUTE;
+    }
+
+    /**
+     * Even if we have already applied, we may still be able to safely reply to the coordinator if we don't perform any read.
+     * This may provide enough information to the coordinator to issue its Result and Writes, by providing only our uniqueHlc.
+     * This is particularly useful for replica execution that may race locally with a read from the coordinator.
+     */
+    private boolean unsafeToExecute(Command command)
+    {
+        if (!txnId.is(Write))
+            return true;
+
+        // we must collect uniqueHlc
+        if (!command.hasBeen(Status.PreApplied) || command.hasBeen(Status.Truncated))
+            return true;
+
+        PartialTxn txn = partialTxn != null ? partialTxn : command.partialTxn();
+        Participants<?> executes = command.participants().executes();
+        return txn == null || executes == null || txn.read().keys().intersects(executes);
     }
 
     @Override
@@ -427,9 +428,10 @@ public abstract class ReadData extends AbstractRequest<Participants<?>, ReadData
                 return false;
 
             SaveStatus saveStatus = command.saveStatus();
-            switch (actionForStatus(saveStatus))
+            StoreAction action = actionFor(command);
+            switch (action)
             {
-                default: throw new AssertionError("Unhandled Action: " + actionForStatus(saveStatus));
+                default: throw new UnhandledEnum(action);
                 case WAIT:
                     if (flags.contains(NO_WAIT) && saveStatus.compareTo(SaveStatus.Stable) >= 0)
                     {
@@ -473,7 +475,6 @@ public abstract class ReadData extends AbstractRequest<Participants<?>, ReadData
     public void accept(CommitOrReadNack reply, Throwable failure)
     {
         partialTxn = null;
-        cancel = null;
         if (!isPending() && reply == null && failure == null)
             return; // cancelled
 
@@ -678,22 +679,34 @@ public abstract class ReadData extends AbstractRequest<Participants<?>, ReadData
             case PENDING:
                 state = State.RETURNED;
                 reply(unavailable, data, uniqueHlc);
-                return clearUnsafe();
+                Cancellable listeners = clearUnsafe();
+                Cancellable timeout = ensureDone();
+                if (listeners == null || timeout == null)
+                    return listeners != null ? listeners : timeout;
+                return () -> { timeout.cancel(); listeners.cancel(); };
         }
     }
 
-    protected boolean cancel()
+    @Override
+    protected boolean tryCancel(boolean isTimeout)
     {
+        Pending cancelled;
         Cancellable clear;
         synchronized (this)
         {
             if (state.compareTo(State.PENDING_OBSOLETE) > 0)
                 return false;
 
+            cancelled = trySetCancelled();
+            if (cancelled.isDone())
+                return false;
+
             state = State.OBSOLETE;
             clear = clearUnsafe();
         }
+
         cleanup(clear);
+        cleanupOnFailure(isTimeout ? cancelled.cancel : cancelled);
         return true;
     }
 
@@ -702,48 +715,30 @@ public abstract class ReadData extends AbstractRequest<Participants<?>, ReadData
         return this.state == State.PENDING;
     }
 
+    void cleanupWaitingOnExclusive(IntHashSet waitingOn)
+    {
+    }
+
     @Nullable Cancellable clearUnsafe()
     {
         Invariants.require(state != State.PENDING);
-        Cancellable cancelSubmission = cancel;
-        RegisteredTimeout cancelTimeout = timeout;
         Int2ObjectHashMap<LocalListeners.Registered> cancelListeners = listeners;
-        cancel = null;
-        timeout = null;
         listeners = null;
+        cleanupWaitingOnExclusive(waitingOn);
         waitingOn.clear();
         reading.clear();
         data = null;
         unavailable = null;
 
-        if (cancelListeners == null && cancelTimeout == null)
+        if (cancelListeners == null)
             return null;
 
-        return () -> {
-            if (cancelSubmission != null)
-                cancelSubmission.cancel();
-            if (cancelTimeout != null)
-                cancelTimeout.cancel();
-            if (cancelListeners != null)
-                cancelListeners.forEach((i, r) -> r.cancel());
-        };
-    }
-
-    private static void cleanup(@Nullable Cancellable cancel)
-    {
-        if (cancel != null)
-            cancel.cancel();
+        return () -> cancelListeners.forEach((i, r) -> r.cancel());
     }
 
     public final void timeout()
     {
-        timeoutInternal();
-    }
-
-    protected boolean timeoutInternal()
-    {
-        timeout = null;
-        return cancel();
+        tryTimeout();
     }
 
     public int stripe()
@@ -753,7 +748,7 @@ public abstract class ReadData extends AbstractRequest<Participants<?>, ReadData
 
     void onFailure(CommitOrReadNack failReply, Throwable throwable)
     {
-        if (!cancel())
+        if (!tryCancel())
             return;
 
         if (throwable != null)

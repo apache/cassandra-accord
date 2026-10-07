@@ -96,7 +96,7 @@ public class GetLatestDeps extends RouteRequest.WithUnsynced<ReplyList<GetLatest
         {
             if (command.promised().compareTo(ballot) > 0)
                 return GetLatestDepsReply.NACK;
-            command = safeCommand.updatePromised(ballot);
+            command = safeCommand.updatePromised(safeStore, ballot);
         }
 
         PartialDeps coordinatedDeps = command.partialDeps();

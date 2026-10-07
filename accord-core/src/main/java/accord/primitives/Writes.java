@@ -25,6 +25,7 @@ import java.util.Objects;
 import accord.api.Write;
 import accord.local.CommandStore;
 import accord.local.SafeCommandStore;
+import accord.utils.Invariants;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 
@@ -34,11 +35,13 @@ public class Writes
 {
     public final TxnId txnId;
     public final Timestamp executeAt;
-    public final Seekables<?, ?> keys;
+    @Deprecated
+    public final Seekables<?, ?> keys; // maintained for wire-compatibility with cassandra-6.0-alpha2 only;
     @Nullable public final Write write;
 
     public Writes(TxnId txnId, Timestamp executeAt, Seekables<?, ?> keys, @Nullable Write write)
     {
+        Invariants.require(write != null || keys.isEmpty());
         this.txnId = txnId;
         this.executeAt = executeAt;
         this.keys = keys;
@@ -51,18 +54,27 @@ public class Writes
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         Writes writes = (Writes) o;
-        return txnId.equals(writes.txnId) && executeAt.equals(writes.executeAt) && keys.equals(writes.keys) && Objects.equals(write, writes.write);
-    }
-
-    public boolean isEmpty()
-    {
-        return keys.isEmpty();
+        return txnId.equals(writes.txnId) && executeAt.equals(writes.executeAt) && Objects.equals(write, writes.write);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(txnId, executeAt, keys, write);
+        return Objects.hash(txnId, executeAt, write);
+    }
+
+    public Seekables<?, ?> appliesTo(@Nullable PartialTxn txn)
+    {
+        if (write == null)
+            return Keys.EMPTY;
+
+        Invariants.require(txn != null && txn.update() != null, "Cannot apply %s without the transaction definition", this);
+        return txn.update().keys();
+    }
+
+    public boolean appliesToAny(@Nullable PartialTxn txn, Participants<?> executes)
+    {
+        return write != null && !executes.isEmpty() && appliesTo(txn).intersects(executes);
     }
 
     public AsyncChain<Void> apply(SafeCommandStore safeStore, Participants<?> executes, PartialTxn txn)
@@ -85,7 +97,7 @@ public class Writes
         if (write == null || executes.isEmpty())
             return AsyncChains.success(null);
 
-        Seekables<?, ?> keys = this.keys.overlapping(executes);
+        Seekables<?, ?> keys = appliesTo(txn).overlapping(executes);
         int count = keys.size();
         switch (count)
         {

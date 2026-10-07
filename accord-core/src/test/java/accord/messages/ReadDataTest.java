@@ -45,10 +45,9 @@ import accord.impl.mock.MockCluster;
 import accord.local.CheckedCommands;
 import accord.local.Command;
 import accord.local.CommandStore;
-import accord.local.Node;
 import accord.local.ExecutionContext;
+import accord.local.Node;
 import accord.local.SafeCommand;
-import accord.primitives.SaveStatus;
 import accord.local.StoreParticipants;
 import accord.primitives.Ballot;
 import accord.primitives.FullRoute;
@@ -58,6 +57,7 @@ import accord.primitives.PartialTxn;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.Route;
+import accord.primitives.SaveStatus;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
@@ -77,7 +77,6 @@ import static accord.Utils.createNode;
 import static accord.Utils.id;
 import static accord.primitives.Routable.Domain.Key;
 import static accord.utils.Invariants.illegalState;
-import static accord.utils.Utils.listOf;
 import static accord.utils.async.AsyncChainUtils.getUninterruptibly;
 import static org.mockito.ArgumentMatchers.any;
 
@@ -86,7 +85,7 @@ class ReadDataTest
     private static final Node.Id ID1 = id(1);
     private static final Node.Id ID2 = id(2);
     private static final Node.Id ID3 = id(3);
-    private static final List<Node.Id> IDS = listOf(ID1, ID2, ID3);
+    private static final List<Node.Id> IDS = List.of(ID1, ID2, ID3);
     private static final Range RANGE = IntKey.range(0, 100);
     private static final Ranges RANGES = Ranges.single(RANGE);
     private static final Topology TOPOLOGY = TopologyFactory.toTopology(IDS, 3, RANGE);
@@ -106,6 +105,7 @@ class ReadDataTest
         Query query = Mockito.mock(Query.class);
         Update update = Mockito.mock(Update.class);
         Mockito.when(update.intersecting(any())).thenReturn(update);
+        Mockito.doReturn(keys).when(update).keys(); // Writes applies the keys of our own Update
 
         Txn txn = new Txn.InMemory(keys, read, query, update);
         PartialTxn partialTxn = txn.intersecting(RANGES, true);

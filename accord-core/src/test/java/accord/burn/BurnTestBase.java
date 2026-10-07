@@ -62,14 +62,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.api.Agent;
+import accord.api.AsyncExecutor;
 import accord.api.Journal;
 import accord.api.Key;
 import accord.api.OwnershipEventListener;
 import accord.api.ProtocolModifiers;
 import accord.api.ProtocolModifiers.Configure;
 import accord.api.ProtocolModifiers.CoordinatorBacklogExecution;
-import accord.api.ProtocolModifiers.ReplicaExecution;
 import accord.api.ProtocolModifiers.FastExecution;
+import accord.api.ProtocolModifiers.ReplicaExecution;
 import accord.api.Scheduler;
 import accord.burn.random.FrequentLargeRange;
 import accord.impl.MessageListener;
@@ -108,6 +109,7 @@ import accord.primitives.TxnId.MediumPath;
 import accord.topology.Shard;
 import accord.topology.Topology;
 import accord.topology.TopologyRandomizer;
+import accord.utils.ArrayUtils;
 import accord.utils.DefaultRandom;
 import accord.utils.Gen;
 import accord.utils.Gens;
@@ -117,8 +119,6 @@ import accord.utils.Threads;
 import accord.utils.TinyEnumSet;
 import accord.utils.TriFunction;
 import accord.utils.UnhandledEnum;
-import accord.utils.Utils;
-import accord.api.AsyncExecutor;
 import accord.utils.async.TimeoutUtils;
 import accord.verify.StrictSerializabilityVerifier;
 import accord.verify.Verifier;
@@ -136,7 +136,6 @@ import static accord.impl.list.ListResult.Status.RecoveryApplied;
 import static accord.impl.list.ListResult.Status.Truncated;
 import static accord.primitives.Txn.Kind.EphemeralRead;
 import static accord.primitives.Txn.Kind.Write;
-import static accord.utils.Utils.toArray;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 public class BurnTestBase
@@ -315,9 +314,9 @@ public class BurnTestBase
                 if (bias != 0)
                     splitsToPick = Arrays.copyOf(splits, splits.length);
                 if (bias == 1)
-                    Utils.reverse(splitsToPick);
+                    ArrayUtils.reverse(splitsToPick);
                 else if (bias == 2)
-                    Utils.shuffle(splitsToPick, rs);
+                    ArrayUtils.shuffle(splitsToPick, rs);
                 Gen.IntGen zipf = Gens.pickZipf(splitsToPick);
                 return (prefixes) -> randomRange(rs, prefixes, () -> {
                     int value = zipf.nextInt(rs);
@@ -482,7 +481,7 @@ public class BurnTestBase
         Arrays.sort(prefixes);
 
         int[] keys = IntStream.range(0, keyCount).toArray();
-        Packet[] requests = toArray(generate(random, listener, Function.identity(), clients, nodes, keys, operations), Packet[]::new);
+        Packet[] requests = generate(random, listener, Function.identity(), clients, nodes, keys, operations).toArray(Packet[]::new);
         int[] starts = new int[requests.length];
         Packet[] replies = new Packet[requests.length];
 
@@ -583,7 +582,7 @@ public class BurnTestBase
         Map<MessageType, Stats> messageStatsMap;
         try
         {
-            messageStatsMap = Cluster.run(toArray(nodes, Id[]::new), newPrefixes, listener, () -> queue,
+            messageStatsMap = Cluster.run(nodes.toArray(Id[]::new), newPrefixes, listener, () -> queue,
                                           id -> globalExecutor,
                                           agentSupplier,
                                           queue::checkFailures,

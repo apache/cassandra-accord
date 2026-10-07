@@ -40,7 +40,7 @@ import static accord.local.cfk.Serialize.selectFlagHistory;
 import static accord.local.cfk.Serialize.updateFlagHistory;
 import static accord.primitives.Routable.Domain.Range;
 import static accord.primitives.TxnId.Cardinality.Any;
-import static accord.utils.Utils.shuffle;
+import static accord.utils.ArrayUtils.shuffle;
 
 // this class is mostly tested in C* integration due to having concrete serializers to work with
 public class SerializeTest

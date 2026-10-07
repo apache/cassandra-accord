@@ -224,9 +224,9 @@ public class ExecuteEphemeralRead extends ReadCoordinator<Result, ReadReply>
         }
 
         @Override
-        protected boolean timeoutInternal()
+        protected boolean tryTimeout()
         {
-            if (!super.timeoutInternal())
+            if (!super.tryTimeout())
                 return false;
 
             // TODO (desired): if we fail to commit locally we can submit a slow/medium path request

@@ -215,7 +215,12 @@ public class FastPathTracker extends PreAcceptTracker<FastPathTracker.FastPathSh
     int waitingOnMediumPathSuccess; // if we reach zero, we have succeeded on the medium path for every shard
     public FastPathTracker(Topologies topologies, TxnId txnId)
     {
-        super(topologies, FastPathShardTracker[]::new, txnId.fastPath(), FastPathTracker::create);
+        this(topologies, txnId.fastPath());
+    }
+
+    public FastPathTracker(Topologies topologies, FastPath fastPath)
+    {
+        super(topologies, FastPathShardTracker[]::new, fastPath, FastPathTracker::create);
         this.waitingOnFastPathSuccess = this.waitingOnMediumPathSuccess = super.waitingOnShards;
     }
 

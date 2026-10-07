@@ -23,40 +23,41 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 
 import accord.local.CommandSummaries.SummaryStatus;
-import accord.primitives.Known.PrivilegedVote;
 import accord.primitives.Known.Definition;
 import accord.primitives.Known.KnownDeps;
 import accord.primitives.Known.KnownExecuteAt;
 import accord.primitives.Known.KnownRoute;
 import accord.primitives.Known.Outcome;
+import accord.primitives.Known.PrivilegedVote;
 import accord.primitives.Status.Phase;
-import accord.utils.BitUtils;
+import accord.utils.Invariants;
 
 import static accord.local.CommandSummaries.SummaryStatus.ACCEPTED;
 import static accord.local.CommandSummaries.SummaryStatus.APPLIED;
-import static accord.primitives.Known.PrivilegedVote.NoVote;
-import static accord.primitives.Known.PrivilegedVote.VotePreAccept;
-import static accord.primitives.Known.KnownDeps.DepsFromCoordinator;
-import static accord.primitives.Known.KnownDeps.DepsProposedFixed;
-import static accord.primitives.Known.Outcome.Apply;
-import static accord.primitives.Known.Outcome.WasApply;
-import static accord.primitives.SaveStatus.LocalExecution.CleaningUp;
-import static accord.primitives.SaveStatus.LocalExecution.NotReady;
 import static accord.primitives.Known.Definition.DefinitionErased;
 import static accord.primitives.Known.Definition.DefinitionKnown;
 import static accord.primitives.Known.Definition.DefinitionUnknown;
 import static accord.primitives.Known.KnownDeps.DepsErased;
+import static accord.primitives.Known.KnownDeps.DepsFromCoordinator;
 import static accord.primitives.Known.KnownDeps.DepsKnown;
 import static accord.primitives.Known.KnownDeps.DepsProposed;
+import static accord.primitives.Known.KnownDeps.DepsProposedFixed;
+import static accord.primitives.Known.KnownDeps.DepsProposedFromCoordinator;
 import static accord.primitives.Known.KnownDeps.DepsUnknown;
+import static accord.primitives.Known.KnownExecuteAt.ApplyAtKnown;
 import static accord.primitives.Known.KnownExecuteAt.ExecuteAtErased;
 import static accord.primitives.Known.KnownExecuteAt.ExecuteAtKnown;
-import static accord.primitives.Known.KnownExecuteAt.ApplyAtKnown;
 import static accord.primitives.Known.KnownExecuteAt.ExecuteAtProposed;
 import static accord.primitives.Known.KnownExecuteAt.ExecuteAtUnknown;
 import static accord.primitives.Known.KnownRoute.FullRoute;
 import static accord.primitives.Known.KnownRoute.MaybeRoute;
+import static accord.primitives.Known.Outcome.Apply;
 import static accord.primitives.Known.Outcome.Unknown;
+import static accord.primitives.Known.Outcome.WasApply;
+import static accord.primitives.Known.PrivilegedVote.NoVote;
+import static accord.primitives.Known.PrivilegedVote.VotePreAccept;
+import static accord.primitives.SaveStatus.LocalExecution.CleaningUp;
+import static accord.primitives.SaveStatus.LocalExecution.NotReady;
 import static accord.primitives.SaveStatus.LocalExecution.ReadyToExclude;
 import static accord.primitives.SaveStatus.LocalExecution.WaitingToExecute;
 import static accord.primitives.Status.Truncated;
@@ -71,53 +72,61 @@ import static accord.primitives.Status.Truncated;
  */
 public enum SaveStatus
 {
-    Uninitialised                   (Status.NotDefined),
-    NotDefined                      (Status.NotDefined),
-    PreAccepted                     (Status.PreAccepted),
-    PreAcceptedWithVote             (Status.PreAccepted,                                                                                                    VotePreAccept),
-    PreAcceptedWithDeps             (Status.PreAccepted,            FullRoute,  DefinitionKnown,    ExecuteAtUnknown,   DepsFromCoordinator,    Unknown,    VotePreAccept),
+    Uninitialised                   ( 0, Status.NotDefined),
+    NotDefined                      ( 1, Status.NotDefined),
+    PreAccepted                     ( 2, Status.PreAccepted),
+    // the privileged coordinator's own preaccept
+    PreAcceptedPrivCoord            (31, SaveStatus.PreAccepted), // identical to PreAccepted but for coordinator; no need to plumb through self node id to know if we're the coordinator
+    PreAcceptedPrivCoordRecovery    (32, SaveStatus.PreAccepted), // identical to PreAccepted but for coordinator when ballot is non-zero; no need to query promised ballot
+    PreAcceptedWithVote             ( 3, Status.PreAccepted,                                                                                                    VotePreAccept),
+    PreAcceptedWithDeps             ( 4, Status.PreAccepted,            FullRoute,  DefinitionKnown,    ExecuteAtUnknown,   DepsFromCoordinator,    Unknown,    VotePreAccept),
+    FastAcceptedPrivCoord           (33, SaveStatus.PreAccepted), // a special status for multi shard transactions using privileged coordinator optimisation
 
     // note: this status means we have durably cleared any Accepted that may have been inflight, but we must retain DepsFromCoordinator for deciding if a fast path decision may have been taken
     // note: AcceptedInvalidate(s), PreNotAccepted(s) and NotAccepted(s) clear any proposed Deps.
     // This means voters recovering an earlier transaction will not consider the record when excluding the possibility of another transaction's fast-path commit.
     // This is safe, because any Accept that may override the Pre/NotAccepted will construct new Deps that must now witness the recovering transaction.
 
-    AcceptedInvalidate              (Status.AcceptedInvalidate),
-    AcceptedInvalidateWithDefinition(Status.AcceptedInvalidate,     FullRoute,  DefinitionKnown,    ExecuteAtUnknown,   DepsUnknown,        Unknown),
+    AcceptedInvalidate              ( 5, Status.AcceptedInvalidate),
+    AcceptedInvalidateWithDefinition( 6, Status.AcceptedInvalidate,     FullRoute,  DefinitionKnown,    ExecuteAtUnknown,   DepsUnknown,        Unknown),
 
-    // TODO (expected): enrich with whether the proposal is a re-proposal of the original coordinator or a fast path recovery (this may help future optimisations)
-    AcceptedMedium                  (Status.AcceptedMedium),
-    AcceptedMediumWithDefinition    (Status.AcceptedMedium,         FullRoute,  DefinitionKnown,    ExecuteAtProposed,  DepsProposedFixed,  Unknown),
-    AcceptedMediumWithDefAndVote    (Status.AcceptedMedium,         FullRoute,  DefinitionKnown,    ExecuteAtProposed,  DepsProposedFixed,  Unknown,        VotePreAccept),
-    AcceptedSlow                    (Status.AcceptedSlow),
-    AcceptedSlowWithDefinition      (Status.AcceptedSlow,           FullRoute,  DefinitionKnown,    ExecuteAtProposed,  DepsProposed,       Unknown),
-    AcceptedSlowWithDefAndVote      (Status.AcceptedSlow,           FullRoute,  DefinitionKnown,    ExecuteAtProposed,  DepsProposed,       Unknown,        VotePreAccept),
-    PreCommitted                    (Status.PreCommitted,                                                                                            ReadyToExclude),
-    PreCommittedWithDefinition      (Status.PreCommitted,           FullRoute,  DefinitionKnown,    ExecuteAtKnown,     DepsUnknown,        Unknown, ReadyToExclude),
-    PreCommittedWithDeps            (Status.PreCommitted, ACCEPTED, FullRoute,  DefinitionUnknown,  ExecuteAtKnown,     DepsProposed,       Unknown, ReadyToExclude),
-    PreCommittedWithFixedDeps       (Status.PreCommitted, ACCEPTED, FullRoute,  DefinitionUnknown,  ExecuteAtKnown,     DepsProposedFixed,  Unknown, ReadyToExclude),
-    PreCommittedWithDefAndDeps      (Status.PreCommitted, ACCEPTED, FullRoute,  DefinitionKnown,    ExecuteAtKnown,     DepsProposed,       Unknown, ReadyToExclude),
-    PreCommittedWithDefAndFixedDeps (Status.PreCommitted, ACCEPTED, FullRoute,  DefinitionKnown,    ExecuteAtKnown,     DepsProposedFixed,  Unknown, ReadyToExclude),
+    // TODO (expected): enrich with whether the proposal is a re-proposal of the original coordinator's or a fast path recovery (this may help future optimisations)
+    // the txnId==executeAt medium path via TrackStable
+    AcceptedMedium                  ( 7, Status.AcceptedMedium),
+    AcceptedMediumWithDefinition    ( 8, Status.AcceptedMedium,         FullRoute,  DefinitionKnown,    ExecuteAtProposed,  DepsProposedFixed,  Unknown),
+    AcceptedMediumWithDefAndVote    ( 9, Status.AcceptedMedium,         FullRoute,  DefinitionKnown,    ExecuteAtProposed,  DepsProposedFixed,  Unknown,        VotePreAccept),
+    AcceptedSlow                    (10, Status.AcceptedSlow),
+    AcceptedSlowWithDefinition      (11, Status.AcceptedSlow,           FullRoute,  DefinitionKnown,    ExecuteAtProposed,  DepsProposed,       Unknown),
+    // the privileged coordinator's own accept, allowing the coordinator optimisation to apply to the fast quorum medium path
+    AcceptedPrivCoord               (34, SaveStatus.AcceptedSlowWithDefinition, DepsProposedFromCoordinator),
+    AcceptedPrivCoordRecovery       (35, SaveStatus.AcceptedSlowWithDefinition, DepsProposedFromCoordinator), // identical to AcceptedPrivCoord, but promised a non-zero ballot
+    AcceptedSlowWithDefAndVote      (12, Status.AcceptedSlow,           FullRoute,  DefinitionKnown,    ExecuteAtProposed,  DepsProposed,       Unknown,        VotePreAccept),
+    PreCommitted                    (13, Status.PreCommitted,                                                                                            ReadyToExclude),
+    PreCommittedWithDefinition      (14, Status.PreCommitted,           FullRoute,  DefinitionKnown,    ExecuteAtKnown,     DepsUnknown,        Unknown, ReadyToExclude),
+    PreCommittedWithDeps            (15, Status.PreCommitted, ACCEPTED, FullRoute,  DefinitionUnknown,  ExecuteAtKnown,     DepsProposed,       Unknown, ReadyToExclude),
+    PreCommittedWithFixedDeps       (16, Status.PreCommitted, ACCEPTED, FullRoute,  DefinitionUnknown,  ExecuteAtKnown,     DepsProposedFixed,  Unknown, ReadyToExclude),
+    PreCommittedWithDefAndDeps      (17, Status.PreCommitted, ACCEPTED, FullRoute,  DefinitionKnown,    ExecuteAtKnown,     DepsProposed,       Unknown, ReadyToExclude),
+    PreCommittedWithDefAndFixedDeps (18, Status.PreCommitted, ACCEPTED, FullRoute,  DefinitionKnown,    ExecuteAtKnown,     DepsProposedFixed,  Unknown, ReadyToExclude),
 
-    Committed                       (Status.Committed,                                                                                               ReadyToExclude),
-    Stable                          (Status.Stable,                                                                                                  WaitingToExecute),
-    ReadyToExecute                  (Status.Stable,                                                                                                  LocalExecution.ReadyToExecute),
+    Committed                       (19, Status.Committed,                                                                                               ReadyToExclude),
+    Stable                          (20, Status.Stable,                                                                                                  WaitingToExecute),
+    ReadyToExecute                  (21, Status.Stable,                                                                                                  LocalExecution.ReadyToExecute),
 
-    PreApplied                      (Status.PreApplied,                                                                                              LocalExecution.WaitingToApply),
-    Applying                        (Status.PreApplied,                                                                                              LocalExecution.Applying),
+    PreApplied                      (22, Status.PreApplied,                                                                                              LocalExecution.WaitingToApply),
+    Applying                        (23, Status.PreApplied,                                                                                              LocalExecution.Applying),
     // similar to Truncated, but doesn't imply we have any global knowledge about application
-    Applied                         (Status.Applied,                                                                                                 LocalExecution.Applied),
+    Applied                         (24, Status.Applied,                                                                                                 LocalExecution.Applied),
     // TruncatedApplyWithOutcomeAndDeps exists to support re-populating CommandsForKey on replay with any dependencies needed for computing recovery superseding-rejects decisions
     // TODO (expected): test replay
-    TruncatedApplyWithOutcome       (Status.Truncated,   APPLIED,   FullRoute,  DefinitionErased,   ApplyAtKnown,       DepsErased,         Apply,   CleaningUp),
-    TruncatedApply                  (Status.Truncated,   APPLIED,   FullRoute,  DefinitionErased,   ApplyAtKnown,       DepsErased,         WasApply,CleaningUp),
-    TruncatedUnapplied              (Status.Truncated,              MaybeRoute, DefinitionErased,   ExecuteAtKnown,     DepsErased,         WasApply,CleaningUp),
+    TruncatedApplyWithOutcome       (25, Status.Truncated,   APPLIED,   FullRoute,  DefinitionErased,   ApplyAtKnown,       DepsErased,         Apply,   CleaningUp),
+    TruncatedApply                  (26, Status.Truncated,   APPLIED,   FullRoute,  DefinitionErased,   ApplyAtKnown,       DepsErased,         WasApply,CleaningUp),
+    TruncatedUnapplied              (27, Status.Truncated,              MaybeRoute, DefinitionErased,   ExecuteAtKnown,     DepsErased,         WasApply,CleaningUp),
     // Vestigial means the command cannot be completed and is either pre-bootstrap, did not commit, or did not participate in this shard's epoch
     // TODO (expected): should Vestigial NOT be a Truncated status? We should really only use Known or KnownMap to make decisions, so we don't interpret Truncated as implying a decision, e.g. in Invalidate (as of this commit)
-    Vestigial                       (Status.Truncated,              MaybeRoute, DefinitionUnknown,  ExecuteAtUnknown,   DepsUnknown,        Unknown, CleaningUp),
+    Vestigial                       (28, Status.Truncated,              MaybeRoute, DefinitionUnknown,  ExecuteAtUnknown,   DepsUnknown,        Unknown, CleaningUp),
     // NOTE: Erased should ONLY be adopted on a replica that knows EVERY shard has successfully applied the transaction at all healthy replicas (or else that it is durably invalidated)
-    Erased                          (Status.Truncated,              MaybeRoute, DefinitionErased,   ExecuteAtErased,    DepsErased,         Outcome.Erased,CleaningUp),
-    Invalidated                     (Status.Invalidated,                                                                                             CleaningUp),
+    Erased                          (29, Status.Truncated,              MaybeRoute, DefinitionErased,   ExecuteAtErased,    DepsErased,         Outcome.Erased,CleaningUp),
+    Invalidated                     (30, Status.Invalidated,                                                                                             CleaningUp),
     ;
 
     /**
@@ -168,83 +177,153 @@ public enum SaveStatus
         CleaningUp
     }
 
-    private static final SaveStatus[] lookup = values();
-    public static final int ENCODING_BITS = BitUtils.numberOfBitsToRepresent(lookup.length);
-    public static final int ENCODING_MASK = (1 << ENCODING_BITS) - 1;
+    private static final SaveStatus[] byOrdinal = values();
+    private static final SaveStatus[] byId;
+    static
+    {
+        byId = new SaveStatus[byOrdinal.length]; // we require 1:1 mapping over same domain
+        for (SaveStatus saveStatus : byOrdinal)
+        {
+            Invariants.require(byId[saveStatus.id] == null, "Duplicate SaveStatus id %d (%s, %s)", saveStatus.id, saveStatus, byId[saveStatus.id]);
+            // we expect today that we only report to peers an id that was known prior to decoupling id from ordinal, however this is not a hard requirement (but it could temporarily break serialization if not careful)
+            Invariants.expect(saveStatus.report.id <= 30);
+            byId[saveStatus.id] = saveStatus;
+        }
+    }
 
+    /**
+     * A stable identifier used for serialization; this is distinct from ordinal(), which defines the logical order
+     * of SaveStatus and may change between versions. This must NEVER change for a given SaveStatus.
+     */
+    public final int id;
     public final Status status;
     public final Phase phase;
     public final SummaryStatus summary;
     public final Known known;
     public final LocalExecution execution;
+    private final SaveStatus report; // respond to peer queries with this status - primarily used to make compatibility easier
 
-    SaveStatus(Status status)
+    SaveStatus(int id, Status status)
     {
-        this(status, status.phase);
+        this(id, status, status.phase);
     }
 
-    SaveStatus(Status status, PrivilegedVote privilegedVote)
+    SaveStatus(int id, SaveStatus status)
     {
-        this(status, status.summary, status.phase, status.minKnown.with(privilegedVote), NotReady);
+        this(id, status, status.known);
     }
 
-    SaveStatus(Status status, LocalExecution execution)
+    /**
+     * Identical to {@code status}, except for the local knowledge of the dependencies
+     */
+    SaveStatus(int id, SaveStatus status, KnownDeps deps)
     {
-        this(status, status.phase, execution);
+        this(id, status, status.known.with(deps));
+        Invariants.require(status.known.deps().compareTo(deps) <= 0, "%s should know at least as much as %s", this, status);
     }
 
-    SaveStatus(Status status, Phase phase)
+    private SaveStatus(int id, SaveStatus status, Known known)
     {
-        this(status, phase, NotReady);
+        this.id = id;
+        this.status = status.status;
+        this.summary = status.summary;
+        this.phase = status.phase;
+        this.known = known;
+        this.execution = status.execution;
+        this.report = status;
     }
 
-    SaveStatus(Status status, Phase phase, LocalExecution execution)
+    SaveStatus(int id, Status status, PrivilegedVote privilegedVote)
     {
-        this(status, phase, status.minKnown, execution);
+        this(id, status, status.summary, status.phase, status.minKnown.with(privilegedVote), NotReady);
     }
 
-    SaveStatus(Status status, KnownRoute route, Definition definition, KnownExecuteAt executeAt, KnownDeps deps, Outcome outcome)
+    SaveStatus(int id, Status status, LocalExecution execution)
     {
-        this(status, route, definition, executeAt, deps, outcome, NotReady);
+        this(id, status, status.phase, execution);
     }
 
-    SaveStatus(Status status, KnownRoute route, Definition definition, KnownExecuteAt executeAt, KnownDeps deps, Outcome outcome, PrivilegedVote privilegedVote)
+    SaveStatus(int id, Status status, Phase phase)
     {
-        this(status, status.summary, status.phase, new Known(route, definition, executeAt, deps, outcome, privilegedVote), NotReady);
+        this(id, status, phase, NotReady);
     }
 
-    SaveStatus(Status status, KnownRoute route, Definition definition, KnownExecuteAt executeAt, KnownDeps deps, Outcome outcome, LocalExecution execution)
+    SaveStatus(int id, Status status, Phase phase, LocalExecution execution)
     {
-        this(status, status.summary, route, definition, executeAt, deps, outcome, execution);
+        this(id, status, phase, status.minKnown, execution);
     }
 
-    SaveStatus(Status status, SummaryStatus summaryStatus, KnownRoute route, Definition definition, KnownExecuteAt executeAt, KnownDeps deps, Outcome outcome, LocalExecution execution)
+    SaveStatus(int id, Status status, KnownRoute route, Definition definition, KnownExecuteAt executeAt, KnownDeps deps, Outcome outcome)
     {
-        this(status, summaryStatus, status.phase, new Known(route, definition, executeAt, deps, outcome, NoVote), execution);
+        this(id, status, route, definition, executeAt, deps, outcome, NotReady);
     }
 
-    SaveStatus(Status status, Phase phase, Known known, LocalExecution execution)
+    SaveStatus(int id, Status status, KnownRoute route, Definition definition, KnownExecuteAt executeAt, KnownDeps deps, Outcome outcome, PrivilegedVote privilegedVote)
     {
-        this(status, status.summary, phase, known, execution);
+        this(id, status, status.summary, status.phase, new Known(route, definition, executeAt, deps, outcome, privilegedVote), NotReady);
     }
 
-    SaveStatus(Status status, SummaryStatus summaryStatus, Phase phase, Known known, LocalExecution execution)
+    SaveStatus(int id, Status status, KnownRoute route, Definition definition, KnownExecuteAt executeAt, KnownDeps deps, Outcome outcome, LocalExecution execution)
     {
+        this(id, status, status.summary, route, definition, executeAt, deps, outcome, execution);
+    }
+
+    SaveStatus(int id, Status status, SummaryStatus summaryStatus, KnownRoute route, Definition definition, KnownExecuteAt executeAt, KnownDeps deps, Outcome outcome, LocalExecution execution)
+    {
+        this(id, status, summaryStatus, status.phase, new Known(route, definition, executeAt, deps, outcome, NoVote), execution);
+    }
+
+    SaveStatus(int id, Status status, Phase phase, Known known, LocalExecution execution)
+    {
+        this(id, status, status.summary, phase, known, execution);
+    }
+
+    SaveStatus(int id, Status status, SummaryStatus summaryStatus, Phase phase, Known known, LocalExecution execution)
+    {
+        this.id = id;
         this.status = status;
         this.summary = summaryStatus;
         this.phase = phase;
         this.known = known;
         this.execution = execution;
+        this.report = this;
     }
 
     public boolean is(Status status)
     {
-        return this.status.equals(status);
+        return this.status == status;
     }
 
     public boolean hasBeen(Status status)
     {
         return this.status.compareTo(status) >= 0;
+    }
+
+    public SaveStatus report()
+    {
+        return report;
+    }
+
+    /**
+     * @return true iff we are a privileged coordinator of the transaction on a relevant phase
+     */
+    public boolean isPrivilegedCoordinator()
+    {
+        switch (this)
+        {
+            default: return false;
+            case PreAcceptedPrivCoord:
+            case PreAcceptedPrivCoordRecovery:
+            case FastAcceptedPrivCoord:
+            case AcceptedPrivCoord:
+            case AcceptedPrivCoordRecovery:
+                return true;
+        }
+    }
+
+    public boolean isPrivilegedCoordinatorZeroBallot()
+    {
+        return this == PreAcceptedPrivCoord || this == AcceptedPrivCoord;
     }
 
     public boolean isUninitialised()
@@ -319,6 +398,7 @@ public enum SaveStatus
                     switch (known.deps())
                     {
                         case DepsProposedFixed: return PreCommittedWithFixedDeps;
+                        case DepsProposedFromCoordinator: // we do not retain the privileged coordinator's distinction once PreCommitted
                         case DepsProposed:      return PreCommittedWithDeps;
                         default:                return PreCommitted;
                     }
@@ -330,6 +410,7 @@ public enum SaveStatus
                     case DepsUnknown:
                     case DepsFromCoordinator:   return PreCommittedWithDefinition; // TODO (required): consider if this is correct
                     case DepsProposedFixed:     return PreCommittedWithDefAndFixedDeps;
+                    case DepsProposedFromCoordinator: // we do not retain the privileged coordinator's distinction once PreCommitted
                     case DepsProposed:          return PreCommittedWithDefAndDeps;
                     case DepsKnown:
                     case DepsCommitted:
@@ -360,9 +441,13 @@ public enum SaveStatus
             case AcceptedSlow:
             case PreCommitted:
             case Committed:
+            {
                 if (known.isSatisfiedBy(status.known))
                     return status;
+
+                Invariants.require(!status.isPrivilegedCoordinator(), "%s (a privileged coordinator state) should not be 'enrichable' (by %s)", status, known);
                 return get(status.status, status.known.atLeast(known));
+            }
 
             case Stable:
                 return status;
@@ -495,10 +580,23 @@ public enum SaveStatus
         return false;
     }
 
+    /**
+     * Lookup by {@link #ordinal()}. This is NOT stable across versions, use {@link #forId} for serialization.
+     */
     public static SaveStatus forOrdinal(int ordinal)
     {
-        if (ordinal < 0 || ordinal > lookup.length)
+        if (ordinal < 0 || ordinal >= byOrdinal.length)
             throw new IndexOutOfBoundsException(ordinal);
-        return lookup[ordinal];
+        return byOrdinal[ordinal];
+    }
+
+    /**
+     * Lookup by the stable serialization {@link #id}.
+     */
+    public static SaveStatus forId(int id)
+    {
+        if (id < 0 || id >= byId.length)
+            throw new IndexOutOfBoundsException(id);
+        return byId[id];
     }
 }

@@ -27,8 +27,6 @@ import accord.topology.TopologyUtils;
 
 import java.util.*;
 
-import static accord.utils.Utils.toArray;
-
 public class TopologyFactory
 {
     public final int rf;
@@ -47,7 +45,7 @@ public class TopologyFactory
 
     public Topology toTopology(List<Node.Id> cluster)
     {
-        return toTopology(toArray(cluster, Node.Id[]::new));
+        return toTopology(cluster.toArray(Node.Id[]::new));
     }
 
     public static Topology toTopology(List<Node.Id> cluster, int rf, Range... ranges)

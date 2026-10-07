@@ -58,7 +58,6 @@ import accord.local.Node.Id;
 
 import static accord.utils.Gens.lists;
 import static accord.utils.Property.qt;
-import static accord.utils.Utils.toArray;
 import static org.assertj.core.api.Assertions.assertThat;
 
 // TODO (testing): test Keys with no contents, "without", "with" where TxnId and Keys are the same, but Key -> [TxnId] does not match;
@@ -409,11 +408,11 @@ public class KeyDepsTest
             }
 
             TreeMap<TxnId, List<RoutingKey>> canonicalInverted = invertCanonical();
-            Assertions.assertArrayEquals(toArray(canonicalInverted.keySet(), TxnId[]::new),
+            Assertions.assertArrayEquals(canonicalInverted.keySet().toArray(TxnId[]::new),
                                          IntStream.range(0, test.txnIdCount()).mapToObj(test::txnId).toArray(TxnId[]::new));
             for (Map.Entry<TxnId, List<RoutingKey>> e : canonicalInverted.entrySet())
             {
-                Assertions.assertArrayEquals(toArray(e.getValue(), RoutingKey[]::new),
+                Assertions.assertArrayEquals(e.getValue().toArray(RoutingKey[]::new),
                                              test.participants(e.getKey()).stream().toArray(RoutingKey[]::new));
             }
 
@@ -467,7 +466,7 @@ public class KeyDepsTest
                 Hash key = IntHashKey.forHash(random.nextInt());
                 tmp.add(key);
             }
-            hashes = toArray(tmp, Hash[]::new);
+            hashes = tmp.toArray(Hash[]::new);
         }
         Range[] ranges = new Range[count];
         for (int i = 0 ; i < count ; i++)

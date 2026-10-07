@@ -18,6 +18,8 @@
 
 package accord.api;
 
+import java.util.function.Predicate;
+
 import accord.impl.DefaultLocalListeners;
 import accord.local.Command;
 import accord.local.CommandStore;
@@ -76,6 +78,11 @@ public interface LocalListeners
      * Java object as a listener instead of a transaction.
      */
     Registered register(TxnId waitingOn, ComplexListener listener);
+
+    /**
+     * @return true iff any {@link ComplexListener} on {@code waitingOn} satisfies {@code test}
+     */
+    boolean matchesAnyComplex(TxnId waitingOn, Predicate<? super ComplexListener> test);
 
     /**
      * Notify any listener waiting on {@code safeCommand}'s updated status.

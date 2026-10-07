@@ -33,7 +33,6 @@ import accord.primitives.Txn;
 import accord.maelstrom.Packet.Type;
 
 import static accord.utils.Invariants.illegalState;
-import static accord.utils.Utils.toArray;
 
 public class Body
 {
@@ -170,7 +169,7 @@ public class Body
 
         switch (type)
         {
-            case init: return new MaelstromInit(msg_id, node_id, toArray(node_ids, Id[]::new));
+            case init: return new MaelstromInit(msg_id, node_id, node_ids.toArray(Id[]::new));
             case init_ok: return new Body(Type.init_ok, msg_id, in_reply_to);
             case txn: return new MaelstromRequest(msg_id, txn);
             case txn_ok: return new MaelstromReply(in_reply_to, txn_ok);

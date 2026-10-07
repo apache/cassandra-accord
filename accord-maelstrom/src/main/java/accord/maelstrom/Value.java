@@ -29,8 +29,6 @@ import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import com.google.gson.stream.JsonWriter;
 
-import static accord.utils.Utils.toArray;
-
 public class Value
 {
     public static final Value EMPTY = new Value();
@@ -110,7 +108,7 @@ public class Value
             while (in.hasNext())
                 buffer.add(Datum.read(in));
             in.endArray();
-            return constructor.apply(toArray(buffer, Datum[]::new));
+            return constructor.apply(buffer.toArray(Datum[]::new));
         }
 
         return constructor.apply(new Datum[] { Datum.read(in) });

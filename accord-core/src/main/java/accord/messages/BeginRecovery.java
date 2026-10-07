@@ -196,7 +196,11 @@ public class BeginRecovery extends RouteRequest.WithUnsynced<BeginRecovery.Recov
         }
         else
         {
-            try (Visitor visitor = new Visitor())
+            // If we voted for this transaction's fast path condition, we must have it as a dependency in any
+            // superseding transaction we coordinated. This is used for computing the WP set from the protocol,
+            // without requiring that we persist the deps we sent to peers.
+            boolean selfVotedFastPath = command.is(PreAccepted) && txnId.equals(command.executeAt());
+            try (Visitor visitor = new Visitor(selfVotedFastPath))
             {
                 safeStore.visit(participants.owns(), txnId, txnId.witnessedBy(), visitor);
                 supersedingRejects = visitor.supersedingRejects;
@@ -211,7 +215,7 @@ public class BeginRecovery extends RouteRequest.WithUnsynced<BeginRecovery.Recov
         Timestamp executeAt = command.executeAt();
         Writes writes = command.writes();
         Result result = command.result();
-        Participants<?> coordinatorAcceptsFastPath = saveStatus.known.hasPrivilegedVote() ? participants.owns() : null;
+        Participants<?> coordinatorAcceptsFastPath = hasPrivilegedVote(txnId, saveStatus, executeAt) ? participants.owns() : null;
         boolean acceptsFastPath = acceptsFastPath(txnId, participants, saveStatus, executeAt);
         return new RecoverOk(txnId, saveStatus.status, accepted, executeAt, deps, simpleWait, simpleNoWait, laterCoordRejects, acceptsFastPath, coordinatorAcceptsFastPath, supersedingRejects, writes, result);
     }
@@ -258,6 +262,17 @@ public class BeginRecovery extends RouteRequest.WithUnsynced<BeginRecovery.Recov
         );
     }
 
+    /**
+     * The privileged coordinator does not record its vote explicitly, as it may be inferred from its executeAt
+     */
+    static boolean hasPrivilegedVote(TxnId txnId, SaveStatus saveStatus, @Nullable Timestamp executeAt)
+    {
+        if (!saveStatus.isPrivilegedCoordinator())
+            return saveStatus.known.hasPrivilegedVote();
+        // TODO (required): AcceptedPrivCoord* may propose executeAt == txnId (via the medium path) whether or not the coordinator voted; must encode the vote if we permit this
+        return saveStatus.is(PreAccepted) && txnId.equals(executeAt);
+    }
+
     @Override
     protected void acceptInternal(RecoverReply reply, Throwable failure)
     {
@@ -278,7 +293,7 @@ public class BeginRecovery extends RouteRequest.WithUnsynced<BeginRecovery.Recov
 
     static boolean acceptsFastPath(TxnId txnId, StoreParticipants participants, SaveStatus saveStatus, @Nullable Timestamp executeAt)
     {
-        return participants.owns().isEmpty() || (txnId.hasPrivilegedCoordinator() ? saveStatus.known.hasPrivilegedVote() : txnId.equals(executeAt));
+        return participants.owns().isEmpty() || (txnId.hasPrivilegedCoordinator() ? hasPrivilegedVote(txnId, saveStatus, executeAt) : txnId.equals(executeAt));
     }
 
     @Override
@@ -321,9 +336,15 @@ public class BeginRecovery extends RouteRequest.WithUnsynced<BeginRecovery.Recov
 
     class Visitor implements CommandSummaries.SupersedingCommandVisitor, AutoCloseable
     {
+        final boolean selfVotedFastPath;
         Deps.Builder simpleWait, simpleNoWait;
         Deps.Builder supersedingCoordRejects;
         boolean supersedingRejects;
+
+        Visitor(boolean selfVotedFastPath)
+        {
+            this.selfVotedFastPath = selfVotedFastPath;
+        }
 
         @Override
         public boolean visit(Unseekable keyOrRange, TxnId testTxnId, Timestamp testExecuteAt, SummaryStatus status, IsDep dep, Durability minDurability)
@@ -382,6 +403,9 @@ public class BeginRecovery extends RouteRequest.WithUnsynced<BeginRecovery.Recov
                          */
                         return markSupersedingRejects();
 
+                    case SELF_COORD:
+                    case SELF_COORD_RECOVERY:
+                        // not expected for earlier transactions, as we only report these for later transactions; treat as NOT_ELIGIBLE
                     case NOT_ELIGIBLE:
                         switch (status)
                         {
@@ -427,10 +451,16 @@ public class BeginRecovery extends RouteRequest.WithUnsynced<BeginRecovery.Recov
                         // the original coordinator witnessed us, so if it takes the fast or medium path we will be a durable dependency
                         // if it doesn't, it will take the slow path (and witness us), or be invalidated (in which case it doesn't matter)
                         break;
-
+                    case SELF_COORD_RECOVERY:
+                        // we are a privileged voter for this superseding transaction, and we cannot fast commit
+                        break;
+                    case SELF_COORD:
+                        // we are a privileged voter for this superseding transaction, so we can infer whether we voted by our own timestamp
+                        // note: we adopt this status for any privileged coordinator, but only PrivilegedCoordinatorWithDeps requires us to report
+                        if (selfVotedFastPath || !testTxnId.is(PrivilegedCoordinatorWithDeps))
+                            break;
                     case IS_NOT_COORD_DEP:
                         Invariants.requireArgument(testTxnId.is(PrivilegedCoordinatorWithDeps));
-                        // TODO (expected): if we are the original coordinator and we know we cannot fast path commit then we should not include this in the reply
                         ensureSupersedingCoordRejects().add(keyOrRange, testTxnId);
                 }
                 if (testTxnId.isSyncPoint())

@@ -32,7 +32,6 @@ import accord.utils.CRCUtils;
 import accord.utils.Invariants;
 
 import static accord.primitives.Range.UnsafeMarker.ANTI_RANGE;
-import static accord.utils.Utils.toArray;
 
 public abstract class PrefixedIntHashKey implements RoutableKey
 {
@@ -310,7 +309,7 @@ public abstract class PrefixedIntHashKey implements RoutableKey
             prev = next;
         }
         result.add(range(prev, new Hash(prefix, endHash)));
-        return toArray(result, accord.primitives.Range[]::new);
+        return result.toArray(accord.primitives.Range[]::new);
     }
 
     public static Range range(PrefixedIntRoutingKey start, PrefixedIntRoutingKey end)

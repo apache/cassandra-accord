@@ -373,9 +373,12 @@ public class Pruning
                     case TRANSITIVE_VISIBLE:
                     case PREACCEPTED_WITHOUT_DEPS:
                     case PREACCEPTED_WITH_DEPS:
-                    case PREACCEPTED_COORD_NO_FAST_COMMIT:
+                    case PREACCEPTED_COORD:
+                    case PREACCEPTED_COORD_RECOVERY:
                     case NOTACCEPTED:
                     case ACCEPTED:
+                    case ACCEPTED_COORD:
+                    case ACCEPTED_COORD_RECOVERY:
                     case APPLIED_NOT_DURABLE:
                     case APPLIED_NOT_EXECUTED:
                         newByIdBuffer[pos - ++retainCount] = txn;

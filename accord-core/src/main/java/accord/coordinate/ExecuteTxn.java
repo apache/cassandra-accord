@@ -670,9 +670,9 @@ public class ExecuteTxn extends ReadCoordinator<Result, ReadReply>
         }
 
         @Override
-        protected boolean timeoutInternal()
+        protected boolean tryTimeout()
         {
-            if (!super.timeoutInternal())
+            if (!super.tryTimeout())
                 return false;
 
             cancelSlowTimeout();

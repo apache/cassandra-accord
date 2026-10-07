@@ -83,7 +83,8 @@ public interface TopologySorter
     }
 
     /**
-     * Compare two nodes that occur in some topologies, so that the one that is *least* preferable sorts first
+     * Compare two nodes.
+     * LEAST preferable sorts first.
      */
     int compare(Node.Id node1, Node.Id node2, ShardSelection shards);
 

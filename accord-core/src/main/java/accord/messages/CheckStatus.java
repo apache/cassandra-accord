@@ -151,7 +151,7 @@ public class CheckStatus extends ParticipantsRequest<Participants<?>, CheckStatu
 
         Commands.supplementParticipants(safeStore, safeCommand, participants);
         if (bumpBallot != null && bumpBallot.compareTo(command.promised()) > 0)
-            safeCommand.updatePromised(bumpBallot);
+            safeCommand.updatePromised(safeStore, bumpBallot);
 
         // for the moment we use this flag only to report that the initial coordinator is still active since we cannot infer progress by ballot;
         // for all future attempts we rely on witnessing a new ballot and using its age to decide when we should attempt to take over
@@ -278,7 +278,7 @@ public class CheckStatus extends ParticipantsRequest<Participants<?>, CheckStatu
 
         public CheckStatusOk(KnownMap map, boolean isCoordinating, Durability durability, Route<?> route, InvalidIf invalidIf, Command command)
         {
-            this(map, command.saveStatus(), command.promised(), command.acceptedOrCommitted(), command.acceptedOrCommitted(),
+            this(map, command.saveStatus().report(), command.promised(), command.acceptedOrCommitted(), command.acceptedOrCommitted(),
                  command.executeAt(), isCoordinating, durability, route, command.homeKey(), invalidIf);
         }
 

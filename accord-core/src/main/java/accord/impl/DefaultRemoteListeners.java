@@ -68,7 +68,7 @@ public class DefaultRemoteListeners implements RemoteListeners
                 Node.Id replyTo = new Node.Id(listenerNodeId(listener));
                 int callbackId = listenerCallbackId(listener);
                 if (route == null) logger.warn("{}/{} attempting to notify {} with callbackId {} but no route", txnId, saveStatus, replyTo, callbackId);
-                else node.send(replyTo, new AsyncAwaitComplete(txnId, route, saveStatus, callbackId), null);
+                else node.send(replyTo, new AsyncAwaitComplete(txnId, route, saveStatus.report(), callbackId), null);
             }
         }
     }

@@ -62,6 +62,7 @@ import static accord.messages.Accept.Kind.SLOW;
 import static accord.messages.Commit.Invalidate.commitInvalidate;
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.primitives.Status.AcceptedInvalidate;
+import static accord.primitives.TxnId.FastPath.Unoptimised;
 import static accord.primitives.TxnId.MediumPath.TrackStable;
 import static accord.topology.SelectShards.ALL;
 
@@ -86,7 +87,8 @@ abstract class Propose<R> extends AbstractCoordination<FullRoute<?>, R, AcceptRe
         this.require = require;
         this.deps = deps;
         this.executeAt = executeAt;
-        this.tracker = kind == SLOW && ProtocolModifiers.permitFastQuorumMediumPath() ? new FastPathTracker(topologies, txnId) : new QuorumTracker(topologies);
+        // TODO (expected): fast quorum medium path requires its own coordinator optimisation implementation to use the smaller fast quorums
+        this.tracker = kind == SLOW && ProtocolModifiers.permitFastQuorumMediumPath() ? new FastPathTracker(topologies, Unoptimised) : new QuorumTracker(topologies);
         this.acceptFlags = AcceptFlags.encode(txnId, require != scope);
         Invariants.require(txnId.isSyncPoint() || deps.maxTxnId(txnId).compareTo(executeAt) <= 0,
                            "Attempted to propose %s with an earlier executeAt than a conflicting transaction it witnessed: %s vs executeAt: %s", txnId, deps, executeAt);

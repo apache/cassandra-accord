@@ -59,7 +59,6 @@ import accord.utils.SortedArrays.SortedArrayList;
 import org.agrona.collections.IntHashSet;
 
 import static accord.primitives.TxnId.Cardinality.Any;
-import static accord.utils.Utils.toArray;
 
 public class AccordGens
 {
@@ -390,7 +389,7 @@ public class AccordGens
             else if (chance < 0.7f) { rf = 5; }
             else if (chance < 0.8f) { rf = 7; }
             else                    { rf = 9; }
-            Node.Id[] nodes = Utils.toArray(Gens.lists(nodeGen).unique().ofSizeBetween(rf, rf * 3).next(rs), Node.Id[]::new);
+            Node.Id[] nodes = Gens.lists(nodeGen).unique().ofSizeBetween(rf, rf * 3).next(rs).toArray(Node.Id[]::new);
             Ranges ranges = rangesGenFactory.apply(nodes.length, rf).next(rs);
 
             int numElectorate = nodes.length + rf - 1;
@@ -411,7 +410,7 @@ public class AccordGens
             if (!noShard.isEmpty())
                 throw new AssertionError(String.format("The following electorates were found without a shard: %s", noShard));
 
-            return new Topology(epoch, toArray(shards, Shard[]::new));
+            return new Topology(epoch, shards.toArray(Shard[]::new));
         };
     }
 
@@ -562,7 +561,7 @@ public class AccordGens
                 ranges.addAll(Arrays.asList(PrefixedIntHashKey.ranges(prefix, numNodes * rf)));
             }
             ranges.sort(Range::compare);
-            return Ranges.ofSortedAndDeoverlapped(Utils.toArray(ranges, Range[]::new));
+            return Ranges.ofSortedAndDeoverlapped(ranges.toArray(Range[]::new));
         };
     }
 

@@ -31,7 +31,6 @@ import accord.primitives.Ranges;
 import accord.primitives.Keys;
 import accord.utils.Invariants;
 
-import static accord.utils.Utils.toArray;
 import javax.annotation.Nonnull;
 
 public abstract class IntHashKey implements RoutableKey
@@ -257,7 +256,7 @@ public abstract class IntHashKey implements RoutableKey
             prev = next;
         }
         result.add(new Range(prev, new Hash(0xffff)));
-        return toArray(result, accord.primitives.Range[]::new);
+        return result.toArray(accord.primitives.Range[]::new);
     }
 
     public static accord.primitives.Range range(Hash start, Hash end)

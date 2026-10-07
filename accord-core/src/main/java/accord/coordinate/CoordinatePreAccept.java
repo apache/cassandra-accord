@@ -41,6 +41,7 @@ import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import accord.topology.TopologyMismatch;
 import accord.utils.SortedListMap;
+import accord.utils.ThrowableSafety;
 
 import static accord.coordinate.Propose.NotAccept.proposeAndCommitInvalidate;
 import static accord.coordinate.tracking.RequestStatus.Success;
@@ -154,7 +155,7 @@ abstract class CoordinatePreAccept<T> extends AbstractCoordinatePreAccept<T, Pre
             BiConsumer<?, Throwable> callback = finishAndTakeCallback();
             proposeAndCommitInvalidate(node, executor, Ballot.ZERO, txnId, scope.homeKey(), scope, txnId, tracing, (success, invalidated) -> {
                 failure.addSuppressed(invalidated);
-                callback.accept(null, failure);
+                ThrowableSafety.safeFail(callback, failure, node);
                 node.agent().coordinatorEvents().onFailed(failure, txnId, scope, this);
             });
         }
