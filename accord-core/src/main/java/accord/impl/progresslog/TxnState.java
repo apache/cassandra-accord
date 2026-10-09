@@ -49,6 +49,12 @@ public class TxnState extends WaitingState implements ExecutionContext
         super(txnId);
     }
 
+    protected TxnState(TxnState copy)
+    {
+        super(copy.txnId);
+        this.encodedState = copy.encodedState;
+    }
+
     final void updateScheduling(SafeCommandStore safeStore, DefaultProgressLog owner, TxnStateKind updated, @Nullable BlockedUntil blockedUntil, Progress newProgress)
     {
         long newDelay;

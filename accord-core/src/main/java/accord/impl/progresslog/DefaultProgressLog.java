@@ -136,7 +136,21 @@ public class DefaultProgressLog implements ProgressLog, Consumer<SafeCommandStor
     private final Object2ObjectHashMap<TxnId, PendingTask> pendingHome = new Object2ObjectHashMap<>();
 
     private final Long2ObjectHashMap<Object> active = new Long2ObjectHashMap<>();
-    private final Map<TxnId, TxnState> debugDeleted = Invariants.debug() && Invariants.isParanoid() && Invariants.isTesting() ? new Object2ObjectHashMap<>() : null;
+    public static final int DEBUG_LEVEL;
+    private static final TxnState DEBUG_SENTINEL = new TxnState(TxnId.NONE);
+    static
+    {
+        int debugLevel = Invariants.debug() ? 1 : 0;
+        String str = System.getProperty("accord.debug.progresslog");
+        if (str != null)
+        {
+            try { debugLevel = Integer.parseInt(str); }
+            catch (Throwable t) { logger.error("Failed to parse system property accord.debug.progresslog=" + str); }
+        }
+        DEBUG_LEVEL = debugLevel;
+    }
+
+    private final Map<TxnId, TxnState> debugDeleted = DEBUG_LEVEL > 0 ? new Object2ObjectHashMap<>() : null;
 
     // peek into the future by this many micros when picking what to run.
     // this is primarily to handle the fact that we do not support 0 delay when scheduling, so tasks that should be run immediately are schedule with 1us delay
@@ -200,7 +214,7 @@ public class DefaultProgressLog implements ProgressLog, Consumer<SafeCommandStor
         TxnState result = BTree.<TxnId, TxnState>find(stateMap, (id, state) -> id.compareTo(state.txnId), txnId);
         if (result == null)
         {
-            Invariants.require(debugDeleted == null || !debugDeleted.containsKey(txnId));
+            Invariants.require(DEBUG_LEVEL == 0 || !debugDeleted.containsKey(txnId));
             stateMap = BTree.update(stateMap, BTree.singleton(result = new TxnState(txnId)), TxnState::compareTo);
         }
         return result;
@@ -208,7 +222,7 @@ public class DefaultProgressLog implements ProgressLog, Consumer<SafeCommandStor
 
     private TxnState insert(TxnId txnId)
     {
-        Invariants.require(debugDeleted == null || !debugDeleted.containsKey(txnId));
+        Invariants.require(DEBUG_LEVEL == 0 || !debugDeleted.containsKey(txnId));
         TxnState result = new TxnState(txnId);
         stateMap = BTree.update(stateMap, BTree.singleton(result), TxnState::compareTo);
         return result;
@@ -447,7 +461,7 @@ public class DefaultProgressLog implements ProgressLog, Consumer<SafeCommandStor
 
         pendingWaiting.clear();
         pendingHome.clear();
-        if (debugDeleted != null)
+        if (DEBUG_LEVEL > 0)
             debugDeleted.clear();
 
         runBuffer = EMPTY_RUN_BUFFER;
@@ -465,10 +479,13 @@ public class DefaultProgressLog implements ProgressLog, Consumer<SafeCommandStor
     void remove(TxnState state)
     {
         stateMap = BTreeRemoval.<TxnId, TxnState>remove(stateMap, (id, s) -> id.compareTo(s.txnId), state.txnId);
-        if (debugDeleted != null)
+        if (DEBUG_LEVEL > 0)
         {
-            DeletedTxnState copy = new DeletedTxnState(state);
-            debugDeleted.put(copy.txnId, copy);
+            TxnState save;
+            if (DEBUG_LEVEL == 1) save = DEBUG_SENTINEL;
+            else if (debugDeletion == null) save = new TxnState(state);
+            else save = new DeletedTxnState(state);
+            debugDeleted.put(save.txnId, save);
         }
     }
 
@@ -1202,13 +1219,13 @@ public class DefaultProgressLog implements ProgressLog, Consumer<SafeCommandStor
         final Object debug;
         protected DeletedTxnState(TxnState copy)
         {
-            super(copy.txnId);
-            this.encodedState = copy.encodedState;
-            this.debug = debugDeletion.apply(copy.txnId);
+            super(copy);
+            Function<TxnId, ?> f = debugDeletion;
+            this.debug = f == null ? null : debugDeletion.apply(copy.txnId);
         }
     }
 
-    private static volatile Function<TxnId, ?> debugDeletion = id -> null;
+    private static volatile Function<TxnId, ?> debugDeletion = null;
     public static void setDebugDeletion(Function<TxnId, ?> newDebugDeletion)
     {
         debugDeletion = newDebugDeletion;
