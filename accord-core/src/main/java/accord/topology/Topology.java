@@ -438,7 +438,7 @@ public class Topology
             return this;
 
         LargeBitSet nodes = new LargeBitSet(this.nodes.size());
-        Int2ObjectHashMap<NodeInfo> nodeLookup = this.nodeLookup;
+        Int2ObjectHashMap<NodeInfo> nodeLookup = new Int2ObjectHashMap<>(nodes.size(), 0.8f);
         for (int shardIndex : newSubset)
         {
             Shard shard = shards[shardIndex];
@@ -446,7 +446,11 @@ public class Topology
             for (Id id : shard.nodes)
             {
                 i = this.nodes.findNext(i, id);
-                if (i >= 0) nodes.set(i++);
+                if (i >= 0)
+                {
+                    nodes.set(i++);
+                    nodeLookup.putIfAbsent(id.id, this.nodeLookup.get(id.id).forSubset(newSubset));
+                }
                 else i = -1 - i;
             }
         }
