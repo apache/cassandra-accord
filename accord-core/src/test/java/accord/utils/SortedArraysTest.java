@@ -549,6 +549,33 @@ class SortedArraysTest
         });
     }
 
+    @Test
+    public void testWithoutBasic()
+    {
+        Assertions.assertEquals(
+            SortedArrayList.ofSorted(1),
+            SortedArrayList.ofSorted(1, 2, 3).without(SortedArrayList.ofSorted(2, 3))
+        );
+    }
+
+    @Test
+    public void testWithoutSingleElement()
+    {
+        Assertions.assertEquals(
+            SortedArrayList.ofSorted(1, 2, 4),
+            SortedArrayList.ofSorted(1, 2, 3, 4).without(SortedArrayList.ofSorted(3))
+        );
+    }
+
+    @Test
+    public void testWithoutTrailingElements()
+    {
+        Assertions.assertEquals(
+            SortedArrayList.ofSorted(1, 2),
+            SortedArrayList.ofSorted(1, 2, 3, 4).without(SortedArrayList.ofSorted(3, 4))
+        );
+    }
+
     private static class Pair<T>
     {
         private final T[] src;
