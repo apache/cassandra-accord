@@ -343,6 +343,21 @@ public class RangeDepsTest
         }
     }
 
+    @Test
+    public void testMergeFlags()
+    {
+        Range[] ranges = { r(0, 1), r(2, 3) };
+        TxnId[] txnIds = { new TxnId(1, 1, 0, Txn.Kind.ExclusiveSyncPoint, Domain.Range, new Node.Id(1)) };
+        for (int leftMask = 1 ; leftMask < (1 << ranges.length) ; ++leftMask)
+        for (int rightMask = 1 ; rightMask < (1 << ranges.length) ; ++rightMask)
+        {
+            RangeDeps left = flaggedDeps(ranges, txnIds, leftMask, Timestamp.Flag.SHARD_BOUND.bit, 0);
+            RangeDeps right = flaggedDeps(ranges, txnIds, rightMask, Timestamp.Flag.HLC_BOUND.bit, 0);
+            RangeDeps result = RangeDeps.merge(java.util.stream.Stream.of(left, right, left));
+            assertUnion(ranges, txnIds, leftMask, Timestamp.Flag.SHARD_BOUND.bit, rightMask, Timestamp.Flag.HLC_BOUND.bit, result);
+        }
+    }
+
     private static RangeDeps flaggedDeps(Range[] ranges, TxnId[] txnIds, int mask, int flags, int layout)
     {
         RangeDeps result;

@@ -354,7 +354,7 @@ public class RelationMultiMap
         @Override
         public Object construct(K[] keys, int keysLength, V[] values, int valuesLength, int[] out, int outLength)
         {
-            boolean isNext = true, isPrev = true;
+            boolean isPrev = true;
             if (keys != prevKeys)
             {
                 Invariants.require(len(prevKeys, prevKeysLength) != keysLength);
@@ -362,7 +362,6 @@ public class RelationMultiMap
                     keyBuffers.realDiscard(prevKeys, prevKeysLength);
                 prevKeys = keys;
                 prevKeysLength = keys == nextKeys ? -1 : keysLength;
-                isNext = keysLength == nextKeys.length;
                 isPrev = false;
             }
             if (values != prevValues)
@@ -371,7 +370,6 @@ public class RelationMultiMap
                     realDiscard(prevValues, prevValuesLength);
                 prevValues = values;
                 prevValuesLength = values == nextValues ? -1 : valuesLength;
-                isNext &= valuesLength == nextValues.length;
                 isPrev = false;
             }
             if (out != prevKeysToValues)
@@ -380,12 +378,11 @@ public class RelationMultiMap
                     realDiscard(prevKeysToValues, prevKeysToValuesLength);
                 prevKeysToValues = out;
                 prevKeysToValuesLength = out == nextKeysToValues ? -1 : outLength;
-                isNext &= out == nextKeysToValues;
                 isPrev = false;
             }
 
             if (!isPrev)
-                prev = isNext ? next : null;
+                prev = keys == nextKeys && values == nextValues && out == nextKeysToValues ? next : null;
 
             return null;
         }
@@ -653,7 +650,7 @@ public class RelationMultiMap
                     && arraysEqual(leftKeys, rightKeys, rightKeysLength)
                 )
             {
-                return constructor.construct(leftKeys, leftKeysLength, leftValues, leftValuesLength, left, leftLength);
+                return constructor.construct(outKeys, outKeysLength, outValues, outValuesLength, left, leftLength);
             }
 
             int lk = 0, rk = 0, ok = 0, l = leftKeysLength, r = rightKeysLength;
@@ -726,7 +723,7 @@ public class RelationMultiMap
                 }
 
                 if (out == null)
-                    return constructor.construct(leftKeys, leftKeysLength, leftValues, leftValuesLength, left, leftLength);
+                    return constructor.construct(outKeys, outKeysLength, outValues, outValuesLength, left, leftLength);
             }
             else if (remapRight == null && outKeys == rightKeys)
             {
@@ -794,7 +791,7 @@ public class RelationMultiMap
                 }
 
                 if (out == null)
-                    return constructor.construct(rightKeys, rightKeysLength, rightValues, rightValuesLength, right, rightLength);
+                    return constructor.construct(outKeys, outKeysLength, outValues, outValuesLength, right, rightLength);
             }
             else
             {
