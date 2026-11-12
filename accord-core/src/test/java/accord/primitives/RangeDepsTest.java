@@ -355,6 +355,15 @@ public class RangeDepsTest
             RangeDeps right = flaggedDeps(ranges, txnIds, rightMask, Timestamp.Flag.HLC_BOUND.bit, 0);
             RangeDeps result = RangeDeps.merge(java.util.stream.Stream.of(left, right, left));
             assertUnion(ranges, txnIds, leftMask, Timestamp.Flag.SHARD_BOUND.bit, rightMask, Timestamp.Flag.HLC_BOUND.bit, result);
+
+            RangeDeps superset = flaggedDeps(ranges, txnIds, leftMask | rightMask,
+                                            Timestamp.Flag.SHARD_BOUND.bit | Timestamp.Flag.HLC_BOUND.bit, 0);
+            if ((leftMask | rightMask) != leftMask)
+            {
+                Assertions.assertSame(superset, RangeDeps.merge(java.util.stream.Stream.of(left, superset, left)));
+                List<RangeDeps> inputs = Arrays.asList(left, superset, left);
+                Assertions.assertSame(superset, RangeDeps.merge(inputs, inputs.size(), List::get, d -> d, d -> d));
+            }
         }
     }
 

@@ -382,9 +382,19 @@ public class RelationMultiMap
             }
 
             if (!isPrev)
-                prev = keys == nextKeys && values == nextValues && out == nextKeysToValues ? next : null;
+                prev = out == nextKeysToValues && sameElements(keys, keysLength, nextKeys) && sameElements(values, valuesLength, nextValues) ? next : null;
 
             return null;
+        }
+
+        private static boolean sameElements(Object[] array, int length, Object[] other)
+        {
+            if (length != other.length) return false;
+            if (array == other) return true;
+            // Equality can ignore metadata such as transaction flags.
+            for (int i = 0 ; i < length ; ++i)
+                if (array[i] != other[i]) return false;
+            return true;
         }
 
         public void update(T merge, K[] keys, V[] values, int[] keysToValues)
