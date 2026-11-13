@@ -363,6 +363,14 @@ public class RangeDepsTest
                 Assertions.assertSame(superset, RangeDeps.merge(java.util.stream.Stream.of(left, superset, left)));
                 List<RangeDeps> inputs = Arrays.asList(left, superset, left);
                 Assertions.assertSame(superset, RangeDeps.merge(inputs, inputs.size(), List::get, d -> d, d -> d));
+
+                // Equal transaction identities need not share their object references.
+                TxnId[] equalTxnIds = { new TxnId(1, 1, 0, Txn.Kind.ExclusiveSyncPoint, Domain.Range, new Node.Id(1)) };
+                RangeDeps contained = flaggedDeps(ranges, txnIds, leftMask, 0, 0);
+                superset = flaggedDeps(ranges, equalTxnIds, leftMask | rightMask, 0, 0);
+                Assertions.assertSame(superset, RangeDeps.merge(java.util.stream.Stream.of(contained, superset, contained)));
+                inputs = Arrays.asList(contained, superset, contained);
+                Assertions.assertSame(superset, RangeDeps.merge(inputs, inputs.size(), List::get, d -> d, d -> d));
             }
         }
     }

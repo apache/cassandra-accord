@@ -382,18 +382,20 @@ public class RelationMultiMap
             }
 
             if (!isPrev)
-                prev = out == nextKeysToValues && sameElements(keys, keysLength, nextKeys) && sameElements(values, valuesLength, nextValues) ? next : null;
+                prev = out == nextKeysToValues
+                       && sameElements(keys, keysLength, nextKeys, adapter.keyMerger())
+                       && sameElements(values, valuesLength, nextValues, adapter.valueMerger()) ? next : null;
 
             return null;
         }
 
-        private static boolean sameElements(Object[] array, int length, Object[] other)
+        private static <T> boolean sameElements(T[] array, int length, T[] other, BiFunction<T, T, T> merger)
         {
             if (length != other.length) return false;
             if (array == other) return true;
             // Equality can ignore metadata such as transaction flags.
             for (int i = 0 ; i < length ; ++i)
-                if (array[i] != other[i]) return false;
+                if (array[i] != other[i] && (merger == null || merger.apply(other[i], array[i]) != other[i])) return false;
             return true;
         }
 
