@@ -110,14 +110,21 @@ extends SafeCommandStore
             for (int i = 0 ; i < withKeys.size() ; ++i)
             {
                 RoutingKey key = (RoutingKey) withKeys.get(i);
-                if (isPresent(key))
-                    continue;
+                SafeCommandsForKey present = getInternal(key);
+                if (present != null)
+                {
+                    // Incremental tasks retain references to keys outside their initialised batch.
+                    if (!present.isUninitialised())
+                        continue;
+                }
+                else
+                {
+                    if (unavailable == null && caches == null)
+                        caches = tryGetCaches();
 
-                if (unavailable == null && caches == null)
-                    caches = tryGetCaches();
-
-                if (ifLoadedInternal(caches, key) != null)
-                    continue;
+                    if (ifLoadedInternal(caches, key) != null)
+                        continue;
+                }
 
                 if (unavailable == null)
                     unavailable = new ArrayList<>();
@@ -174,11 +181,6 @@ extends SafeCommandStore
     private boolean isPresentOrLoadedInternal(@Nonnull Caches caches, RoutingKey key)
     {
         return getInternal(key) != null || ifLoadedInternal(caches, key) != null;
-    }
-
-    private boolean isPresent(RoutingKey key)
-    {
-        return getInternal(key) != null;
     }
 
     protected CFK ifLoadedInternal(@Nullable Caches caches, RoutingKey key)
