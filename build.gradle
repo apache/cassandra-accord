@@ -32,6 +32,7 @@ rat {
     excludes.add("**/build/**")
     excludes.add("**/*.md")
     excludes.add(".idea/**")
+    excludes.add("README.md")
     if (layout.projectDirectory.file(".rat-excludes.txt").asFile.exists())
     {
         excludeFile.set(layout.projectDirectory.file(".rat-excludes.txt"))
