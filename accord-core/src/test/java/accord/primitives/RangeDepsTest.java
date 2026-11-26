@@ -312,6 +312,118 @@ public class RangeDepsTest
         }
     }
 
+    @Test
+    public void testUnionFlags()
+    {
+        Range[] ranges = { r(0, 1), r(2, 3) };
+        TxnId[] txnIds = {
+            new TxnId(1, 1, 0, Txn.Kind.ExclusiveSyncPoint, Domain.Range, new Node.Id(1)),
+            new TxnId(1, 2, 0, Txn.Kind.ExclusiveSyncPoint, Domain.Range, new Node.Id(1))
+        };
+        int[] flags = { 0, Timestamp.Flag.SHARD_BOUND.bit, Timestamp.Flag.HLC_BOUND.bit, Timestamp.Flag.UNSTABLE.bit };
+        int combinations = 1 << (ranges.length * txnIds.length);
+        for (int leftMask = 0 ; leftMask < combinations ; ++leftMask)
+        for (int rightMask = 0 ; rightMask < combinations ; ++rightMask)
+        for (int leftLayout = 0 ; leftLayout < 3 ; ++leftLayout)
+        for (int rightLayout = 0 ; rightLayout < 3 ; ++rightLayout)
+        for (int leftFlags : flags)
+        for (int rightFlags : flags)
+        {
+            RangeDeps left = flaggedDeps(ranges, txnIds, leftMask, leftFlags, leftLayout);
+            RangeDeps right = flaggedDeps(ranges, txnIds, rightMask, rightFlags, rightLayout);
+            RangeDeps result = left.with(right);
+            assertUnion(ranges, txnIds, leftMask, leftFlags, rightMask, rightFlags, result);
+
+            // Use the same thread's buffers again while retaining the result and both inputs.
+            flaggedDeps(ranges, txnIds, combinations - 1, 0, 0)
+                    .with(flaggedDeps(ranges, txnIds, combinations - 1, Timestamp.Flag.UNSTABLE.bit, 1));
+            assertUnion(ranges, txnIds, leftMask, leftFlags, rightMask, rightFlags, result);
+            assertUnion(ranges, txnIds, leftMask, leftFlags, 0, 0, left);
+            assertUnion(ranges, txnIds, rightMask, rightFlags, 0, 0, right);
+        }
+    }
+
+    @Test
+    public void testMergeFlags()
+    {
+        Range[] ranges = { r(0, 1), r(2, 3) };
+        TxnId[] txnIds = { new TxnId(1, 1, 0, Txn.Kind.ExclusiveSyncPoint, Domain.Range, new Node.Id(1)) };
+        for (int leftMask = 1 ; leftMask < (1 << ranges.length) ; ++leftMask)
+        for (int rightMask = 1 ; rightMask < (1 << ranges.length) ; ++rightMask)
+        {
+            RangeDeps left = flaggedDeps(ranges, txnIds, leftMask, Timestamp.Flag.SHARD_BOUND.bit, 0);
+            RangeDeps right = flaggedDeps(ranges, txnIds, rightMask, Timestamp.Flag.HLC_BOUND.bit, 0);
+            RangeDeps result = RangeDeps.merge(java.util.stream.Stream.of(left, right, left));
+            assertUnion(ranges, txnIds, leftMask, Timestamp.Flag.SHARD_BOUND.bit, rightMask, Timestamp.Flag.HLC_BOUND.bit, result);
+
+            RangeDeps superset = flaggedDeps(ranges, txnIds, leftMask | rightMask,
+                                            Timestamp.Flag.SHARD_BOUND.bit | Timestamp.Flag.HLC_BOUND.bit, 0);
+            if ((leftMask | rightMask) != leftMask)
+            {
+                Assertions.assertSame(superset, RangeDeps.merge(java.util.stream.Stream.of(left, superset, left)));
+                List<RangeDeps> inputs = Arrays.asList(left, superset, left);
+                Assertions.assertSame(superset, RangeDeps.merge(inputs, inputs.size(), List::get, d -> d, d -> d));
+
+                // Equal transaction identities need not share their object references.
+                TxnId[] equalTxnIds = { new TxnId(1, 1, 0, Txn.Kind.ExclusiveSyncPoint, Domain.Range, new Node.Id(1)) };
+                RangeDeps contained = flaggedDeps(ranges, txnIds, leftMask, 0, 0);
+                superset = flaggedDeps(ranges, equalTxnIds, leftMask | rightMask, 0, 0);
+                Assertions.assertSame(superset, RangeDeps.merge(java.util.stream.Stream.of(contained, superset, contained)));
+                inputs = Arrays.asList(contained, superset, contained);
+                Assertions.assertSame(superset, RangeDeps.merge(inputs, inputs.size(), List::get, d -> d, d -> d));
+            }
+        }
+    }
+
+    private static RangeDeps flaggedDeps(Range[] ranges, TxnId[] txnIds, int mask, int flags, int layout)
+    {
+        RangeDeps result;
+        try (RangeDeps.AbstractRangeBuilder<?, ?> builder = layout == 1 ? RangeDeps.byTxnIdBuilder() : RangeDeps.builderByRange())
+        {
+            // Group by the builder's key so each key is visited only once.
+            for (int key = 0 ; key < (layout == 1 ? txnIds.length : ranges.length) ; ++key)
+            for (int value = 0 ; value < (layout == 1 ? ranges.length : txnIds.length) ; ++value)
+            {
+                int range = layout == 1 ? value : key;
+                int txn = layout == 1 ? key : value;
+                if ((mask & (1 << (range * txnIds.length + txn))) != 0)
+                    builder.add(ranges[range], txnIds[txn].addFlags(flags));
+            }
+            result = builder.build();
+        }
+        if (layout == 2)
+            RangeDeps.SerializerSupport.txnIdsToRanges(result);
+        return result;
+    }
+
+    private static void assertUnion(Range[] ranges, TxnId[] txnIds, int leftMask, int leftFlags, int rightMask, int rightFlags, RangeDeps actual)
+    {
+        Map<TxnId, Set<Range>> expected = new TreeMap<>();
+        for (int r = 0 ; r < ranges.length ; ++r)
+        for (int t = 0 ; t < txnIds.length ; ++t)
+        {
+            if (((leftMask | rightMask) & (1 << (r * txnIds.length + t))) != 0)
+                expected.computeIfAbsent(txnIds[t], ignore -> new TreeSet<>(Range::compare)).add(ranges[r]);
+        }
+        Map<TxnId, Set<Range>> found = new TreeMap<>();
+        actual.forEach(e -> found.computeIfAbsent(e.getValue(), ignore -> new TreeSet<>(Range::compare)).add(e.getKey()));
+        Assertions.assertEquals(expected, found);
+        Assertions.assertEquals(expected.size(), actual.txnIdsWithFlags().size());
+        for (TxnId stored : actual.txnIdsWithFlags())
+        {
+            int expectedFlags = stored.withoutNonIdentityFlags().flags();
+            for (int r = 0 ; r < ranges.length ; ++r)
+            for (int t = 0 ; t < txnIds.length ; ++t)
+            {
+                if (!txnIds[t].equals(stored)) continue;
+                int bit = 1 << (r * txnIds.length + t);
+                if ((leftMask & bit) != 0) expectedFlags |= leftFlags;
+                if ((rightMask & bit) != 0) expectedFlags |= rightFlags;
+            }
+            Assertions.assertEquals(expectedFlags, stored.flags(), "Flags for " + stored + " in union of " + leftMask + " and " + rightMask);
+        }
+    }
+
     private static TxnId id(int i)
     {
         return new TxnId(1, i, 0, Write, Domain.Key, new Node.Id(1));

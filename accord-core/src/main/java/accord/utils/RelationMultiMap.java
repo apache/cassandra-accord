@@ -361,7 +361,7 @@ public class RelationMultiMap
         @Override
         public Object construct(K[] keys, int keysLength, V[] values, int valuesLength, int[] out, int outLength)
         {
-            boolean isNext = true, isPrev = true;
+            boolean isPrev = true;
             if (keys != prevKeys)
             {
                 Invariants.require(len(prevKeys, prevKeysLength) != keysLength);
@@ -369,7 +369,6 @@ public class RelationMultiMap
                     keyBuffers.realDiscard(prevKeys, prevKeysLength);
                 prevKeys = keys;
                 prevKeysLength = keys == nextKeys ? -1 : keysLength;
-                isNext = keysLength == nextKeys.length;
                 isPrev = false;
             }
             if (values != prevValues)
@@ -378,7 +377,6 @@ public class RelationMultiMap
                     realDiscard(prevValues, prevValuesLength);
                 prevValues = values;
                 prevValuesLength = values == nextValues ? -1 : valuesLength;
-                isNext &= valuesLength == nextValues.length;
                 isPrev = false;
             }
             if (out != prevKeysToValues)
@@ -387,14 +385,25 @@ public class RelationMultiMap
                     realDiscard(prevKeysToValues, prevKeysToValuesLength);
                 prevKeysToValues = out;
                 prevKeysToValuesLength = out == nextKeysToValues ? -1 : outLength;
-                isNext &= out == nextKeysToValues;
                 isPrev = false;
             }
 
             if (!isPrev)
-                prev = isNext ? next : null;
+                prev = out == nextKeysToValues
+                       && sameElements(keys, keysLength, nextKeys, adapter.keyMerger())
+                       && sameElements(values, valuesLength, nextValues, adapter.valueMerger()) ? next : null;
 
             return null;
+        }
+
+        private static <T> boolean sameElements(T[] array, int length, T[] other, BiFunction<T, T, T> merger)
+        {
+            if (length != other.length) return false;
+            if (array == other) return true;
+            // Equality can ignore metadata such as transaction flags.
+            for (int i = 0 ; i < length ; ++i)
+                if (array[i] != other[i] && (merger == null || merger.apply(other[i], array[i]) != other[i])) return false;
+            return true;
         }
 
         public void update(T merge, K[] keys, V[] values, int[] keysToValues)
@@ -660,7 +669,7 @@ public class RelationMultiMap
                     && arraysEqual(leftKeys, rightKeys, rightKeysLength)
                 )
             {
-                return constructor.construct(leftKeys, leftKeysLength, leftValues, leftValuesLength, left, leftLength);
+                return constructor.construct(outKeys, outKeysLength, outValues, outValuesLength, left, leftLength);
             }
 
             int lk = 0, rk = 0, ok = 0, l = leftKeysLength, r = rightKeysLength;
@@ -733,7 +742,7 @@ public class RelationMultiMap
                 }
 
                 if (out == null)
-                    return constructor.construct(leftKeys, leftKeysLength, leftValues, leftValuesLength, left, leftLength);
+                    return constructor.construct(outKeys, outKeysLength, outValues, outValuesLength, left, leftLength);
             }
             else if (remapRight == null && outKeys == rightKeys)
             {
@@ -801,7 +810,7 @@ public class RelationMultiMap
                 }
 
                 if (out == null)
-                    return constructor.construct(rightKeys, rightKeysLength, rightValues, rightValuesLength, right, rightLength);
+                    return constructor.construct(outKeys, outKeysLength, outValues, outValuesLength, right, rightLength);
             }
             else
             {
